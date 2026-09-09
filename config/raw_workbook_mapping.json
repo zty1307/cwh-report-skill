@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "file_patterns": {
+    "total_heat": "^总[0-9]+-.*热度分析\\.xlsx$",
+    "child_heat": "^子([1-9][0-9]*)(?:-|\\.xlsx$).*(?:热度分析\\.xlsx)?$",
+    "public_top": "^总[0-9]+-.*公众文章.*样本\\.xlsx$",
+    "overseas_latest": "^总[0-9]+-.*境外新闻.*样本\\.xlsx$"
+  },
+  "input_role_hints": {
+    "total_heat": ["总事件", "总体", "汇总", "overall", "total"],
+    "child_index_patterns": [
+      "(?:^|[^0-9])子(?:事件|议题)?\\s*[-_]?\\s*([1-9][0-9]*)",
+      "(?:^|[^a-z0-9])(?:subevent|subtopic|topic)\\s*[-_]?\\s*([1-9][0-9]*)",
+      "^\\s*([1-9][0-9]*)\\s*(?:[-_.（(]|$)"
+    ]
+  },
+  "sheet_aliases": {
+    "daily_trend": ["日趋势", "每日趋势", "天趋势"],
+    "public_articles": ["最热公号文章", "最热公号文章 （10w+）", "最热公号文章（10w+）", "公众文章最热样本", "公众文章"],
+    "overseas_news": ["境外新闻", "境外新闻最新样本"]
+  },
+  "daily_columns": {
+    "date": ["日期", "时间"],
+    "public_articles": ["公众文章"],
+    "public_recommend": ["公号-在看量（推荐量）", "公号-在看量", "公号-推荐量"],
+    "public_comments": ["公号-精选评论量", "精选评论量"],
+    "weibo": ["新浪微博", "微博"],
+    "domestic_news": ["境内新闻", "国内新闻"],
+    "domestic_app": ["境内APP", "国内APP", "新闻客户端"],
+    "domestic_forum": ["境内论坛", "国内论坛", "论坛"],
+    "other_video": ["其他视频"],
+    "overseas_news": ["境外新闻", "海外新闻"],
+    "x": ["X", "推特", "Twitter"],
+    "overseas_other": ["境外其他", "海外其他"],
+    "video_account": ["视频号发文", "视频号"],
+    "douyin": ["抖音"]
+  },
+  "detail_columns": {
+    "source": ["站点名称", "来源", "媒体名称", "账号昵称"],
+    "url": ["发文链接", "链接", "原文链接", "URL"],
+    "published_at": ["发表时间", "发布时间", "日期"],
+    "title": ["标题", "文章标题"],
+    "content": ["正文内容", "正文", "摘要", "内容"],
+    "account": ["昵称", "账号", "帐号", "作者", "账号昵称"],
+    "read_count": ["阅读量", "浏览量"],
+    "recommend_count": ["推荐（公号）/爱心点赞（视频号）/收藏量", "在看量", "推荐量", "在看量（推荐量）"]
+  },
+  "total_groups": {
+    "domestic_mainstream": ["domestic_news"],
+    "overseas_media": ["overseas_news"],
+    "wechat": ["public_articles", "public_recommend", "public_comments"],
+    "weibo": ["weibo"],
+    "video_account": ["video_account"],
+    "other_new_media": ["domestic_app", "domestic_forum", "other_video", "x", "overseas_other", "douyin"]
+  },
+  "child_groups": {
+    "domestic_mainstream": ["domestic_news"],
+    "overseas_media": ["overseas_news"],
+    "new_media": [
+      "public_articles",
+      "public_recommend",
+      "public_comments",
+      "weibo",
+      "domestic_app",
+      "domestic_forum",
+      "other_video",
+      "x",
+      "overseas_other",
+      "video_account",
+      "douyin"
+    ]
+  },
+  "meeting_anchor_patterns": [
+    "国务院常务会议",
+    "国务院常务会",
+    "国常会",
+    "State Council executive meeting",
+    "Chinese premier chairs meeting"
+  ],
+  "public_roundup_patterns": [
+    "新闻早餐",
+    "财经早餐",
+    "三分钟新闻",
+    "早报",
+    "早参",
+    "早知道",
+    "早八点",
+    "早8点",
+    "早新闻",
+    "盘前纪要",
+    "盘前",
+    "周复盘",
+    "十大消息",
+    "影响一周市场",
+    "法治热点早知道",
+    "来听新闻",
+    "资讯汇总"
+  ],
+  "market_promo_patterns": ["ETF", "A股", "股市", "成份股", "成交", "涨停", "吸金"],
+  "domestic_overseas_outlet_patterns": [
+    "新华网海外版",
+    "新华社英文",
+    "CGTN",
+    "央视网英文版",
+    "人民网英文版",
+    "中国经济网英文版",
+    "english.news.cn",
+    "news.cgtn.com",
+    "english.cctv.com",
+    "en.people.cn",
+    "en.ce.cn"
+  ],
+  "public_top_n": 10,
+  "public_read_cap": 100000,
+  "cutoff_consistency_tolerance_minutes": 2,
+  "public_publisher_families": [
+    {
+      "id": "cctv_news_family",
+      "canonical": "央视新闻",
+      "aliases": ["央视新闻", "央视网"],
+      "reason": "同一中央广播电视总台新闻发布主体的公众号榜单账号族按一个来源席位计；不扩展到新闻联播等独立栏目账号"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "release_id": "2026.08.27-v43",
+  "rules_updated": "2026-08-27",
+  "required_charts": ["trend_distribution", "topic_distribution", "hotword_distribution"]
+}

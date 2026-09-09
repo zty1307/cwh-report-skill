@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CWH舆情报告工作台</title>
+  <style>
+    :root { --ink:#18212b; --muted:#65717d; --line:#d9dee4; --paper:#fff; --bg:#f3f5f7; --nav:#17232e; --nav2:#243441; --teal:#147d73; --blue:#1f5f8b; --red:#a63d40; --green:#2d7a53; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; max-width:100%; overflow-x:hidden; color:var(--ink); background:var(--bg); font-family:"Microsoft YaHei","微软雅黑",Arial,sans-serif; letter-spacing:0; }
+    button,input,textarea { font:inherit; letter-spacing:0; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    a { color:var(--blue); }
+    .app { min-height:100vh; display:grid; grid-template-columns:250px minmax(0,1fr); }
+    .sidebar { position:sticky; top:0; height:100vh; background:var(--nav); color:#eaf2f1; padding:20px 14px; display:flex; flex-direction:column; overflow:auto; }
+    .brand { padding:4px 10px 18px; border-bottom:1px solid rgba(255,255,255,.12); }
+    .brand strong { display:block; font-size:18px; }
+    .brand span { display:block; margin-top:7px; color:#a9c0be; font-size:12px; line-height:1.6; }
+    .nav-label { margin:19px 10px 8px; color:#8faaa8; font-size:11px; font-weight:700; }
+    .nav-link { width:100%; min-height:46px; display:flex; align-items:center; gap:10px; padding:7px 10px; margin:3px 0; color:#d7e5e3; text-decoration:none; border:0; background:transparent; cursor:pointer; text-align:left; border-left:3px solid transparent; font-size:14px; }
+    .nav-link:hover,.nav-link.active { background:var(--nav2); color:#fff; border-left-color:#59b9ae; }
+    .nav-number { width:24px; height:24px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.22); font-size:12px; flex:none; }
+    .library { margin-top:auto; border-top:1px solid rgba(255,255,255,.12); padding-top:12px; }
+    .library-trigger { width:100%; display:flex; justify-content:space-between; align-items:center; padding:9px 10px; border:1px solid rgba(255,255,255,.16); background:transparent; color:#d7e5e3; cursor:pointer; font-size:12px; }
+    .library-trigger:hover { background:var(--nav2); color:#fff; }
+    .report-link { display:block; padding:8px 10px; color:#c9d9d7; text-decoration:none; font-size:12px; line-height:1.5; border-left:2px solid transparent; }
+    .report-link:hover,.report-link.current { background:var(--nav2); border-left-color:#59b9ae; color:#fff; }
+    .main { min-width:0; }
+    .topbar { position:sticky; top:0; z-index:20; min-height:64px; background:rgba(255,255,255,.96); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:20px; padding:10px 28px; }
+    .top-title { min-width:0; }
+    .top-title strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:16px; }
+    .top-title span { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+    .top-actions { display:flex; align-items:center; gap:7px; flex:none; }
+    .btn { min-height:34px; padding:7px 12px; border:1px solid #bcc9ce; background:#fff; color:var(--ink); cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; font-size:13px; }
+    .btn:hover { border-color:#7c949c; background:#f7f9fa; }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+    .btn[aria-disabled="true"] { opacity:.55; cursor:not-allowed; pointer-events:none; }
+    .btn-primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+    .btn-save { background:var(--blue); border-color:var(--blue); color:#fff; }
+    .content { max-width:1450px; margin:0 auto; padding:26px 30px 56px; }
+    .workspace-panel { display:none; }
+    .workspace-panel.active { display:block; }
+    .section-heading { display:flex; justify-content:space-between; gap:20px; align-items:flex-end; border-bottom:2px solid var(--ink); padding-bottom:12px; margin-bottom:18px; }
+    .section-title { display:flex; gap:13px; align-items:center; }
+    .section-no { width:34px; height:34px; display:grid; place-items:center; color:#fff; background:var(--ink); font-size:13px; font-weight:700; }
+    .section-title h2 { margin:0; font-size:21px; line-height:1.3; }
+    .section-title p { margin:5px 0 0; color:var(--muted); font-size:13px; }
+    .section-meta { margin:5px 0 0; color:var(--muted); font-size:12px; }
+    .hero { background:#fff; border-top:4px solid var(--blue); display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:22px; padding:22px 24px; box-shadow:0 8px 24px rgba(24,33,43,.08); }
+    .hero h3 { margin:0 0 10px; font-size:19px; line-height:1.45; }
+    .agenda { margin:0; color:#3d4d54; line-height:1.8; font-size:14px; }
+    .meta-row { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:18px; color:var(--muted); font-size:12px; }
+    .import-panel { border-left:1px solid var(--line); padding-left:22px; }
+    .import-panel h3 { margin:0 0 12px; font-size:16px; }
+    .import-agenda { width:100%; min-height:34px; margin:0 0 8px; padding:7px 9px; border:1px solid #cfd8dc; background:#fff; color:#273842; font-size:11px; outline:none; }
+    .import-agenda:focus { border-color:var(--blue); box-shadow:0 0 0 2px #dceaf2; }
+    .file-picker { display:block; margin:9px 0; padding:10px 11px; border:1px dashed #9eb0b7; background:#f7fafb; cursor:pointer; }
+    .file-picker:hover { border-color:var(--blue); background:#f1f6f8; }
+    .file-picker-title { display:block; color:#263942; font-size:12px; font-weight:700; line-height:1.45; }
+    .file-picker-note { display:block; margin-top:3px; color:var(--muted); font-size:11px; line-height:1.45; }
+    .file-picker input { position:absolute; inline-size:1px; block-size:1px; opacity:0; pointer-events:none; }
+    .import-state { min-height:20px; color:var(--muted); font-size:12px; margin-top:8px; line-height:1.6; }
+    .pipeline-state { display:grid; gap:4px; margin-top:8px; }
+    .pipeline-stage { display:grid; grid-template-columns:14px minmax(0,1fr); gap:6px; align-items:start; }
+    .pipeline-stage strong { color:var(--ink); font-weight:600; }
+    .pipeline-stage[data-status="succeeded"] .pipeline-dot { color:#16805c; }
+    .pipeline-stage[data-status="running"] .pipeline-dot,.pipeline-stage[data-status="retrying"] .pipeline-dot { color:var(--accent); }
+    .pipeline-stage[data-status="failed"] .pipeline-dot { color:#b42318; }
+    .pipeline-stage[data-status^="waiting"] .pipeline-dot,.pipeline-stage[data-status="blocked"] .pipeline-dot { color:#a15c00; }
+    .import-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+    .import-actions .btn:first-child { grid-column:1/-1; }
+    .import-steps { display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; margin:9px 0 0; padding:0; list-style:none; }
+    .import-step { position:relative; padding-left:14px; color:#7a858d; font-size:10px; line-height:1.45; }
+    .import-step::before { content:""; position:absolute; left:0; top:5px; width:6px; height:6px; border:1px solid #aebbc0; background:#fff; }
+    .import-step.running { color:#174f6f; font-weight:700; }
+    .import-step.running::before { border-color:var(--blue); background:var(--blue); box-shadow:0 0 0 2px #dceaf2; }
+    .import-step.complete { color:#315a4b; }
+    .import-step.complete::before { border-color:var(--green); background:var(--green); }
+    .import-step.error { color:var(--red); font-weight:700; }
+    .import-step.error::before { border-color:var(--red); background:var(--red); }
+    .import-artifact-link { margin-left:6px; white-space:nowrap; }
+    .overview-data { margin-top:16px; display:grid; gap:14px; }
+    .overview-block { background:#fff; border:1px solid var(--line); padding:16px 18px; }
+    .overview-block-head { display:flex; justify-content:space-between; align-items:baseline; gap:14px; margin-bottom:12px; }
+    .overview-block-head strong { font-size:14px; }
+    .overview-block-head span { color:var(--muted); font-size:11px; }
+    .spread-stack { display:flex; width:100%; height:18px; overflow:hidden; background:#e7ecef; border:1px solid #cfd7db; }
+    .spread-stack span { min-width:2px; height:100%; }
+    .overview-columns { display:grid; grid-template-columns:minmax(320px,1fr) max-content; gap:18px; align-items:start; justify-content:space-between; }
+    .channel-list { display:grid; gap:8px; }
+    .channel-row { display:grid; grid-template-columns:105px 1fr 72px 46px; gap:9px; align-items:center; font-size:11px; }
+    .channel-swatch { width:8px; height:8px; display:inline-block; margin-right:6px; vertical-align:1px; }
+    .channel-track { height:7px; background:#e8edef; overflow:hidden; }
+    .channel-track span { display:block; height:100%; }
+    .channel-value,.channel-share { text-align:right; font-variant-numeric:tabular-nums; }
+    .overall-stat-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); border:1px solid var(--line); margin-bottom:16px; background:#f8fafb; }
+    .overall-stat { min-width:0; padding:12px 10px; border-right:1px solid var(--line); }
+    .overall-stat:last-child { border-right:0; }
+    .overall-stat span { display:block; color:var(--muted); font-size:11px; line-height:1.35; }
+    .overall-stat strong { display:block; margin-top:4px; color:#173f58; font-size:18px; font-variant-numeric:tabular-nums; }
+    .overview-topic-table { width:max-content; max-width:100%; border:1px solid var(--line); overflow:auto; }
+    .overview-topic-table table { width:auto; min-width:0; }
+    .overview-topic-table th,.overview-topic-table td { padding:8px 7px; font-size:11px; }
+    .overview-topic-table th:not(:nth-child(2)),.overview-topic-table td:not(:nth-child(2)) { white-space:nowrap; }
+    .overview-topic-table th:nth-child(2),.overview-topic-table td:nth-child(2) { min-width:150px; max-width:220px; }
+    .overview-topic-table tr:last-child td { border-bottom:1px solid var(--line); }
+    .support-band,.formal-band { background:#fff; border:1px solid var(--line); padding:20px; }
+    .support-band + .support-band { margin-top:16px; }
+    .formal-band { margin-top:16px; background:#e6ebed; }
+    .inline-formal { margin:20px -20px -20px; padding:18px 20px 20px; border-top:1px solid var(--line); background:#e6ebed; }
+    .support-head { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:14px; }
+    .support-head h3 { margin:0; font-size:15px; }
+    .support-head span { color:var(--muted); font-size:11px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .figure { border:1px solid var(--line); padding:14px; min-height:260px; }
+    .figure-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
+    .figure-head h3 { margin:0; font-size:15px; }
+    .figure-head small { color:var(--muted); font-size:11px; }
+    .figure img { width:100%; height:250px; object-fit:contain; display:block; }
+    .chart-empty,.empty { padding:24px; text-align:center; color:var(--muted); background:#f7f9fa; font-size:13px; }
+    .data-table-wrap { overflow:auto; border:1px solid var(--line); }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { padding:9px 8px; border-bottom:1px solid var(--line); border-right:1px solid #e8edef; text-align:left; vertical-align:top; }
+    th { background:#eef3f4; font-weight:700; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; }
+    .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .sentiment-cell { min-width:190px; }
+    .sentiment-bar { height:7px; display:flex; background:#d9dfe1; overflow:hidden; }
+    .sentiment-bar span:nth-child(1){background:#4d946d}.sentiment-bar span:nth-child(2){background:#7f939b}.sentiment-bar span:nth-child(3){background:#c86658}
+    .sentiment-labels { display:flex; justify-content:space-between; gap:8px; margin-top:5px; color:var(--muted); font-size:10px; }
+    .pending { color:#8a5c22; font-weight:700; }
+    .topic-tabs { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:12px; }
+    .topic-btn { border:1px solid #bdcbd0; background:#fff; padding:7px 10px; cursor:pointer; font-size:12px; }
+    .topic-btn.active { background:var(--blue); border-color:var(--blue); color:#fff; font-weight:700; }
+    .module-tabs { display:flex; gap:0; margin-bottom:16px; border-bottom:1px solid #aebdc4; }
+    .module-tab { min-height:40px; padding:8px 18px; border:0; border-bottom:3px solid transparent; background:transparent; color:#53636b; cursor:pointer; font-size:13px; }
+    .module-tab:hover { color:var(--blue); background:#eef4f6; }
+    .module-tab.active { border-bottom-color:var(--blue); color:#173f58; background:#fff; font-weight:700; }
+    .domestic-module { display:none; }
+    .domestic-module.active { display:block; }
+    .topic-panel { display:none; }
+    .topic-panel.active { display:block; }
+    .topic-summary { display:flex; flex-wrap:wrap; gap:8px 18px; padding:10px 12px; background:#f3f6f7; color:#4c5d64; font-size:12px; }
+    .cluster,.comment-card { padding:15px 0; border-bottom:1px solid var(--line); }
+    .cluster:last-child,.comment-card:last-child { border-bottom:0; }
+    .cluster h4,.comment-card h4 { margin:0 0 7px; font-size:14px; }
+    .sample-count { color:var(--muted); font-size:12px; font-weight:400; }
+    .cluster p,.comment-card p { margin:0; color:#46525e; line-height:1.85; font-family:inherit; font-size:13px; }
+    .evidence-row { display:grid; grid-template-columns:minmax(0,1fr); gap:7px; margin-top:10px; }
+    .evidence-link { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border:1px solid #cdd9e2; background:#f6fafc; color:#174f6f; font-size:11px; font-weight:700; text-decoration:none; }
+    .evidence-link::after { content:"↗"; }
+    .evidence-card { border:1px solid #d8e1e8; background:#fbfcfd; padding:12px 14px; }
+    .evidence-claim { margin:0 0 9px; color:#263b4b; font-size:14px; line-height:1.9; }
+    .evidence-card-meta { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+    .supporting-links { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:8px; padding-top:8px; border-top:1px dashed #d8e1e8; }
+    .supporting-links-label { color:#667784; font-size:12px; font-weight:700; }
+    .evidence-library { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
+    .evidence-library-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; color:#33464f; font-size:12px; }
+    .evidence-library-head span { color:var(--muted); font-size:11px; }
+    .evidence-library-list { display:grid; gap:8px; margin-top:10px; }
+    .evidence-unit { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:7px; width:100%; max-width:100%; padding:8px 9px; border:1px solid #dbe3e7; background:#fafcfd; }
+    .evidence-unit .evidence-link { justify-self:start; }
+    .evidence-description { grid-column:2; color:#4c5c64; font-size:11px; line-height:1.7; }
+    .origin-tag { flex:none; padding:3px 5px; border:1px solid #d4dde1; background:#eef3f4; color:#53656d; font-size:10px; }
+    .attribution-line { grid-column:2; display:flex; flex-wrap:wrap; align-items:center; gap:6px; color:#5b6970; font-size:10px; }
+    .attribution-person { color:#51636c; font-size:10px; }
+    .formal-attribution-warning { color:#c00000; font-weight:700; background:#fff1f0; padding:0 2px; }
+    .comment-meta { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font-size:10px; margin-top:9px; }
+    .hotword-layout { display:grid; grid-template-columns:360px minmax(0,1fr); gap:16px; margin-top:18px; align-items:stretch; }
+    .hotword-editor { border:1px solid var(--line); padding:14px; min-width:0; background:#fbfcfc; }
+    .hotword-editor-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:9px; }
+    .hotword-editor-head strong { font-size:13px; }
+    .hotword-editor-head span,.hotword-edit-state { color:var(--muted); font-size:10px; }
+    .hotword-input { display:block; width:100%; min-height:300px; resize:vertical; border:1px solid #cbd7dc; background:#fff; color:#193f52; padding:11px 12px; font:12px/1.75 "Microsoft YaHei",sans-serif; outline:none; }
+    .hotword-input:focus { border-color:var(--blue); box-shadow:0 0 0 2px rgba(31,95,139,.12); }
+    .hotword-input[readonly] { background:#f4f7f8; color:#526b78; cursor:default; }
+    .hotword-editor-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-top:10px; }
+    .hotword-edit-state { flex:1 1 100%; min-height:16px; }
+    .hotword-cloud { border:1px solid var(--line); padding:12px; min-height:300px; display:flex; flex-wrap:wrap; align-content:center; justify-content:center; gap:9px 12px; }
+    .hotword { color:#244e58; }
+    .overseas-list { display:grid; }
+    .overseas-item { display:grid; grid-template-columns:140px 90px minmax(0,1fr); gap:12px; padding:12px 0; border-bottom:1px solid var(--line); font-size:12px; }
+    .overseas-group + .overseas-group { margin-top:18px; }
+    .overseas-group-head { display:flex; align-items:center; justify-content:space-between; padding:9px 11px; background:#f3f6f7; border-left:3px solid var(--teal); color:#33464f; font-size:12px; }
+    .overseas-source { font-weight:700; }
+    .overseas-date { color:var(--muted); }
+    .overseas-copy a { font-weight:700; text-decoration:none; }
+    .overseas-origin-head { display:flex; align-items:center; justify-content:space-between; margin-top:7px; padding:6px 11px; border-bottom:1px solid var(--line); color:#5a6970; font-size:11px; }
+    .window-tag { display:inline-block; margin-left:7px; padding:2px 5px; background:#f5ead7; color:#835c20; font-size:10px; }
+    .comment-translation { margin-top:6px !important; padding-top:6px; border-top:1px dashed #d7e0e4; color:#173f58 !important; }
+    .editor-shell { max-width:900px; margin:auto; }
+    .editor-head { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:10px; }
+    .editor-title strong { display:block; }
+    .editor-title span,.save-state { color:var(--muted); font-size:11px; }
+    .editor-actions { display:flex; gap:7px; }
+    .word-page { width:min(100%,760px); min-height:220px; margin:auto; padding:34px 48px; background:#fff; box-shadow:0 2px 12px rgba(23,35,43,.12); outline:none; }
+    .word-page[contenteditable="true"] { box-shadow:0 0 0 2px var(--blue),0 2px 12px rgba(23,35,43,.12); }
+    .word-block { margin:0; color:#000; line-height:1.85; }
+    .word-h1 { font-family:"SimHei","黑体",sans-serif; font-size:15px; font-weight:400; text-indent:2em; }
+    .word-h2 { font-family:"KaiTi_GB2312","KaiTi","楷体",serif; font-size:15px; font-weight:700; text-indent:2em; }
+    .word-h3 { font-family:"FangSong_GB2312","FangSong","仿宋",serif; font-size:15px; font-weight:700; text-indent:2em; }
+    .word-p { font-family:"FangSong_GB2312","FangSong","仿宋",serif; font-size:14px; font-weight:400; text-align:justify; text-indent:2em; }
+    .word-asset { margin:10px 0 14px; text-align:center; }
+    .word-asset img { display:block; width:100%; max-height:250px; object-fit:contain; }
+    .word-embedded-table { margin:9px 0 14px; overflow:auto; }
+    .word-embedded-table table { width:100%; table-layout:fixed; border-collapse:collapse; font-family:"Microsoft YaHei","微软雅黑",sans-serif; font-size:10px; color:#000; }
+    .word-embedded-table th,.word-embedded-table td { padding:6px 4px; border:1px solid #000; background:#fff; color:#000; text-align:center; vertical-align:middle; text-indent:0; line-height:1.45; white-space:normal; overflow-wrap:anywhere; }
+    .word-embedded-table th { font-weight:700; }
+    .word-embedded-table.word-topic-table tbody td { height:54px; }
+    .word-embedded-table.word-overseas-table tbody td { height:42px; }
+    .word-embedded-table tr:last-child td { border-bottom:1px solid #000; }
+    .word-embedded-table.word-wechat-table table { font-family:"FangSong_GB2312","FangSong","仿宋",serif; font-size:12px; }
+    .word-embedded-table.word-wechat-table thead th { background:#17365d; color:#fff; }
+    .save-state { width:min(100%,760px); margin:9px auto 0; }
+    .delivery { margin-top:16px; background:#fff; border:1px solid var(--line); padding:18px; }
+    .artifact-list { display:grid; gap:8px; }
+    .artifact { display:grid; grid-template-columns:150px minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px; background:#f5f7f8; }
+    .artifact-type { font-weight:700; font-size:12px; }
+    .artifact-path { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:11px; }
+    .modal-backdrop { position:fixed; inset:0; z-index:100; display:none; place-items:center; padding:24px; background:rgba(12,20,27,.62); }
+    .modal-backdrop.open { display:grid; }
+    .history-dialog { width:min(860px,100%); max-height:min(760px,88vh); overflow:hidden; background:#fff; border-top:4px solid var(--blue); box-shadow:0 18px 60px rgba(0,0,0,.25); display:flex; flex-direction:column; }
+    .history-head { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 20px; border-bottom:1px solid var(--line); }
+    .history-head h3 { margin:0; font-size:17px; }
+    .icon-btn { width:34px; height:34px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:20px; line-height:1; }
+    .archive-tabs { display:flex; gap:0; margin:14px 20px 0; border-bottom:1px solid var(--line); }
+    .archive-tab { min-width:92px; padding:9px 14px; border:0; border-bottom:2px solid transparent; background:#fff; color:var(--muted); cursor:pointer; font-weight:700; font-size:12px; }
+    .archive-tab.active { color:var(--blue); border-bottom-color:var(--blue); }
+    .history-search { margin:12px 20px 4px; height:36px; padding:7px 10px; border:1px solid #c7d1d5; }
+    .history-list { padding:12px 20px 20px; overflow:auto; display:grid; gap:7px; }
+    .history-item { display:grid; grid-template-columns:110px minmax(0,1fr) auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--line); color:var(--ink); font-size:12px; }
+    .history-item:hover,.history-item.current { border-color:#8ca5b4; background:#f2f6f8; }
+    .history-date { font-weight:700; }
+    .history-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; }
+    .history-period { margin-top:3px; color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .history-actions { display:flex; align-items:center; gap:6px; }
+    .history-action { padding:6px 9px; border:1px solid #b8c8d0; color:var(--blue); background:#fff; text-decoration:none; white-space:nowrap; }
+    .history-action:hover { border-color:var(--blue); }
+    .tool-dialog { width:min(720px,100%); max-height:min(780px,90vh); overflow:hidden; background:#fff; border-top:4px solid var(--blue); box-shadow:0 18px 60px rgba(0,0,0,.25); display:flex; flex-direction:column; }
+    .tool-body { min-height:280px; padding:18px 20px 20px; overflow:auto; }
+    .platform-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .platform-card { border:1px solid var(--line); padding:14px; background:#fafcfd; }
+    .platform-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .platform-card h4 { margin:0; font-size:14px; }
+    .platform-browser { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-bottom:12px; color:var(--muted); font-size:13px; }
+    .platform-browser select { min-height:34px; border:1px solid var(--line); background:#fff; padding:0 30px 0 10px; color:var(--ink); font:inherit; }
+    .platform-state { margin-top:8px; color:var(--muted); font-size:11px; line-height:1.6; }
+    .platform-state[data-status="connected"] { color:#0b7a52; font-weight:700; }
+    .platform-state[data-status="waiting_login"] { color:#9a5b00; }
+    .platform-kind { margin-left:7px; padding:2px 6px; border:1px solid var(--line); color:var(--muted); font-size:10px; font-weight:400; }
+    .qr-stage { display:none; margin-top:16px; padding:16px; border:1px solid var(--line); text-align:center; background:#f6f8f9; }
+    .qr-stage.open { display:block; }
+    .qr-stage img { width:240px; height:240px; object-fit:contain; background:#fff; border:10px solid #fff; }
+    .qr-stage img[hidden] { display:none; }
+    .qr-stage img.verification { width:min(100%,640px); height:auto; max-height:56vh; border:1px solid var(--line); cursor:crosshair; touch-action:none; }
+    .qr-stage strong,.qr-stage span { display:block; }
+    .qr-stage span { margin-top:7px; color:var(--muted); font-size:11px; }
+    .assistant-messages { min-height:330px; max-height:52vh; overflow:auto; display:grid; align-content:start; gap:10px; padding:4px 2px 14px; }
+    .assistant-message { max-width:88%; padding:10px 12px; border:1px solid var(--line); line-height:1.7; white-space:pre-wrap; font-size:12px; }
+    .assistant-message.user { justify-self:end; background:#edf4f7; border-color:#c8dbe4; }
+    .assistant-message.assistant { justify-self:start; background:#fff; }
+    .assistant-compose { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; border-top:1px solid var(--line); padding-top:12px; }
+    .assistant-compose textarea { min-height:72px; resize:vertical; border:1px solid #c7d1d5; padding:9px 10px; outline:none; }
+    .assistant-compose textarea:focus { border-color:var(--blue); }
+    .assistant-status { margin-bottom:8px; color:var(--muted); font-size:11px; line-height:1.6; }
+    @media(max-width:1000px){.app{grid-template-columns:minmax(0,1fr);max-width:100%}.sidebar{position:relative;height:auto;min-width:0}.main,.content{min-width:0;max-width:100%}.library{margin-top:16px}.hero{grid-template-columns:minmax(0,1fr)}.import-panel{border-left:0;border-top:1px solid var(--line);padding:20px 0 0}.grid-2,.hotword-layout,.overview-columns{grid-template-columns:minmax(0,1fr)}.word-page{padding:48px 38px}.content{padding:20px 14px}.topbar{padding:10px 14px;flex-wrap:wrap}.top-actions{max-width:100%;overflow-x:auto}.history-item{grid-template-columns:1fr}.history-actions{flex-wrap:wrap}.modal-backdrop{padding:14px}}
+    @media(max-width:650px){.channel-row{grid-template-columns:95px 1fr 65px}.channel-share{display:none}.overall-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.overall-stat{border-bottom:1px solid var(--line)}.overall-stat:nth-child(2n){border-right:0}.overall-stat:nth-last-child(-n+2){border-bottom:0}.top-actions .btn-primary{display:none}.platform-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><strong>CWH 报告工作台</strong><span id="brand-period">国务院常务会议舆情报告</span></div>
+    <div class="nav-label">报告结构</div>
+    <nav>
+      <a class="nav-link active" href="#overview" data-panel="overview"><span class="nav-number">总</span><span>总览与数据导入</span></a>
+      <a class="nav-link" href="#part-one" data-panel="part-one"><span class="nav-number">一</span><span>舆情传播情况</span></a>
+      <a class="nav-link" href="#part-two" data-panel="part-two"><span class="nav-number">二</span><span>境内舆论情况</span></a>
+      <a class="nav-link" href="#part-three" data-panel="part-three"><span class="nav-number">三</span><span>境外舆论情况</span></a>
+      <a class="nav-link" href="#part-four" data-panel="part-four"><span class="nav-number">四</span><span>附录与报告生成</span></a>
+    </nav>
+    <div class="library"><div class="nav-label">报告文件</div><button class="library-trigger" id="open-history"><span>历期报告</span><span id="history-count">读取中</span></button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="top-title"><strong id="top-title"></strong><span id="top-subtitle"></span></div><div class="top-actions"><button class="btn" id="open-platforms">连接平台</button><button class="btn" id="open-assistant">报告助理</button><a class="btn btn-primary" id="top-open-word">打开 Word</a></div></header>
+    <div class="content" id="content">
+      <section class="workspace-panel active" id="overview">
+        <div class="section-heading"><div class="section-title"><span class="section-no">总</span><div><h2>总览与数据导入</h2><p>导入系统文件，查看本期报告</p></div></div></div>
+        <div class="hero" id="hero"></div>
+        <div class="overview-data" id="overview-data"></div>
+      </section>
+      <section class="workspace-panel" id="part-one">
+        <div class="section-heading"><div class="section-title"><span class="section-no">一</span><div><h2>舆情传播情况</h2><p>总事件与子议题传播情况</p></div></div><div class="section-meta" id="spread-meta"></div></div>
+        <div class="module-tabs" data-module-group="one" role="tablist" aria-label="舆情传播情况模块">
+          <button class="module-tab active" data-module-view="one-overall" role="tab">（一）总事件传播情况</button>
+          <button class="module-tab" data-module-view="one-topics" role="tab">（二）子议题传播情况</button>
+        </div>
+        <div class="domestic-module active" data-module-panel="one-overall"><div class="support-band"><div class="support-head"><h3>（一）总事件传播情况</h3><span>正文涉及的监测系统统计与传播走势</span></div><div id="overall-spread-data"></div><div class="figure" id="trend-chart"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="one-overall"></div></div></div></div>
+        <div class="domestic-module" data-module-panel="one-topics"><div class="support-band"><div class="support-head"><h3>（二）子议题传播情况</h3><span>监测系统分类与传播量</span></div><div class="figure" id="topic-chart"></div><div style="height:15px"></div><div class="data-table-wrap" id="topic-table"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="one-topics"></div></div></div></div>
+      </section>
+      <section class="workspace-panel" id="part-two">
+        <div class="section-heading"><div class="section-title"><span class="section-no">二</span><div><h2>境内舆论情况</h2><p>媒体/自媒体观点、网民观点与热词分布</p></div></div><div class="section-meta">按系统子议题切换查看</div></div>
+        <div class="module-tabs" data-module-group="two" role="tablist" aria-label="境内舆论模块">
+          <button class="module-tab active" data-module-view="two-media" role="tab">（一）境内媒体自媒体情况</button>
+          <button class="module-tab" data-module-view="two-comments" role="tab">（二）网民评论情况</button>
+          <button class="module-tab" data-module-view="two-hotwords" role="tab">（三）热词分布情况</button>
+        </div>
+        <div class="domestic-module active" data-module-panel="two-media"><div class="support-band"><div class="support-head"><h3>（一）境内媒体自媒体情况</h3><span>按系统子议题整理，证据保留原链接</span></div><div class="topic-tabs" id="media-topics"></div><div id="media-panel"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="two-media"></div></div></div></div>
+        <div class="domestic-module" data-module-panel="two-comments"><div class="support-band"><div class="support-head"><h3>（二）网民评论情况</h3><span>只收录评论区原话，必须保留平台和原链接</span></div><div class="topic-tabs" id="comment-topics"></div><div id="comment-panel"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="two-comments"></div></div></div></div>
+        <div class="domestic-module" data-module-panel="two-hotwords"><div class="support-band"><div class="support-head"><h3>（三）热词分布情况</h3><span>依据现有样本生成，可人工复核调整</span></div><div class="hotword-layout"><div class="hotword-editor"><div class="hotword-editor-head"><strong>热词编辑</strong><span id="hotword-count"></span></div><textarea class="hotword-input" id="hotword-input" spellcheck="false" readonly title="每行格式：热词 | 字号权重；字号权重控制词云中的相对大小"></textarea><div class="hotword-editor-actions"><button class="btn" id="hotword-edit">修改</button><button class="btn btn-save" id="hotword-save" disabled>保存并生成词云</button><div class="hotword-edit-state" id="hotword-edit-state"></div></div></div><div class="figure" id="hotword-chart"></div></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="two-hotwords"></div></div></div></div>
+      </section>
+      <section class="workspace-panel" id="part-three">
+        <div class="section-heading"><div class="section-title"><span class="section-no">三</span><div><h2>境外舆论情况</h2><p>系统附录与外网补充证据</p></div></div><div class="section-meta" id="overseas-meta"></div></div>
+        <div class="module-tabs" data-module-group="three" role="tablist" aria-label="境外舆论模块">
+          <button class="module-tab active" data-module-view="three-media" role="tab">（一）境外媒体情况</button>
+          <button class="module-tab" data-module-view="three-comments" role="tab">（二）境外网民评论</button>
+        </div>
+        <div class="domestic-module active" data-module-panel="three-media"><div class="support-band"><div class="support-head"><h3>（一）境外媒体情况</h3><span>分别展示监测系统原有报道与公开网络补充报道</span></div><div class="overseas-list" id="overseas-list"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="three-media"></div></div></div></div>
+        <div class="domestic-module" data-module-panel="three-comments"><div class="support-band"><div class="support-head"><h3>（二）境外网民评论</h3><span>来自 X、YouTube、Reddit 等公开讨论，保留原链接与中文翻译</span></div><div id="overseas-comment-list"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="three-comments"></div></div></div></div>
+      </section>
+      <section class="workspace-panel" id="part-four">
+        <div class="section-heading"><div class="section-title"><span class="section-no">四</span><div><h2>附录与报告生成</h2><p>附录表格、正式 Word 与配套 Excel</p></div></div></div>
+        <div class="module-tabs" data-module-group="four" role="tablist" aria-label="附录模块">
+          <button class="module-tab active" data-module-view="four-overseas" role="tab">（一）外媒报道列表（部分）</button>
+          <button class="module-tab" data-module-view="four-wechat" role="tab">（二）传播量较大的公众号文章</button>
+        </div>
+        <div class="domestic-module active" data-module-panel="four-overseas"><div class="support-band"><div class="support-head"><h3>（一）外媒报道列表（部分）</h3><span>全部可追溯样本</span></div><div class="data-table-wrap" id="appendix-overseas-table"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="four-overseas"></div></div></div></div>
+        <div class="domestic-module" data-module-panel="four-wechat"><div class="support-band"><div class="support-head"><h3>（二）传播量较大的公众号文章</h3><span>监测系统原始榜单</span></div><div class="data-table-wrap" id="wechat-table"></div><div class="inline-formal"><div class="editor-shell" data-editor-shell="four-wechat"></div></div></div></div>
+        <div class="delivery" id="delivery-panel"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="modal-backdrop" id="history-modal" aria-hidden="true"><div class="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title"><div class="history-head"><div><h3 id="history-title">历期报告</h3><div class="section-meta">按会议日期、标题、议题或监测周期检索</div></div><button class="icon-btn" id="close-history" title="关闭" aria-label="关闭">×</button></div><input class="history-search" id="history-search" type="search" placeholder="搜索日期、标题、议题或监测周期"><div class="history-list" id="report-library"><div class="empty">正在读取...</div></div></div></div>
+<div class="modal-backdrop" id="platform-modal" aria-hidden="true"><div class="tool-dialog" role="dialog" aria-modal="true" aria-labelledby="platform-title"><div class="history-head"><div><h3 id="platform-title">平台账号</h3><div class="section-meta">在本机真实浏览器中完成登录、扫码或安全验证；验证会话由对应采集器复用</div></div><button class="icon-btn" id="close-platforms" title="关闭" aria-label="关闭">×</button></div><div class="tool-body"><div class="platform-browser"><label for="platform-browser">浏览器</label><select id="platform-browser"><option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div><div class="platform-grid" id="platform-grid"></div></div></div></div>
+<div class="modal-backdrop" id="assistant-modal" aria-hidden="true"><div class="tool-dialog" role="dialog" aria-modal="true" aria-labelledby="assistant-title"><div class="history-head"><div><h3 id="assistant-title">报告助理</h3><div class="section-meta">围绕本期监测数据、证据与正式成文协助核对和修改</div></div><button class="icon-btn" id="close-assistant" title="关闭" aria-label="关闭">×</button></div><div class="tool-body"><div class="assistant-status" id="assistant-status">正在检查模型服务…</div><div class="assistant-messages" id="assistant-messages"></div><div class="assistant-compose"><textarea id="assistant-input" placeholder="例如：请把境内媒体观点第二条改得更符合正式报告语气"></textarea><button class="btn btn-save" id="assistant-send">发送</button></div></div></div></div>
+<script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
+<script>
+const D=JSON.parse(document.getElementById('dashboard-data').textContent);
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const fmt=v=>new Intl.NumberFormat('zh-CN').format(Number(v||0));
+const DEMO_MODE=new URLSearchParams(location.search).get('demo')==='1';
+const SERVER_MODE=/^https?:$/.test(location.protocol);
+const artifactTarget=item=>SERVER_MODE?(item.href||item.protocol):(item.protocol||item.href);
+const importStorageKey=`cwh_import_job_${D.meeting_date}`;
+const editorState={}; let mediaTopic=0, commentTopic=0, libraryData={reports:[],counts:{}}, importJobId='';
+const editorOrder={one:['one-overall','one-topics'],two:['two-media','two-comments','two-hotwords'],three:['three-media','three-comments'],four:['four-overseas','four-wechat']};
+function figure(title,note,src){return `<div class="figure-head"><h3>${esc(title)}</h3><small>${esc(note)}</small></div>${src?`<img src="${src}" alt="${esc(title)}">`:'<div class="chart-empty">未提供该图表</div>'}`}
+function topicRowsHtml(){return D.topics.map((x,i)=>{const sentiment=D.sentiment_available?[`<td>${x.sentiment.positive}%</td>`,`<td>${x.sentiment.neutral}%</td>`,`<td>${x.sentiment.negative}%</td>`].join(''):'';return `<tr><td>${i+1}</td><td>${esc(x.topic||x.display)}</td><td>${fmt(x.domestic_media)}</td><td>${fmt(x.self_media)}</td><td>${fmt(x.overseas_media)}</td><td>${fmt(x.spread_count)}</td>${sentiment}</tr>`}).join('')}
+function reportTopicTable(){const sentimentCols=D.sentiment_available?'<col style="width:10.10%"><col style="width:9.65%"><col style="width:7.80%">':'',sentimentHead=D.sentiment_available?'<th colspan="3">网民情感</th>':'',sentimentSub=D.sentiment_available?'<tr><th>正面</th><th>中立</th><th>负面</th></tr>':'';return `<div class="word-embedded-table word-topic-table" data-transient="true" contenteditable="false"><table><colgroup><col style="width:8.44%"><col style="width:28%"><col style="width:14%"><col style="width:14%"><col style="width:12%"><col style="width:14%">${sentimentCols}</colgroup><thead><tr><th${D.sentiment_available?' rowspan="2"':''}>序号</th><th${D.sentiment_available?' rowspan="2"':''}>标题</th><th${D.sentiment_available?' rowspan="2"':''}>境内主流媒体</th><th${D.sentiment_available?' rowspan="2"':''}>新媒体</th><th${D.sentiment_available?' rowspan="2"':''}>境外媒体</th><th${D.sentiment_available?' rowspan="2"':''}>总量</th>${sentimentHead}</tr>${sentimentSub}</thead><tbody>${topicRowsHtml()}</tbody></table></div>`}
+function wordAsset(src,alt){return src?`<div class="word-asset" data-transient="true" contenteditable="false"><img src="${src}" alt="${esc(alt)}"></div>`:''}
+function reportOverseasTable(){const rows=D.overseas.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.source)}</td><td>${esc(x.date)}</td><td>${esc(x.title)}</td></tr>`).join('');return rows?`<div class="word-embedded-table word-overseas-table" data-transient="true" contenteditable="false"><table><colgroup><col style="width:8%"><col style="width:24%"><col style="width:24%"><col style="width:44%"></colgroup><thead><tr><th>序号</th><th>来源</th><th>日期</th><th>标题</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
+function reportWechatTable(){const rows=D.wechat_top.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.source)}</td><td>${esc(x.title)}</td><td>${esc(x.spread_count)}</td><td>${esc(x.comment_count)}</td></tr>`).join('');return rows?`<div class="word-embedded-table word-wechat-table" data-transient="true" contenteditable="false"><table><colgroup><col style="width:8.3%"><col style="width:20.1%"><col style="width:45.2%"><col style="width:13.4%"><col style="width:13%"></colgroup><thead><tr><th colspan="5">微信公号文章阅读量TOP</th></tr><tr><th>序号</th><th>账号</th><th>标题</th><th>阅读量</th><th>在看量</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
+function formalInline(text,role){let html=esc(text);html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');html=html.replace(/【未识别到具体专家姓名，建议核验原文】/g,'<span class="formal-attribution-warning">【未识别到具体专家姓名，建议核验原文】</span>');if(role==='p'){html=html.replace(/^(\s*\d+[.．、]\s*.*?[。！？])/,'<strong>$1</strong>');html=html.replace(/^((?:一|二|三|四|五|六|七|八|九|十)是.*?[。；：])/,'<strong>$1</strong>');html=html.replace(/(^|[。；！？])([^，。；！？<>]{2,80}?(?:认为|指出|表示|称|建议|分析|强调))/g,'$1<strong>$2</strong>')}return html}
+function blocksHtml(blocks,key=''){let html='';for(const b of blocks||[]){const role=['h1','h2','h3'].includes(b.role)?b.role:'p';html+=`<div class="word-block word-${role}" data-role="${esc(b.role||'p')}">${formalInline(b.text,role)}</div>`}if(key==='one-overall')html+=wordAsset(D.images.trend,'传播走势图');if(key==='one-topics')html+=reportTopicTable()+wordAsset(D.images.topic,'子议题传播量图');if(key==='two-hotwords')html+=wordAsset(D.images.hotword,'热词分布图');if(key==='four-overseas')html+=reportOverseasTable();if(key==='four-wechat')html+=reportWechatTable();return html}
+function splitSection(section){const blocks=(D.report_blocks&&D.report_blocks[section])||[],groups=[];let current=[],seenSubheading=false;for(const block of blocks){if(block.role==='h2'){if(seenSubheading&&current.length){groups.push(current);current=[]}seenSubheading=true}current.push(block)}if(current.length)groups.push(current);return groups}
+function sectionBlocks(section){return (editorOrder[section]||[]).flatMap(key=>snapshot(key))}
+function snapshot(key){const page=document.querySelector(`[data-word-page="${key}"]`);return [...page.children].filter(el=>!el.dataset.transient).map(el=>({role:el.dataset.role||'p',text:el.innerText.trim()})).filter(x=>x.text)}
+function same(a,b){return JSON.stringify(a)===JSON.stringify(b)}
+function setEditing(key,on){const page=document.querySelector(`[data-word-page="${key}"]`);page.contentEditable=on?'true':'false';editorState[key].editing=on;document.querySelector(`[data-edit="${key}"]`).disabled=on;document.querySelector(`[data-save="${key}"]`).disabled=!on;if(on){page.focus();document.querySelector(`[data-save-state="${key}"]`).textContent='编辑中，Ctrl+S 保存，Ctrl+Z 撤销';}}
+function pushHistory(key){const state=editorState[key],value=snapshot(key);if(!same(value,state.history[state.history.length-1])){state.history.push(value);if(state.history.length>100)state.history.shift();}document.querySelector(`[data-undo="${key}"]`).disabled=state.history.length<2;}
+function undoEditor(key){const state=editorState[key];if(state.history.length<2)return;state.history.pop();const value=state.history[state.history.length-1];document.querySelector(`[data-word-page="${key}"]`).innerHTML=blocksHtml(value,key);document.querySelector(`[data-undo="${key}"]`).disabled=state.history.length<2;document.querySelector(`[data-save-state="${key}"]`).textContent='已撤销一步，尚未保存到 Word';}
+async function saveEditor(key){pushHistory(key);const section=editorState[key].section,button=document.querySelector(`[data-save="${key}"]`),label=document.querySelector(`[data-save-state="${key}"]`);button.disabled=true;label.textContent='正在保存并重建 Word...';try{const res=await fetch(`/api/reports/${D.report_id}/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({section,blocks:sectionBlocks(section)})});const payload=await res.json();if(!res.ok)throw new Error(payload.error||'保存失败');label.textContent=`已保存到 Word · ${payload.saved_at}`;if(payload.word){document.getElementById('top-open-word').href=payload.word;}setEditing(key,false);}catch(err){label.textContent=`保存失败：${err.message}。请通过工作台服务器打开页面。`;button.disabled=false;}}
+function renderEditor(key,section,title,blocks){const shell=document.querySelector(`[data-editor-shell="${key}"]`);shell.innerHTML=`<div class="editor-head"><div class="editor-title"><strong>${esc(title)}</strong><span>对应正式 Word 本小节，保存后同步重建 Word</span></div><div class="editor-actions"><button class="btn" data-edit="${key}">修改</button><button class="btn btn-save" data-save="${key}" disabled>保存</button><button class="btn" data-undo="${key}" disabled>撤销</button></div></div><div class="word-page" data-word-page="${key}" contenteditable="false" spellcheck="false">${blocksHtml(blocks,key)}</div><div class="save-state" data-save-state="${key}">当前为已生成稿</div>`;editorState[key]={section,editing:false,history:[blocks],timer:null};const page=shell.querySelector('[data-word-page]');page.addEventListener('input',()=>{clearTimeout(editorState[key].timer);editorState[key].timer=setTimeout(()=>pushHistory(key),250)});page.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveEditor(key)}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();pushHistory(key);undoEditor(key)}});shell.querySelector('[data-edit]').onclick=()=>setEditing(key,true);shell.querySelector('[data-save]').onclick=()=>saveEditor(key);shell.querySelector('[data-undo]').onclick=()=>undoEditor(key);if(DEMO_MODE){shell.querySelectorAll('button').forEach(button=>button.disabled=true);shell.querySelector(`[data-save-state="${key}"]`).textContent='只读演示模式'}}
+function renderEditors(){const one=splitSection('one'),two=splitSection('two'),three=splitSection('three'),four=splitSection('four');[['one-overall','one','整体传播情况正式成文',one[0]||[]],['one-topics','one','子议题传播情况正式成文',one[1]||[]],['two-media','two','（一）境内媒体自媒体情况正式成文',two[0]||[]],['two-comments','two','（二）网民评论情况正式成文',two[1]||[]],['two-hotwords','two','（三）热词分布情况正式成文',two[2]||[]],['three-media','three','（一）境外媒体情况正式成文',three[0]||[]],['three-comments','three','（二）境外网民评论正式成文',three[1]||[]],['four-overseas','four','外媒报道附录',four[0]||[]],['four-wechat','four','公众号传播量附录',four[1]||[]]].forEach(x=>renderEditor(...x))}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function renderImportJob(job){const process=document.getElementById('import-process'),open=document.getElementById('import-open'),report=document.getElementById('import-report'),state=document.getElementById('import-state'),workbookReady=Boolean(job.workbook_url||job.workbook_protocol),busy=['workbook_queued','workbook_running','report_queued','report_running'].includes(job.status),resumable=['failed','waiting_ai','waiting_login','waiting_review','blocked','interrupted','paused'].includes(job.status);process.disabled=busy;open.disabled=!workbookReady;report.disabled=!workbookReady||busy||job.status==='complete';report.textContent=resumable?'继续运行':'生成报告';open.dataset.protocol=job.workbook_protocol||'';open.dataset.download=job.workbook_url||'';if(job.status==='complete')loadLibrary();const pipeline=job.pipeline||{},stageRows=(pipeline.stages||[]).map(row=>{const marks={succeeded:'●',running:'◉',retrying:'◉',failed:'×',waiting_ai:'◇',waiting_login:'◇',waiting_review:'◇',blocked:'!',pending:'○',interrupted:'!'},mark=marks[row.status]||'○';return `<div class="pipeline-stage" data-status="${esc(row.status||'pending')}"><span class="pipeline-dot">${mark}</span><span>${esc(row.label||row.stage_id)}${row.stage_id===pipeline.current_stage&&row.message?`<br><strong>${esc(row.message)}</strong>`:''}</span></div>`}).join(''),pipelineHtml=stageRows?`<div class="pipeline-state">${stageRows}</div>`:'';if(job.status==='failed'){state.innerHTML=`${esc(job.message||'处理失败。')}${job.workbook_log_path?` <a class="import-artifact-link" href="/api/import/artifact?job_id=${encodeURIComponent(job.job_id)}&kind=log">查看处理记录</a>`:''}${pipelineHtml}`}else if(job.status==='complete'&&job.dashboard_url){state.innerHTML=`报告已生成。<a class="import-artifact-link" href="${esc(job.dashboard_url)}">打开新报告</a>${job.word_url?`<a class="import-artifact-link" href="${esc(job.word_url)}">下载 Word</a>`:''}${pipelineHtml}`}else if(busy){state.innerHTML=`${job.status.startsWith('report_')?'正在生成报告…':'正在处理数据…'}${pipelineHtml}`}else if(resumable){state.innerHTML=`${esc(job.message||((pipeline.next_action||{}).message)||'当前节点等待继续处理。')}${pipelineHtml}`}else{state.innerHTML=pipelineHtml}}
+async function readImportJob(jobId){const res=await fetch(`/api/import/status?job_id=${encodeURIComponent(jobId)}`),job=await res.json();if(!res.ok)throw new Error(job.error||'无法读取运行状态');return job}
+async function pollImport(jobId,target){for(let round=0;round<1800;round++){await wait(1200);const job=await readImportJob(jobId);renderImportJob(job);if(['failed','waiting_ai','waiting_login','waiting_review','blocked','interrupted','paused'].includes(job.status)||(target==='workbook'&&job.status==='workbook_complete')||(target==='report'&&job.status==='complete'))return job}throw new Error('任务仍在后台运行，请稍后重新打开工作台查看。')}
+async function runImport(){const files=[...document.getElementById('import-files').files],agenda=document.getElementById('import-agenda').value.trim()||`${D.meeting_date}国务院常务会`,state=document.getElementById('import-state'),button=document.getElementById('import-process');if(!files.length){state.textContent='请选择一个或多个系统导出文件。';return}button.disabled=true;state.textContent=`准备上传 ${files.length} 个文件...`;try{let res=await fetch('/api/import/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agenda})}),job=await res.json();if(!res.ok)throw new Error(job.error||'无法创建处理任务');importJobId=job.job_id;localStorage.setItem(importStorageKey,importJobId);renderImportJob(job);for(let i=0;i<files.length;i++){state.textContent=`正在上传 ${i+1}/${files.length}：${files[i].name}`;res=await fetch(`/api/import/file?job_id=${encodeURIComponent(job.job_id)}&name=${encodeURIComponent(files[i].name)}`,{method:'POST',body:files[i]});const out=await res.json();if(!res.ok)throw new Error(out.error||'上传失败')}res=await fetch('/api/import/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:job.job_id})});const started=await res.json();if(!res.ok)throw new Error(started.error||'无法启动数据处理');renderImportJob(started);await pollImport(job.job_id,'workbook')}catch(err){state.textContent=`处理失败：${err.message}`;button.disabled=false}}
+function openImportedWorkbook(){const button=document.getElementById('import-open');if(button.disabled)return;const target=SERVER_MODE?(button.dataset.download||button.dataset.protocol):(button.dataset.protocol||button.dataset.download);if(target)window.location.href=target}
+async function runImportedReport(){const state=document.getElementById('import-state'),button=document.getElementById('import-report');if(!importJobId){state.textContent='请先处理本期数据。';return}button.disabled=true;try{const res=await fetch('/api/import/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:importJobId})}),job=await res.json();if(!res.ok)throw new Error(job.error||'无法启动报告生成');renderImportJob(job);await pollImport(importJobId,'report')}catch(err){state.textContent=`报告生成失败：${err.message}`;button.disabled=false}}
+function renderHero(){
+  document.getElementById('top-title').textContent='本期报告';
+  document.getElementById('top-subtitle').textContent=`${D.period.label} · ${D.topics.length}个系统子议题`;
+  document.getElementById('brand-period').textContent=D.period.label;
+  document.getElementById('top-open-word').href=artifactTarget(D.artifacts.word);
+  document.getElementById('hero').innerHTML=`<div><h3>${esc(D.title)}</h3><p class="agenda">${esc(D.agenda)}</p><div class="meta-row"><span>会议日期：${esc(D.meeting_date)}</span><span>监测周期：${esc(D.period.label)}</span><span>议题来源：监测系统 Excel</span></div></div><div class="import-panel"><h3>数据导入</h3><input id="import-agenda" class="import-agenda" value="${esc(D.agenda||(D.meeting_date+'国务院常务会'))}" aria-label="会议日期或完整议程" title="原始子事件表不含议题名称时，请填写完整会议议程"><label class="file-picker" for="import-files"><span class="file-picker-title">选择 Excel、CSV、JSON 等文件</span><span class="file-picker-note">支持导入多个文件</span><input id="import-files" type="file" multiple accept=".xlsx,.xls,.xlsm,.csv,.tsv,.json,.zip"></label><div class="import-actions"><button class="btn btn-save" id="import-process">处理数据</button><button class="btn" id="import-open" disabled>打开总表</button><button class="btn" id="import-report" disabled>生成报告</button></div><div class="import-state" id="import-state"></div></div>`;
+  if(DEMO_MODE){
+    document.getElementById('import-files').disabled=true;
+    document.getElementById('import-agenda').disabled=true;
+    document.getElementById('import-process').disabled=true;
+    document.getElementById('import-open').disabled=true;
+    document.getElementById('import-report').disabled=true;
+    document.getElementById('import-state').textContent='';
+    const word=document.getElementById('top-open-word');
+    word.removeAttribute('href');
+    word.setAttribute('aria-disabled','true');
+    word.textContent='只读演示';
+    word.onclick=event=>event.preventDefault();
+    renderOverviewData();
+    return;
+  }
+  document.getElementById('import-process').onclick=runImport;
+  document.getElementById('import-open').onclick=openImportedWorkbook;
+  document.getElementById('import-report').onclick=runImportedReport;
+  document.getElementById('import-files').onchange=e=>{
+    const files=[...e.target.files];
+    importJobId='';
+    localStorage.removeItem(importStorageKey);
+    document.getElementById('import-open').disabled=true;
+    document.getElementById('import-report').disabled=true;
+    document.getElementById('import-steps').innerHTML='';
+    document.getElementById('import-state').textContent=files.length?`已选择 ${files.length} 个文件：${files.map(x=>x.name).join('、')}`:'';
+    renderOverviewData();
+  };
+  renderOverviewData();
+  const resumed=new URLSearchParams(location.search).get('job_id')||localStorage.getItem(importStorageKey);
+  if(resumed){
+    importJobId=resumed;
+    readImportJob(resumed).then(job=>{
+      localStorage.setItem(importStorageKey,resumed);
+      renderImportJob(job);
+      if(['workbook_queued','workbook_running'].includes(job.status))pollImport(resumed,'workbook');
+      if(['report_queued','report_running'].includes(job.status))pollImport(resumed,'report');
+    }).catch(()=>localStorage.removeItem(importStorageKey));
+  }
+}
+function renderOverviewData(){const channels=[['境内主流媒体',D.totals.domestic_mainstream,'#1f5f8b'],['微信公众号',D.totals.wechat_public,'#2d7a53'],['微博',D.totals.weibo,'#a63d40'],['视频号',D.totals.video_account,'#a9772d'],['客户端、论坛等',D.totals.new_media,'#607d8b'],['境外媒体',D.totals.overseas_media,'#76538d']],total=Math.max(1,D.totals.total_spread),max=Math.max(1,...channels.map(x=>Number(x[1]||0))),stack=channels.map(x=>`<span style="width:${Number(x[1]||0)/total*100}%;background:${x[2]}" title="${esc(x[0])}：${fmt(x[1])}（${(Number(x[1]||0)/total*100).toFixed(1)}%）"></span>`).join(''),channelRows=channels.map(x=>`<div class="channel-row"><span><i class="channel-swatch" style="background:${x[2]}"></i>${esc(x[0])}</span><span class="channel-track"><span style="width:${Number(x[1]||0)/max*100}%;background:${x[2]}"></span></span><strong class="channel-value">${fmt(x[1])}</strong><span class="channel-share">${(Number(x[1]||0)/total*100).toFixed(1)}%</span></div>`).join(''),topicRows=D.topics.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.display)}</td><td class="num">${fmt(x.domestic_media)}</td><td class="num">${fmt(x.self_media)}</td><td class="num">${fmt(x.overseas_media)}</td><td class="num"><strong>${fmt(x.spread_count)}</strong></td>${D.sentiment_available?`<td>正${x.sentiment.positive}% / 中${x.sentiment.neutral}% / 负${x.sentiment.negative}%</td>`:''}</tr>`).join(''),sentimentHead=D.sentiment_available?'<th>网民情感</th>':'';document.getElementById('overview-data').innerHTML=`<div class="overview-block"><div class="overview-block-head"><strong>传播数据全览</strong><span>总传播量 ${fmt(D.totals.total_spread)}</span></div><div class="spread-stack">${stack}</div><div class="overview-columns" style="margin-top:14px"><div class="channel-list">${channelRows}</div><div class="overview-topic-table"><table><thead><tr><th>序号</th><th>系统子议题</th><th class="num">境内主流媒体</th><th class="num">新媒体</th><th class="num">境外媒体</th><th class="num">总量</th>${sentimentHead}</tr></thead><tbody>${topicRows}</tbody></table></div></div></div>`}
+function renderOne(){document.getElementById('spread-meta').textContent=`传播峰值：${D.peak.date_label} · ${fmt(D.peak.value)}条`;const overall=[['境内主流媒体',D.totals.domestic_mainstream],['微信公众号',D.totals.wechat_public],['微博',D.totals.weibo],['视频号',D.totals.video_account],['客户端、论坛等',D.totals.new_media],['境外媒体',D.totals.overseas_media]];document.getElementById('overall-spread-data').innerHTML=`<div class="overall-stat-grid">${overall.map(x=>`<div class="overall-stat"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('')}</div>`;document.getElementById('trend-chart').innerHTML=figure('传播走势图','监测系统 Excel 原图',D.images.trend);document.getElementById('topic-chart').innerHTML=figure('子议题传播量','监测系统 Excel 原图',D.images.topic);const rows=D.topics.map((x,i)=>{const s=x.sentiment,cell=D.sentiment_available?`<td class="sentiment-cell"><div class="sentiment-bar"><span style="width:${s.positive}%"></span><span style="width:${s.neutral}%"></span><span style="width:${s.negative}%"></span></div><div class="sentiment-labels"><span>正${s.positive}%</span><span>中${s.neutral}%</span><span>负${s.negative}%</span></div></td>`:'';return `<tr><td>${i+1}</td><td>${esc(x.display)}</td><td class="num">${fmt(x.domestic_media)}</td><td class="num">${fmt(x.self_media)}</td><td class="num">${fmt(x.overseas_media)}</td><td class="num"><b>${fmt(x.spread_count)}</b></td>${cell}</tr>`}).join(''),sentimentHead=D.sentiment_available?'<th>网民情感</th>':'';document.getElementById('topic-table').innerHTML=`<table><thead><tr><th>序号</th><th>系统子议题</th><th class="num">境内媒体</th><th class="num">新媒体</th><th class="num">境外媒体</th><th class="num">总量</th>${sentimentHead}</tr></thead><tbody>${rows}</tbody></table>`}
+function renderMedia(){document.getElementById('media-topics').innerHTML=D.topics.map((x,i)=>`<button class="topic-btn ${i===mediaTopic?'active':''}" data-media-topic="${i}">${esc(x.display)}</button>`).join('');const media=D.viewpoints[mediaTopic]||{clusters:[]};const evidenceUnit=e=>{if(!e.url||e.url==='#')return '';const claim=String(e.claim||e.description||e.title||'').trim();return `<div class="evidence-card">${claim?`<p class="evidence-claim">${esc(claim)}</p>`:''}<div class="evidence-card-meta"><span class="origin-tag">${esc(e.origin||'公开网络补证')}</span><a class="evidence-link" href="${esc(e.url)}" target="_blank" rel="noreferrer" title="${esc(e.title||e.source||'打开原文')}">${esc(e.source||'来源')}${e.title?'：'+esc(e.title):''}</a></div></div>`};const sampleCount=c=>c.evidence.filter(e=>e.url&&e.url!=='#').length;const clusters=media.clusters.map((c,i)=>`<article class="cluster"><h4>${i+1}. ${esc(c.summary)} <span class="sample-count">（${sampleCount(c)}条独立观点样本）</span></h4><div class="evidence-row">${c.evidence.map(e=>evidenceUnit(e)).join('')}</div>${c.needs_attribution_review?'<span class="formal-attribution-warning">【未识别到具体专家姓名，建议核验原文】</span>':''}</article>`).join('');document.getElementById('media-panel').innerHTML=clusters||'<div class="empty">当前子议题尚无可追溯媒体/自媒体观点证据</div>';document.querySelectorAll('[data-media-topic]').forEach(b=>b.onclick=()=>{mediaTopic=Number(b.dataset.mediaTopic);renderMedia()})}
+function renderComments(){document.getElementById('comment-topics').innerHTML=D.topics.map((x,i)=>`<button class="topic-btn ${i===commentTopic?'active':''}" data-comment-topic="${i}">${esc(x.display)}</button>`).join('');const comments=(D.comments_by_topic||[])[commentTopic]||{items:[]},topic=D.topics[commentTopic]||{},sentiment=D.sentiment_available?`<span>情感：正${topic.sentiment.positive}% / 中${topic.sentiment.neutral}% / 负${topic.sentiment.negative}%</span>`:'';document.getElementById('comment-panel').innerHTML=`<div class="topic-summary"><span>${comments.items.length}条真实评论</span><span>均需原话、平台和链接</span>${sentiment}</div>${comments.items.length?comments.items.map((x,i)=>`<article class="comment-card"><h4>${i+1}. ${esc(x.heading)}</h4><p>“${esc(x.content)}”</p><div class="comment-meta"><span>${esc(x.source)} · ${esc(x.platform)} · ${esc(x.published_at)}</span><a class="evidence-link" href="${esc(x.url)}" target="_blank" rel="noreferrer">打开原评论</a></div></article>`).join(''):'<div class="empty">当前尚未采集到符合要求的真实评论。公开视频标题、用户发帖和公开讨论摘要不会计入这里。</div>'}`;document.querySelectorAll('[data-comment-topic]').forEach(b=>b.onclick=()=>{commentTopic=Number(b.dataset.commentTopic);renderComments()})}
+let hotwordPreviewToken='',hotwordEditing=false;
+const hotwordBaselineWords=D.hotwords.map(row=>String(row.word||'').replace(/\s+/g,'')).filter(Boolean);
+function hotwordRowsFromInput(){return document.getElementById('hotword-input').value.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>{const parts=line.split(/[|｜\t]/),weight=parts.length>1?Number(parts[1].trim()):null;return{word:(parts[0]||'').replace(/\s+/g,''),weight:Number.isFinite(weight)?weight:null}}).filter(row=>row.word)}
+function updateHotwordCount(){const rows=hotwordRowsFromInput(),unique=new Set(rows.map(row=>row.word));document.getElementById('hotword-count').textContent=`${unique.size}个热词`;return rows}
+async function buildHotwordPreview(items,state){let res=await fetch(`/api/reports/${D.report_id}/hotwords/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items,baseline_words:hotwordBaselineWords})}),payload=await res.json();if(!res.ok)throw new Error(payload.error||'无法启动词云生成');hotwordPreviewToken=payload.token;for(let round=0;round<900;round++){await wait(1000);res=await fetch(`/api/reports/${D.report_id}/hotwords/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:hotwordPreviewToken})});payload=await res.json();if(!res.ok)throw new Error(payload.error||'无法读取词云状态');if(payload.status==='failed')throw new Error(payload.error||'词云生成失败');if(payload.status!=='complete'){state.textContent=`正在按原版字体和版式重绘 ${items.length} 个热词…`;continue}document.getElementById('hotword-chart').innerHTML=figure('热词分布图','保存前预览',`${payload.image}?v=${Date.now()}`);return payload}throw new Error('词云生成时间过长，请稍后重试')}
+function setHotwordEditing(editing){const input=document.getElementById('hotword-input'),edit=document.getElementById('hotword-edit'),save=document.getElementById('hotword-save'),state=document.getElementById('hotword-edit-state');hotwordEditing=editing;input.readOnly=!editing;edit.disabled=editing;save.disabled=!editing;if(editing){state.textContent='可增删热词或调整1至100的字号权重；保存后自动重绘并更新报告';input.focus()}else{state.textContent='竖线后的数字是1至100的字号权重；点击“修改”后可编辑'}}
+async function saveHotwords(){const input=document.getElementById('hotword-input'),edit=document.getElementById('hotword-edit'),button=document.getElementById('hotword-save'),state=document.getElementById('hotword-edit-state'),items=updateHotwordCount();if(!hotwordEditing)return;if(!items.length){state.textContent='请至少保留一个热词';return}input.readOnly=true;edit.disabled=true;button.disabled=true;hotwordPreviewToken='';state.textContent='正在按原版字体和版式重绘词云…';try{const preview=await buildHotwordPreview(items,state),unsupported=(preview.unsupported||[]).length;state.textContent=unsupported?`正在保存；${unsupported}个新增词由人工保留…`:'正在保存并同步重建 Word…';const res=await fetch(`/api/reports/${D.report_id}/hotwords/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:hotwordPreviewToken})}),payload=await res.json();if(!res.ok)throw new Error(payload.error||'保存失败');state.textContent=`已保存 ${payload.hotword_count} 个热词，正在刷新本期报告…`;const url=new URL(location.href);url.searchParams.set('view','two-hotwords');url.searchParams.set('v',Date.now());url.hash='part-two';location.replace(url.toString())}catch(err){hotwordPreviewToken='';hotwordEditing=true;input.readOnly=false;edit.disabled=true;button.disabled=false;state.textContent=`保存失败：${err.message}`}}
+function initHotwordEditor(){const input=document.getElementById('hotword-input'),edit=document.getElementById('hotword-edit'),save=document.getElementById('hotword-save'),state=document.getElementById('hotword-edit-state');input.value=D.hotwords.map(row=>`${row.word} | ${row.weight||row.count||1}`).join('\n');updateHotwordCount();input.oninput=()=>{hotwordPreviewToken='';updateHotwordCount();state.textContent='内容已修改；点击“保存并生成词云”后更新词云和报告'};input.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveHotwords()}};edit.onclick=()=>setHotwordEditing(true);save.onclick=saveHotwords;setHotwordEditing(false);if(DEMO_MODE){input.disabled=true;edit.disabled=true;save.disabled=true;state.textContent='只读演示模式'}}
+function renderTwo(){renderMedia();renderComments();initHotwordEditor();document.getElementById('hotword-chart').innerHTML=figure('热词分布图','正式报告当前版本',D.images.hotword)}
+function initModuleViews(){const legacy={media:'two-media',comments:'two-comments',hotwords:'two-hotwords'},requested=legacy[new URLSearchParams(location.search).get('view')]||new URLSearchParams(location.search).get('view');document.querySelectorAll('.module-tabs[data-module-group]').forEach(tabs=>{const section=tabs.closest('.workspace-panel'),buttons=[...tabs.querySelectorAll('[data-module-view]')],allowed=buttons.map(button=>button.dataset.moduleView),panels=[...section.querySelectorAll('[data-module-panel]')],fallback=allowed[0],initial=allowed.includes(requested)?requested:fallback;function show(view,updateUrl=false){if(!allowed.includes(view))view=fallback;buttons.forEach(button=>{const active=button.dataset.moduleView===view;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active))});panels.forEach(panel=>panel.classList.toggle('active',panel.dataset.modulePanel===view));if(updateUrl){const url=new URL(location.href);url.searchParams.set('view',view);url.hash=section.id;history.replaceState(null,'',url)}}buttons.forEach(button=>button.onclick=()=>show(button.dataset.moduleView,true));show(initial)});const commentCount=(D.comments_by_topic||[]).reduce((sum,row)=>sum+(row.items||[]).length,0),commentButton=document.querySelector('[data-module-view="two-comments"]');if(commentButton)commentButton.textContent=`（二）网民评论情况（${commentCount}）`}
+function renderThree(){const foreignComments=D.overseas_comments||[],reports=D.overseas||[],inWindow=foreignComments.filter(x=>x.in_monitoring_window).length,postWindow=foreignComments.length-inWindow,systemReports=reports.filter(x=>x.origin==='监测系统 Excel'),supplementReports=reports.filter(x=>x.origin!=='监测系统 Excel'),categories=['事实性报道','解读性报道','借题炒作/风险解读'];const reportRow=x=>{const title=String(x.title_cn||x.title||x.original_title||'').trim();return `<div class="overseas-item"><span class="overseas-source">${esc(x.source)}</span><span class="overseas-date">${esc(x.date)}</span><div class="overseas-copy"><a href="${esc(x.url)}" target="_blank" rel="noreferrer">${esc(title)} ↗</a></div></div>`},originGroup=(title,rows)=>rows.length?`<div class="overseas-origin-head"><strong>${title}</strong><span>${rows.length}条</span></div>${rows.map(reportRow).join('')}`:'',categoryGroup=category=>{const rows=reports.filter(x=>(x.category||'事实性报道')===category);if(!rows.length)return '';const system=rows.filter(x=>x.origin==='监测系统 Excel'),supplement=rows.filter(x=>x.origin!=='监测系统 Excel');return `<div class="overseas-group"><div class="overseas-group-head"><strong>${category}</strong><span>${rows.length}条</span></div>${originGroup('监测系统 Excel',system)}${originGroup('公开网络补证',supplement)}</div>`};document.getElementById('overseas-meta').textContent=`系统报道 ${systemReports.length}条 · 公开补充 ${supplementReports.length}条 · 境外评论 ${foreignComments.length}条`;document.getElementById('overseas-list').innerHTML=reports.length?categories.map(categoryGroup).join(''):'<div class="empty">当前无境外报道样本</div>';document.getElementById('overseas-comment-list').innerHTML=foreignComments.length?`<div class="topic-summary"><span>监测期内 ${inWindow} 条</span><span>监测期后补证 ${postWindow} 条</span><span>原文与中文翻译</span></div>`+foreignComments.map((x,i)=>`<article class="comment-card"><h4>${i+1}. ${esc(x.source)} · ${esc(x.platform)}${x.in_monitoring_window?'':'<span class="window-tag">监测期后补证</span>'}</h4><p>${x.verified?'“'+esc(x.content)+'”':esc(x.content)}</p>${x.translation&&x.translation!==x.content?`<p class="comment-translation"><strong>中文：</strong>${esc(x.translation)}</p>`:''}<div class="comment-meta"><span>${esc(x.date)}${x.comment_id?' · '+esc(x.comment_id):''}</span>${x.url?`<a class="evidence-link" href="${esc(x.url)}" target="_blank" rel="noreferrer">打开原评论</a>`:''}</div></article>`).join(''):'<div class="empty">当前无可核验境外网民观点</div>'}
+function renderFour(){const orows=D.overseas.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.source)}</td><td>${esc(x.date)}</td><td><a href="${esc(x.url)}" target="_blank">${esc(x.title)}</a></td></tr>`).join('');document.getElementById('appendix-overseas-table').innerHTML=orows?`<table><thead><tr><th>序号</th><th>来源</th><th>日期</th><th>超链接标题</th></tr></thead><tbody>${orows}</tbody></table>`:'<div class="empty">暂无外媒附录</div>';const wrows=D.wechat_top.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.source)}</td><td><a href="${esc(x.url)}" target="_blank">${esc(x.title)}</a></td><td class="num">${esc(x.spread_count)}</td><td class="num">${esc(x.comment_count)}</td></tr>`).join('');document.getElementById('wechat-table').innerHTML=wrows?`<table><thead><tr><th>序号</th><th>账号</th><th>标题</th><th>阅读量</th><th>在看量</th></tr></thead><tbody>${wrows}</tbody></table>`:'<div class="empty">暂无公众号榜单</div>';const a=[['正式报告 Word',D.artifacts.word],['配套数据 Excel',D.artifacts.excel],['结构化数据',D.artifacts.data],['质量审计',D.artifacts.audit]];document.getElementById('delivery-panel').innerHTML=`<div class="artifact-list">${a.map((x,i)=>`<div class="artifact"><div class="artifact-type">${x[0]}</div><div class="artifact-path">${esc(x[1].path)}</div><div><a class="btn ${i===0?'btn-primary':''}" href="${esc(artifactTarget(x[1]))}">打开</a></div></div>`).join('')}</div>`}
+function renderLibrary(filter=''){const box=document.getElementById('report-library'),needle=filter.trim().toLowerCase(),rows=(libraryData.reports||[]).filter(x=>`${x.date||''} ${x.title||''} ${x.period||''} ${(x.topics||[]).join(' ')}`.toLowerCase().includes(needle));box.innerHTML=rows.map(x=>{const details=[x.period,(x.topics||[]).join('；')].filter(Boolean).join(' · '),actions=[x.dashboard&&['工作台',x.dashboard],x.word&&['Word',x.word]];return `<div class="history-item ${x.current?'current':''}"><span class="history-date">${esc(x.date||'未标日期')}</span><span><div class="history-title">${esc(x.title)}</div><div class="history-period">${esc(details||'暂无监测周期说明')}</div></span><span class="history-actions">${actions.filter(Boolean).map(a=>`<a class="history-action" href="${esc(a[1])}">${esc(a[0])}</a>`).join('')||'暂无报告文件'}</span></div>`}).join('')||'<div class="empty">没有匹配的报告</div>'}
+async function loadLibrary(){if(DEMO_MODE){libraryData={reports:[{date:D.meeting_date,title:D.title,current:true,dashboard:location.href,word:''}],counts:{reports:1}};document.getElementById('history-count').textContent='1期';renderLibrary();return}try{const r=await fetch('/api/archive');if(!r.ok)throw new Error();libraryData=await r.json()}catch(_){libraryData={reports:[{date:D.meeting_date,title:D.title,current:true,dashboard:location.href}],counts:{reports:1}}}document.getElementById('history-count').textContent=`${(libraryData.counts||{}).reports||libraryData.reports.length}期`;renderLibrary(document.getElementById('history-search').value)}
+function initHistory(){const modal=document.getElementById('history-modal'),open=()=>{modal.classList.add('open');modal.setAttribute('aria-hidden','false');document.getElementById('history-search').focus()},close=()=>{modal.classList.remove('open');modal.setAttribute('aria-hidden','true')};document.getElementById('open-history').onclick=open;document.getElementById('close-history').onclick=close;document.getElementById('history-search').oninput=e=>renderLibrary(e.target.value);modal.onclick=e=>{if(e.target===modal)close()};document.addEventListener('keydown',e=>{if(e.key==='Escape')close()})}
+function initNav(){const links=[...document.querySelectorAll('[data-panel]')],panels=[...document.querySelectorAll('.workspace-panel')];function show(id,hash=true){if(!panels.some(x=>x.id===id))id='overview';panels.forEach(x=>x.classList.toggle('active',x.id===id));links.forEach(x=>x.classList.toggle('active',x.dataset.panel===id));if(hash)history.replaceState(null,'','#'+id);window.scrollTo({top:0,behavior:'smooth'})}links.forEach(x=>x.onclick=e=>{e.preventDefault();show(x.dataset.panel)});window.onhashchange=()=>show(location.hash.slice(1)||'overview',false);show(location.hash.slice(1)||'overview',false)}
+const platformDefinitions={wb:{label:'微博',kind:'评论采集'},dy:{label:'抖音',kind:'评论采集'},ks:{label:'快手',kind:'评论采集'},bili:{label:'哔哩哔哩',kind:'评论采集'},zhihu:{label:'知乎',kind:'评论采集'},baijiahao:{label:'百家号',kind:'文章检索'},wechat_weread:{label:'微信读书（公众号）',kind:'文章检索'}};let platformPollTimer=null,activePlatformSessionId='',assistantHistory=[];
+const platformClientId=(()=>{const key='cwh-platform-client-id';let value=localStorage.getItem(key)||'';if(!/^[a-f0-9-]{32,64}$/i.test(value)){value=(crypto.randomUUID?crypto.randomUUID():Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join(''));localStorage.setItem(key,value)}return value})();
+const nativeFetch=window.fetch.bind(window);window.fetch=(input,init={})=>{if(typeof input==='string'&&input.startsWith('/api/platform-sessions')){const method=String(init.method||'GET').toUpperCase();if(input==='/api/platform-sessions'&&method==='GET'){input='/api/platform-sessions/list';init={...init,method:'POST',headers:{...(init.headers||{}),'Content-Type':'application/json'},body:JSON.stringify({client_id:platformClientId})}}else if(method==='POST'){let payload={};try{payload=JSON.parse(init.body||'{}')}catch(_){}payload.client_id=platformClientId;init={...init,headers:{...(init.headers||{}),'Content-Type':'application/json'},body:JSON.stringify(payload)}}}return nativeFetch(input,init)};
+function closeToolModal(id){const modal=document.getElementById(id);modal.classList.remove('open');modal.setAttribute('aria-hidden','true')}
+function platformCard(platform){const item=platformDefinitions[platform];return `<div class="platform-card"><div class="platform-card-head"><h4>${item.label}<span class="platform-kind">${item.kind}</span></h4><button class="btn btn-save" data-connect-platform="${platform}">连接${item.label}</button></div><div class="platform-state" data-platform-state="${platform}" data-status="disconnected">在本机真实浏览器中完成登录和安全验证。</div></div>`}
+async function refreshPlatformStatus(platform){const state=document.querySelector(`[data-platform-state="${platform}"]`);if(!state)return;try{const response=await nativeFetch(`http://127.0.0.1:8791/status?platform=${encodeURIComponent(platform)}`,{cache:'no-store'}),data=await response.json();if(!response.ok)throw new Error(data.error||'状态读取失败');state.dataset.status=data.status||'opened';state.textContent=data.message||data.status}catch(_){state.dataset.status='disconnected';state.textContent='本机连接器未启动或状态暂不可读；仍可点击连接并在新页面查看提示。'}}
+function loadPlatformSessions(){const grid=document.getElementById('platform-grid');grid.innerHTML=Object.keys(platformDefinitions).map(platformCard).join('');grid.querySelectorAll('[data-connect-platform]').forEach(button=>button.onclick=()=>startPlatformSession(button.dataset.connectPlatform));Object.keys(platformDefinitions).forEach(refreshPlatformStatus)}
+function startPlatformSession(platform){const browser=document.getElementById('platform-browser').value||'edge',url=`http://127.0.0.1:8791/connect?platform=${encodeURIComponent(platform)}&browser=${encodeURIComponent(browser)}`,loginWindow=window.open(url,'_blank','noopener'),state=document.querySelector(`[data-platform-state="${platform}"]`);if(!loginWindow)alert('浏览器阻止了新窗口，请允许此站点打开新窗口。');else{state.dataset.status='waiting_login';state.textContent='验证页已打开，请完成登录、滑块或扫码；完成前不是任务终点。';setTimeout(()=>refreshPlatformStatus(platform),1800)}}
+function initPlatforms(){const modal=document.getElementById('platform-modal'),open=()=>{modal.classList.add('open');modal.setAttribute('aria-hidden','false');loadPlatformSessions();clearInterval(platformPollTimer);platformPollTimer=setInterval(()=>Object.keys(platformDefinitions).forEach(refreshPlatformStatus),2500)},close=()=>{clearInterval(platformPollTimer);platformPollTimer=null;closeToolModal('platform-modal')};document.getElementById('open-platforms').onclick=open;document.getElementById('close-platforms').onclick=close;modal.onclick=e=>{if(e.target===modal)close()}}
+function assistantMessage(role,content){const box=document.getElementById('assistant-messages'),node=document.createElement('div');node.className=`assistant-message ${role}`;node.textContent=content;box.appendChild(node);box.scrollTop=box.scrollHeight}
+async function sendAssistantMessage(){const input=document.getElementById('assistant-input'),button=document.getElementById('assistant-send'),message=input.value.trim();if(!message)return;assistantMessage('user',message);input.value='';button.disabled=true;try{const res=await fetch('/api/assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,history:assistantHistory})}),data=await res.json();if(!res.ok)throw new Error(data.error||'报告助理暂时无法回答');assistantHistory.push({role:'user',content:message},{role:'assistant',content:data.answer});assistantHistory=assistantHistory.slice(-12);assistantMessage('assistant',data.answer)}catch(err){assistantMessage('assistant',`当前无法调用模型：${err.message}`)}finally{button.disabled=false;input.focus()}}
+async function initAssistant(){const modal=document.getElementById('assistant-modal'),status=document.getElementById('assistant-status'),send=document.getElementById('assistant-send'),open=()=>{modal.classList.add('open');modal.setAttribute('aria-hidden','false');document.getElementById('assistant-input').focus()},close=()=>closeToolModal('assistant-modal');document.getElementById('open-assistant').onclick=open;document.getElementById('close-assistant').onclick=close;modal.onclick=e=>{if(e.target===modal)close()};send.onclick=sendAssistantMessage;document.getElementById('assistant-input').onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();sendAssistantMessage()}};try{const res=await fetch('/api/assistant/status'),data=await res.json();if(data.available){status.textContent=`已连接 ${data.model}`;assistantMessage('assistant','我已读取本期报告上下文。你可以让我核对数据口径、梳理证据，或修改某一小节的正式表述。')}else{status.textContent='模型服务待接入';send.disabled=true;document.getElementById('assistant-input').disabled=true;assistantMessage('assistant','工作台入口已经就绪，但发布应用不会自动继承 With 编辑器里的 Claude。配置公司批准的模型服务后，这里即可正式对话。')}}catch(_){status.textContent='无法读取模型服务状态';send.disabled=true}}
+renderHero();renderEditors();renderOne();renderTwo();renderThree();renderFour();loadLibrary();initHistory();initModuleViews();initNav();initPlatforms();initAssistant();
+if(DEMO_MODE){document.querySelectorAll('.artifact .btn').forEach(link=>{link.removeAttribute('href');link.setAttribute('aria-disabled','true');link.textContent='只读演示';link.onclick=event=>event.preventDefault()})}
+</script>
+</body>
+</html>

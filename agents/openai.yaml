@@ -1,0 +1,7 @@
+interface:
+  display_name: "CWH Report Skill"
+  short_description: "原始监测表标准化整理及国务院常务会舆情报告全流程自动化"
+  default_prompt: "Use $cwh-report-skill to turn a CWH agenda plus either raw monitoring-system exports or an organized workbook into a validated standard workbook and, when requested, the formal Word report and HTML dashboard."
+
+policy:
+  allow_implicit_invocation: true

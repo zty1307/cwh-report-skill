@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>平台账号登录</title>
+  <style>
+    :root { --ink:#102433; --muted:#637582; --line:#d6dfe4; --blue:#17618d; --bg:#eef2f4; --ok:#287a57; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; color:var(--ink); background:var(--bg); font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+    body { display:grid; grid-template-rows:auto 1fr; height:100vh; }
+    header { min-height:68px; padding:12px 22px; display:flex; align-items:center; justify-content:space-between; gap:18px; background:#fff; border-bottom:1px solid var(--line); }
+    h1 { margin:0; font-size:20px; letter-spacing:0; }
+    .status { margin-top:5px; color:var(--muted); font-size:13px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    button,a { min-height:38px; padding:0 14px; border:1px solid var(--line); border-radius:2px; color:var(--ink); background:#fff; font:inherit; text-decoration:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+    button.primary { color:#fff; border-color:var(--blue); background:var(--blue); }
+    main { min-height:0; padding:16px; display:grid; }
+    .browser { min-width:0; min-height:0; display:grid; place-items:center; overflow:hidden; background:#757575; border:1px solid var(--line); position:relative; }
+    #screen { display:none; width:100%; height:100%; object-fit:contain; user-select:none; -webkit-user-drag:none; touch-action:none; cursor:default; }
+    #screen.interactive { display:block; cursor:crosshair; }
+    #screen.qr { display:block; width:min(460px,82vw); height:min(460px,72vh); padding:18px; background:#fff; }
+    .empty { max-width:520px; padding:26px; color:#fff; text-align:center; line-height:1.8; }
+    .connected { color:#fff; text-align:center; }
+    .connected strong { display:block; margin-bottom:8px; color:#d9ffec; font-size:24px; }
+    .dragging::after { content:""; position:absolute; inset:0; border:3px solid rgba(23,97,141,.75); pointer-events:none; }
+    @media (max-width:720px) { header { align-items:flex-start; flex-direction:column; } main { padding:8px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1 id="title">平台账号登录</h1><div class="status" id="status" aria-live="polite">正在连接服务器浏览器…</div></div>
+    <div class="actions"><button id="refresh">刷新画面</button><a href="/" id="back">返回工作台</a><button class="primary" id="close">关闭页面</button></div>
+  </header>
+  <main><div class="browser" id="browser"><img id="screen" alt="平台登录页面"><div class="empty" id="empty">服务器正在打开平台登录页，请稍候。</div></div></main>
+  <script>
+    const params=new URLSearchParams(location.search),sessionId=params.get('session_id')||'',clientId=params.get('client_id')||'',platform=params.get('platform')||'';
+    const labels={wb:'微博',dy:'抖音',ks:'快手',bili:'哔哩哔哩',zhihu:'知乎'},title=document.getElementById('title'),statusNode=document.getElementById('status'),screen=document.getElementById('screen'),empty=document.getElementById('empty'),browser=document.getElementById('browser');
+    title.textContent=`连接${labels[platform]||'平台'}`;
+    let stopped=false,timer=null,dragStart=null,moved=false;
+    async function post(path,body={}){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:clientId,...body})});const data=await response.json();if(!response.ok)throw new Error(data.error||data.message||'请求失败');return data}
+    function point(event){const rect=screen.getBoundingClientRect(),naturalWidth=screen.naturalWidth||1280,naturalHeight=screen.naturalHeight||900,renderRatio=Math.min(rect.width/naturalWidth,rect.height/naturalHeight),renderWidth=naturalWidth*renderRatio,renderHeight=naturalHeight*renderRatio,offsetX=(rect.width-renderWidth)/2,offsetY=(rect.height-renderHeight)/2;return{x:Math.max(0,Math.min(naturalWidth,(event.clientX-rect.left-offsetX)/renderRatio)),y:Math.max(0,Math.min(naturalHeight,(event.clientY-rect.top-offsetY)/renderRatio))}}
+    async function sendAction(type,start,end=start){statusNode.textContent=type==='drag'?'正在执行你的拖动操作…':'正在执行你的点击操作…';await post('/api/platform-sessions/action',{session_id:sessionId,type,start,end});setTimeout(poll,350)}
+    screen.draggable=false;
+    screen.addEventListener('dragstart',event=>event.preventDefault());
+    screen.addEventListener('pointerdown',event=>{if(!screen.classList.contains('interactive'))return;event.preventDefault();dragStart=point(event);moved=false;screen.setPointerCapture(event.pointerId);browser.classList.add('dragging')});
+    screen.addEventListener('pointermove',event=>{if(!dragStart)return;const current=point(event);if(Math.hypot(current.x-dragStart.x,current.y-dragStart.y)>5)moved=true});
+    screen.addEventListener('pointerup',event=>{if(!dragStart)return;event.preventDefault();const start=dragStart,end=point(event),type=moved?'drag':'click';dragStart=null;moved=false;browser.classList.remove('dragging');sendAction(type,start,end).catch(error=>statusNode.textContent=`操作失败：${error.message}`)});
+    screen.addEventListener('pointercancel',()=>{dragStart=null;moved=false;browser.classList.remove('dragging')});
+    function showImage(source,kind){empty.hidden=true;screen.src=source;screen.className=kind;screen.hidden=false}
+    async function poll(){clearTimeout(timer);if(stopped||!sessionId||!clientId)return;try{const state=await post('/api/platform-sessions/status',{session_id:sessionId});statusNode.textContent=state.message||'正在读取登录状态…';if(state.status==='connected'){screen.style.display='none';empty.hidden=false;empty.className='connected';empty.innerHTML='<strong>账号已连接</strong>可以关闭此页面并返回工作台。';return}if(['failed','stopped'].includes(state.status)){screen.style.display='none';empty.hidden=false;empty.className='empty';empty.textContent=state.message||'登录未完成，请返回工作台重新连接。';return}if(state.qr_data_url)showImage(state.qr_data_url,'qr');else if(state.preview_data_url)showImage(state.preview_data_url,'interactive');else{screen.style.display='none';empty.hidden=false;empty.className='empty';empty.textContent=state.message||'登录页正在加载…'}timer=setTimeout(poll,1000)}catch(error){statusNode.textContent=`连接暂时中断：${error.message}`;timer=setTimeout(poll,1800)}}
+    document.getElementById('refresh').onclick=()=>poll();
+    document.getElementById('close').onclick=()=>{window.close();statusNode.textContent='浏览器未允许自动关闭时，可直接关闭当前标签页。'};
+    if(!sessionId||!clientId){empty.textContent='登录链接不完整，请返回工作台重新点击连接平台。';statusNode.textContent='缺少会话信息'}else poll();
+  </script>
+</body>
+</html>

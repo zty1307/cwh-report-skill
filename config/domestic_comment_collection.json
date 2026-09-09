@@ -1,0 +1,39 @@
+{
+  "allowed_platforms": ["wb", "dy", "ks", "bili", "zhihu"],
+  "blocked_platforms": [
+    "xhs",
+    "xiaohongshu",
+    "tieba",
+    "x",
+    "twitter",
+    "youtube",
+    "reddit",
+    "tiktok",
+    "instagram",
+    "bluesky",
+    "threads",
+    "pinterest",
+    "truthsocial",
+    "grounding"
+  ],
+  "default_trial_platforms": ["wb", "bili"],
+  "platform_aliases": {
+    "weibo": "wb",
+    "微博": "wb",
+    "douyin": "dy",
+    "抖音": "dy",
+    "kuaishou": "ks",
+    "快手": "ks",
+    "bilibili": "bili",
+    "哔哩哔哩": "bili",
+    "b站": "bili",
+    "百度贴吧": "tieba",
+    "贴吧": "tieba",
+    "知乎": "zhihu"
+  },
+  "profiles": {
+    "trial": {"max_posts": 10, "max_comments_per_post": 20, "get_sub_comment": false},
+    "formal": {"max_posts": 20, "max_comments_per_post": 30, "get_sub_comment": false},
+    "deep": {"max_posts": 30, "max_comments_per_post": 50, "get_sub_comment": true}
+  }
+}
