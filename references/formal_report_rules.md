@@ -7,6 +7,8 @@ These rules are distilled from the mentor-provided formal reports:
 
 The formal report must follow this stable structure. Do not invent a new chapter layout unless the user explicitly asks for a non-formal analysis draft.
 
+The machine-readable source of truth is `config/formal_writing_rules.v1.json`. It captures cross-topic patterns rather than facts from one meeting. `scripts/normalize_cwh_analysis.py` assembles viewpoint paragraphs from verified atomic claims; the model does not improvise the final attribution, order or punctuation.
+
 ## Typography measured from both mentor reports
 
 - Title: `华文中宋`, 22 pt, bold, centered, no first-line indent.
@@ -48,15 +50,14 @@ Use these as stable sentence frames and replace only bracketed values:
 
 For domestic viewpoints, support both a single-cluster paragraph and a multi-cluster `一是、二是……` pattern. Use `建议、认可、肯定、认为、期待、希望` only when supported by the evidence cluster.
 
-For overseas coverage, first run an AI relevance review and exclude rows that only overlap with an agenda topic but do not report or interpret the meeting. Then classify eligible rows by the article body and write each non-empty category as its own numbered paragraph:
+For overseas coverage, first run an AI relevance review and exclude rows that only overlap with an agenda topic but do not report or interpret the meeting. Classify eligible rows by article body, then use the factual lead and a separate interpretive paragraph specified below. Do not number report categories:
 
 ```text
-一是事实性报道主要转述会议议程和相关工作部署。如……等。
-二是解读性报道主要围绕会议议题的政策影响展开分析。其中……。
-三是借题炒作及风险解读主要聚焦……。其中……。
-
-Do not force a missing category into the report. Negative wording, criticism or a crawler-supplied tag alone is not proof of `借题炒作/风险解读`.
+数据周期内，境外媒体以事实性报道为主。如{examples}等，少量解读如下：
+{reviewed_interpretive_prose}
 ```
+
+Use this factual lead only when supported by the reviewed category distribution. If there is no interpretation, use `，暂无评论性文章。` instead. Do not force a missing category into the report. Negative wording, criticism or a crawler-supplied tag alone is not proof of `借题炒作/风险解读`.
 
 ## 一、舆情传播情况
 
@@ -110,9 +111,9 @@ Organize by subtopic or stable viewpoint group. Use numbered top-level items:
 3.肯定……
 ```
 
-Before writing, build and audit the broadest practical accessible candidate pool from both the priority source registry and unrestricted open-web discovery. The registry is not an allowlist. Search authoritative/mainstream, finance/industry/expert, university/think-tank and public-platform/self-media routes separately. Toutiao, WeChat and Baijiahao are all mandatory public-platform routes. A generic web-search miss is not proof that a platform contains no relevant sample; only an executed platform-specific/site-restricted query may produce `no_relevant_result`, otherwise record the access blocker. After the first pass, expand every useful named expert, institution and account with a name-plus-topic query. Keep every discovered result with an inclusion, duplicate or exclusion decision; do not stop after obtaining two usable sources.
+Before writing, build an audited candidate pool from the priority source registry and open-web discovery. The registry is not an allowlist. Follow the selected profile in `research_plan.json`: `bounded_60m` uses grouped lanes, at most 10 queries and 24 full-page fetches per topic, and stops after lane coverage plus one zero-new round or budget exhaustion; `exhaustive` searches individual required sources and requires two zero-new rounds. Keep a decision for every result actually reviewed within scope.
 
-Stop only after both open-web and public-platform routes are completed or honestly blocked and two consecutive search rounds add no material high-relevance independent viewpoint. Each round must retain the exact query, backend, execution time, result count, result URL snapshot and retained candidate IDs. A round label such as `general_open_search`、`专家定向检索` or a model-written zero count is not proof of saturation. Every candidate must point back to one saved query result. Cluster the complete eligible pool first. Every eligible independent sample must map to an existing viewpoint or create a new viewpoint, and the complete mapped set must appear both in the dashboard and in formal prose; no per-cluster upper cap applies. Exact mirrors, reposts and other non-independent pages use `decision=duplicate` and remain in structured research audit only. They do not become extra voices, formal sentences, dashboard cards or displayed sample counts.
+In bounded mode, select the strongest 6-12 independent voices per topic across 2-4 clusters and cap formal prose at 12 voices. Keep additional valid candidates as `formal_use=reserve` with `reserve_reason`; they stay auditable but do not lengthen the report. In exhaustive mode, map every eligible independent voice into prose. Exact mirrors remain duplicate audit records.
 
 Every top-level item must begin with an evidence-supported stance or action verb such as `建议、认可、肯定、认为、期待、希望、支持、呼吁、质疑、担忧`. Remove empty wrappers such as `舆论关注` and do not copy a cluster summary as the heading when it lacks a stance. If a topic genuinely has only factual reporting after research, use the explicit exception `监测期内尚未形成评论性观点` and do not present the factual digest as a viewpoint.
 
@@ -131,7 +132,8 @@ Every claim should include evidence sources such as experts, media, institutions
 Avoid unsupported generic wording such as `媒体普遍认为` unless evidence is cited.
 Formal Markdown and Word must not append `样本来源：……`、`公开网络补证`、`原始报道汇总` or any link-list paragraph after a viewpoint. Put the verified original link on the corresponding dashboard evidence card and keep source metadata in structured audit data. Formal body prose consists only of concrete attributed claims.
 Write every independent voice as `完整机构/职务/姓名+认为/指出/建议+具体观点`; when no named person is available, write `媒体/平台/自媒体账号全名+认为/指出/建议+具体观点`. Prohibit vague aggregation such as `报道汇集刘某、伍某、严某等对……的分析` or `多家媒体关注……`; split genuinely distinct speakers into separate attributed sentences. If several URLs reproduce the same speaker and same claim, render that claim once and keep the other URLs as duplicate audit records.
-For a mature multi-source cluster, include all eligible independent voices; two voices remain the maturity floor, not an output target, and there is no four-voice ceiling. Each voice normally receives a complete 45-120-character attributed explanation, so total cluster length grows with the evidence set. A substantive agenda normally yields 2-4 mature clusters; a one-cluster topic needs a structured exception proving that the complete eligible pool contains only one material viewpoint family. A cluster below two voices or without a complete claim for every mapped sample needs a traceable thin-cluster exception. Do not compress several sources into an anonymous one-sentence policy summary. Do not inflate page count with repeated wording; the additional length must come from distinct evidence and argument layers. Page count is an outcome of evidence density: compare section characters, viewpoint-cluster count, independent voices and traceable comment-group coverage before changing typography or margins. A benchmark page total is never an acceptance target by itself, and an exhausted traceable-comment search must be reported rather than filled with unverifiable benchmark quotations.
+For a mature multi-source cluster, normally use 2-4 selected independent voices. Each voice receives one complete 45-120-character attributed claim. A substantive agenda normally yields 2-4 clusters; one-cluster and thin-cluster cases need traceable exceptions. Do not compress several sources into an anonymous summary or inflate page count with repeated wording.
+The shared executable density gate requires two distinct speaking subjects and at least 120 Chinese characters, or a `thin_cluster_exception` containing non-empty `reason`, `search_evidence` and `reviewed_by`. Both draft validation and final auditing use this rule. The exception is retained in the audit and does not waive the minimum quality of each claim, original-source mapping or independent semantic review. Repeated URLs, repeated speakers and repeated attribution verbs do not increase independent-voice count.
 Bold each `一是/二是……` conclusion and the named source plus attribution verb (`某专家认为`、`某媒体报道称`、`微信公众号“某某”称`).
 
 Apply the following source and wording rules to every meeting:
@@ -154,7 +156,7 @@ Lead sentence:
 
 Then group representative raw comments:
 
-Search all workbook topics before selection. Do not stop after one topic supplies several usable quotations, and do not use a fixed target number of topics or quotes. Preserve a topic-by-platform matrix with status, execution mode, query or reviewed seed URL, result count, eligible comment IDs, exclusions and blockers. A global platform status cannot stand in for every topic, and an article-search hit cannot stand in for a comment-interface result. Formal prose includes only topics with traceable substantive comments; missing topics remain an explicit collection result, not AI-filled prose.
+Search all workbook topics before selection. In `bounded_60m`, use the configured limit of six query executions and 30 retained candidates per topic, then select 2-3 traceable comments for each ready topic. `exhaustive` may continue to saturation. Preserve a topic-by-platform matrix with exclusions and blockers. Formal prose includes only topics with traceable substantive comments.
 
 ```text
 一是认可……并期待……。网民称，“……”“……”。

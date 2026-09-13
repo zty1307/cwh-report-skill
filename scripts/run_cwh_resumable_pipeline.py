@@ -23,6 +23,9 @@ from domestic_evidence_mapping import (
     validate_analysis_mapping,
     validate_release_mapping,
 )
+from cwh_model_contract import build_task_payload, execution_profile, stage_budget_seconds
+from normalize_cwh_analysis import normalize_analysis
+from cwh_viewpoint_gate import cluster_density_result
 from report_rules import domestic_viewpoint_quality_issues
 
 
@@ -37,6 +40,11 @@ VALID_DOMESTIC_DISCOVERY_ORIGINS = {
     "open_web",
     "public_platform_web",
 }
+DOMESTIC_SATURATION_STOPS = {
+    "two_consecutive_rounds_no_material_new_independent_viewpoint": 2,
+    "coverage_minimum_then_one_zero_new_round_or_budget_exhausted": 1,
+}
+# Backward-compatible name for imported validators and legacy audit fixtures.
 DOMESTIC_SATURATION_STOP = "two_consecutive_rounds_no_material_new_independent_viewpoint"
 
 
@@ -171,20 +179,18 @@ def ai_task(
     expected_output: Path,
     inputs: dict[str, Any],
     rules: list[str],
+    output_schema: dict[str, Any] | None = None,
 ) -> Path:
     path = runner.root / "tasks" / f"{stage_id}.json"
-    payload = {
-        "schema_version": 1,
-        "task_type": task_type,
-        "stage_id": stage_id,
-        "expected_output": str(expected_output),
-        "inputs": inputs,
-        "rules": rules,
-        "completion_contract": (
-            "Write the requested structured artifact to expected_output, then rerun this pipeline. "
-            "Do not mark the stage complete manually; the deterministic validator decides."
-        ),
-    }
+    payload = build_task_payload(
+        stage_id=stage_id,
+        task_type=task_type,
+        expected_output=expected_output,
+        inputs=inputs,
+        rules=rules,
+        profile_name=str(runner.input_contract.get("execution_profile") or ""),
+        output_schema=output_schema,
+    )
     atomic_write_json(path, payload)
     return path
 
@@ -210,7 +216,8 @@ def maybe_run_ai_worker(
         )
         for item in template
     ]
-    code, log_path = runner.run_command(spec.stage_id, command, cwd=runner.root, timeout_seconds=None)
+    timeout = stage_budget_seconds(spec.stage_id, str(runner.input_contract.get("execution_profile") or ""))
+    code, log_path = runner.run_command(spec.stage_id, command, cwd=runner.root, timeout_seconds=timeout)
     if code != 0:
         return StageOutcome.failed(
             f"AI工作器退出码为{code}，详见{log_path}",
@@ -236,12 +243,17 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
     by_topic = ((data.get("viewpoints") or {}).get("by_topic") or [])
     rows = {str(item.get("topic") or "").strip(): item for item in by_topic}
     registry = read_json(SOURCE_REGISTRY_PATH)
-    required_sources = {
+    registry_required_sources = {
         str(row.get("id"))
         for row in registry.get("sources") or []
         if row.get("must_check") and row.get("region") == "domestic" and row.get("tier") != "comment_platform"
     }
     research = ((data.get("research_audit") or {}).get("domestic_media_research") or {})
+    required_sources = {
+        str(value).strip()
+        for value in research.get("required_source_ids") or registry_required_sources
+        if str(value).strip()
+    }
     public_corpus_path = path.parent / "public_article_evidence.json"
     public_corpus_ids: set[str] = set()
     public_corpus_ids_by_topic: dict[str, set[str]] = {}
@@ -381,6 +393,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                     problems.append(f"{topic}{source.get('name') or source_id}登录等待缺少断点或恢复动作")
         eligible_candidates: dict[str, dict[str, Any]] = {}
         eligible_cluster_keys: set[str] = set()
+        bounded_profile = False
         if not pool:
             problems.append(f"{topic}缺少全网候选池及饱和检索审计")
         else:
@@ -463,10 +476,17 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             query_executions: dict[str, dict[str, Any]] = {}
             if saturation.get("completed") is not True:
                 problems.append(f"{topic}尚未完成候选池饱和检索")
-            if str(saturation.get("stop_reason") or "") != DOMESTIC_SATURATION_STOP:
-                problems.append(f"{topic}候选池没有按连续两轮无新增独立观点的规则停止")
-            if len(rounds) < 2 or any(int(row.get("new_independent_viewpoints") or 0) != 0 for row in rounds[-2:]):
-                problems.append(f"{topic}缺少连续两轮无新增高相关独立观点的检索记录")
+            stop_reason = str(saturation.get("stop_reason") or "")
+            bounded_profile = stop_reason == "coverage_minimum_then_one_zero_new_round_or_budget_exhausted"
+            required_zero_rounds = DOMESTIC_SATURATION_STOPS.get(stop_reason)
+            if required_zero_rounds is None:
+                problems.append(f"{topic}候选池没有按受支持的检索停止规则结束")
+                required_zero_rounds = 2
+            if len(rounds) < required_zero_rounds or any(
+                int(row.get("new_independent_viewpoints") or 0) != 0
+                for row in rounds[-required_zero_rounds:]
+            ):
+                problems.append(f"{topic}缺少{required_zero_rounds}轮无新增高相关独立观点的检索记录")
             for round_index, round_row in enumerate(rounds, 1):
                 executions = [row for row in round_row.get("executions") or [] if isinstance(row, dict)]
                 if not executions:
@@ -575,14 +595,9 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             if not str(cluster.get("details") or "").strip():
                 problems.append(f"{topic}第{index}个观点簇没有成文说明")
             details_text = str(cluster.get("details") or cluster.get("analysis") or "")
-            detail_length = len(re.findall(r"[\u4e00-\u9fff]", str(cluster.get("details") or "")))
-            thin_exception = cluster.get("thin_cluster_exception") or {}
-            if len(evidence) < 2 or detail_length < 120:
-                if not all(str(thin_exception.get(field) or "").strip() for field in ("reason", "search_evidence", "reviewed_by")):
-                    problems.append(
-                        f"{topic}第{index}个观点簇仅{len(evidence)}个独立声音、{detail_length}个汉字，"
-                        "未达到成文密度且缺少thin_cluster_exception"
-                    )
+            density = cluster_density_result(cluster)
+            if not density["passed"]:
+                problems.append(f"{topic}第{index}个观点簇{density['message']}")
             for evidence_index, evidence_row in enumerate(evidence, 1):
                 candidate_id = str(evidence_row.get("candidate_id") or "").strip()
                 if candidate_id:
@@ -625,12 +640,32 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                     problems.append(
                         f"{topic}第{index}个观点簇的成文说明未写入候选{candidate_id or evidence_index}的具体人物、媒体或账号主体"
                     )
-        missing_formal_candidates = sorted(set(eligible_candidates) - formal_candidate_ids)
+        reserve_candidates = {
+            candidate_id
+            for candidate_id, candidate in eligible_candidates.items()
+            if str(candidate.get("formal_use") or "").strip().lower() == "reserve"
+        }
+        if reserve_candidates and not bounded_profile:
+            problems.append(f"{topic}仅bounded_60m允许使用formal_use=reserve")
+        for candidate_id in sorted(reserve_candidates):
+            if not str(eligible_candidates[candidate_id].get("reserve_reason") or "").strip():
+                problems.append(f"{topic}候选{candidate_id}标记为reserve但缺少reserve_reason")
+        missing_formal_candidates = sorted(set(eligible_candidates) - formal_candidate_ids - reserve_candidates)
         if missing_formal_candidates:
             problems.append(
                 f"{topic}仍有{len(missing_formal_candidates)}条合格独立样本未归入正式观点和正文："
                 + "、".join(missing_formal_candidates[:12])
             )
+        if bounded_profile:
+            if len(formal_candidate_ids) > 12:
+                problems.append(f"{topic}bounded_60m正式声音{len(formal_candidate_ids)}条，超过12条硬上限")
+            if len(formal_candidate_ids) < 4:
+                shortfall = item.get("evidence_shortfall") or {}
+                if not all(str(shortfall.get(field) or "").strip() for field in ("reason", "search_evidence", "reviewed_by")):
+                    problems.append(
+                        f"{topic}bounded_60m正式声音仅{len(formal_candidate_ids)}条，"
+                        "低于4条且缺少evidence_shortfall审计"
+                    )
     for issue in domestic_viewpoint_quality_issues(data):
         if issue.get("severity") == "error":
             problems.append(str(issue.get("message") or issue.get("code") or "境内观点质量错误"))
@@ -801,7 +836,8 @@ def validate_foreign(audit_path: Path, supplements_path: Path) -> list[str]:
 
 def build_specs() -> list[StageSpec]:
     return [
-        StageSpec("intake", "输入识别与契约固化", artifacts=(ArtifactSpec("intake", "artifacts/intake.json"),), max_attempts=1),
+        StageSpec("preflight", "运行环境与Skill完整性预检", artifacts=(ArtifactSpec("preflight", "artifacts/preflight.json"),), max_attempts=1),
+        StageSpec("intake", "输入识别与契约固化", dependencies=("preflight",), artifacts=(ArtifactSpec("intake", "artifacts/intake.json"),), max_attempts=1),
         StageSpec(
             "workbook",
             "标准总表生成与审核",
@@ -875,6 +911,8 @@ def build_specs() -> list[StageSpec]:
                 ArtifactSpec("report_data", "report/report_data.json"),
                 ArtifactSpec("word", "report/cwh_formal_report.docx", minimum_bytes=1024),
                 ArtifactSpec("dashboard", "report/cwh_dashboard.html", minimum_bytes=1024),
+                ArtifactSpec("data_workbook", "report/cwh_data_workbook.xlsx", minimum_bytes=1024),
+                ArtifactSpec("cwh_audit", "report/cwh_audit.json"),
             ),
             max_attempts=2,
         ),
@@ -882,8 +920,12 @@ def build_specs() -> list[StageSpec]:
             "delivery_gate",
             "成品一致性与正式交付门禁",
             dependencies=("render",),
-            artifacts=(ArtifactSpec("delivery_audit", "artifacts/delivery_gate.json"),),
-            max_attempts=1,
+            artifacts=(
+                ArtifactSpec("delivery_audit", "artifacts/delivery_gate.json"),
+                ArtifactSpec("release_mapping_audit", "report/domestic_evidence_mapping_audit.json"),
+                ArtifactSpec("cwh_audit", "report/cwh_audit.json"),
+            ),
+            max_attempts=2,
         ),
     ]
 
@@ -898,6 +940,7 @@ class CwhPipeline:
         for directory in (self.artifacts, self.tasks, self.report):
             directory.mkdir(parents=True, exist_ok=True)
         executors = {
+            "preflight": self.preflight,
             "intake": self.intake,
             "workbook": self.workbook,
             "research_plan": self.research_plan,
@@ -916,6 +959,32 @@ class CwhPipeline:
             pipeline_name="cwh-formal-report",
             input_contract=contract,
         )
+
+    def preflight(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
+        target = self.artifacts / "preflight.json"
+        command = [
+            sys.executable,
+            str(SCRIPT_DIR / "cwh_preflight.py"),
+            "--skill-root",
+            str(SKILL_ROOT),
+            "--output",
+            str(target),
+        ]
+        code, log_path = runner.run_command(
+            spec.stage_id,
+            command,
+            cwd=SKILL_ROOT,
+            timeout_seconds=stage_budget_seconds("preflight", str(self.contract.get("execution_profile") or "")),
+        )
+        if code != 0:
+            payload = read_json(target) if target.exists() else {}
+            repair = str(payload.get("repair_command") or "")
+            return StageOutcome.failed(
+                "运行环境预检未通过" + (f"；建议执行：{repair}" if repair else ""),
+                error_code="preflight_failed",
+                details={"log_path": str(log_path), "preflight": str(target), "problems": payload.get("problems") or []},
+            )
+        return StageOutcome.succeeded("运行依赖与Skill关键文件预检通过。", details={"log_path": str(log_path)})
 
     def intake(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
         agenda = str(self.contract.get("agenda") or "").strip()
@@ -1020,7 +1089,14 @@ class CwhPipeline:
                 spec.stage_id,
                 task_type="raw_workbook_semantic_reviews",
                 expected_output=hotword_review,
-                inputs={key: str(value) for key, value in packets.items() if value.exists()},
+                inputs={
+                    **{key: str(value) for key, value in packets.items() if value.exists()},
+                    "expected_outputs": {
+                        "hotword_ai_review": str(hotword_review),
+                        "overseas_ai_review": str(overseas_review),
+                        "public_top_ai_review": str(public_review),
+                    },
+                },
                 rules=[
                     "分别完成热词语义审核、境外报道逐条相关性审核，以及公众文章TOP临界候选全文审核。",
                     "境外审核必须覆盖全部候选；热词审核必须保留证据并完成二次自审。",
@@ -1058,6 +1134,8 @@ class CwhPipeline:
             str(self.contract.get("agenda") or ""),
             "--output",
             str(target),
+            "--execution-profile",
+            str(self.contract.get("execution_profile") or "bounded_60m"),
         ]
         code, log_path = runner.run_command(spec.stage_id, command, cwd=SKILL_ROOT.parent)
         if code != 0:
@@ -1076,6 +1154,8 @@ class CwhPipeline:
         supplied = str(self.contract.get("analysis_bundle") or "").strip()
         if supplied and not target.exists():
             shutil.copy2(supplied, target)
+        if target.exists():
+            atomic_write_json(target, normalize_analysis(read_json(target)))
         topics = topic_titles(self.artifacts / "CWH舆情情况_标准总表.xlsx")
         problems = (
             validate_analysis_bundle(target, topics, require_semantic_review=False)
@@ -1094,6 +1174,9 @@ class CwhPipeline:
                 "existing_output": str(target) if target.exists() else "",
                 "validation_problems": problems,
                 "source_registry": str(SOURCE_REGISTRY_PATH),
+                "execution_policy": str(SKILL_ROOT / "config" / "execution_policy.v1.json"),
+                "formal_writing_rules": str(SKILL_ROOT / "config" / "formal_writing_rules.v1.json"),
+                "analysis_schema": str(SKILL_ROOT / "references" / "analysis_bundle_schema.md"),
                 "public_article_evidence": (
                     str(self.artifacts / "public_article_evidence.json")
                     if (self.artifacts / "public_article_evidence.json").exists()
@@ -1101,41 +1184,23 @@ class CwhPipeline:
                 ),
             },
             rules=[
-                "若存在public_article_evidence，必须先逐议题检索该原始监测全文证据池；它不受公众TOP10排名限制，每条候选均须进入候选池或记录明确排除理由。",
-                "同一篇文章出现的多名专家、机构和账号观点要分别抽取并回到原文核对，不能只保留标题主体或第一位受访者。",
-                "按每个系统子议题独立检索境内媒体、专家和自媒体观点，不设置结果条数上限；稳定来源库只是优先种子，不是白名单。",
-                "必须先逐项执行稳定来源库并形成覆盖矩阵，再用不受来源名单限制的开放检索扩展全网候选池；命中、无结果和访问失败都要真实留痕。",
-                "候选池保留每个发现结果及eligible、duplicate或excluded决定和理由；不得只保存拟写入正文的两三条证据。",
-                "合格候选必须从原始页面或原始监测表逐条复核发布时间，保存published_at_source_text并设置published_at_verified_from_source=true；超出监测期的文章即使内容优质也必须排除。",
-                "每个候选必须记录discovery_query_id、first_seen_round和viewpoint_cluster_key；每轮必须保存具体查询串、后端、执行时间、结果URL快照及保留的候选ID。只写“通用检索”或自报零新增无效。",
-                "开放检索按不同查询和来源轮次继续，只有连续两轮没有新增高相关独立观点时才能停止，并逐轮记录新增候选数和新增独立观点数；查询执行证据必须能反向核验候选池。",
-                "今日头条/头条号、微信公众号和百家号均为必查公开平台，必须分别执行平台定向或site限定查询；不能因通用检索未返回就视为已覆盖。",
-                "先运行scripts/run_cwh_public_platform_research.py：微信公众号使用微信读书搜一搜发现原文链接，百家号使用百度可视浏览器；两者必须与今日头条分别保存逐议题查询和结果快照。",
-                "微信读书或百家号遇到扫码、验证码时写waiting_login、terminal=false、截图/断点和恢复动作，继续全部免登录/系统/开放检索兜底；不得把waiting_login当成整个报告流程的终点。",
-                "基准报告中的历史账号是平台召回评估样本，不是永久必查账号；应按平台统计基准数量、候选召回和失败原因，用重复漏召回识别平台适配器缺口。",
-                "首轮发现具名专家、机构或账号后，继续执行“名称+议题”实体扩展检索；同时补查高校智库、行业协会和券商研报路线。",
-                "排除单纯通稿、合集、广告、弱相关稿和镜像重复稿；保留原始链接与原文证据。",
-                "从完整合格候选池聚类；每条eligible独立样本必须归入现有观点簇或形成新观点簇，并逐条进入工作台和正式报告，不设2条或4条上限。转载镜像保留为duplicate审计记录，不进入正文、可见卡片或样本数。",
-                "正式正文只写具体归因观点：具名时写完整机构、职务、姓名和观点；未具名时写具体媒体、平台或自媒体账号和观点。禁止样本来源清单、公开网络补证、报道汇集某某等泛化表述。",
-                "同一发言主体的同一实质观点即使有多个转载链接也只成文和展示一次；其他链接仅保留在审计数据中。",
-                "每个发言主体通常写45至120个汉字的完整归因观点；观点簇总字数随合格样本数量增长，不设总字数上限。2条只是成熟度下限，绝不是检索或成文停止点。",
-                "每个实质性子议题通常形成2至4个成熟观点簇。仅有1个观点簇时必须提供single_cluster_exception；单簇不足2个声音或120个汉字时必须提供thin_cluster_exception，且异常说明要引用实际检索证据。",
-                "同一子议题内同一专家或媒体通常只出现一次；保留完整机构、职务和姓名。",
-                "每个发言主体单独审核和成文。单个归因观点通常保留45至120个汉字，少于30个汉字必须回原文补足理由、机制、条件或例证，否则删除该声音。",
-                "metadata.evidence_mapping_version必须为1.0。每条eligible候选必须保存source_snapshot，包括snapshot_id、原始URL、文章标题、采集时间、采集方式、完整连续正文source_text及其SHA-256。搜索摘要不能冒充页面正文快照。",
-                "每条成文证据必须有唯一evidence_id，使用source_snapshot_id和candidate_id反查原文；article_title、url必须与候选和快照一致。named_person、media_voice、self_media均须单独填写speaker_name，具名专家另保留speaker_role。",
-                "source_excerpt必须是source_snapshot.source_text中的连续原文，并保存source_excerpt_start/source_excerpt_end字符位置；发言主体必须出现在该片段中。不得把分散段落或多个发言人的句子拼成一段原文。",
-                "本节点只完成候选、原文快照、逐人观点和精确位置映射，不得自行填写semantic_review；下一独立节点使用另一run_id逐命题复核。",
-                "正式观点不得增加原文片段没有的数字、专名、因果、程度、预测或政策效果。脚本负责哈希、位置、标题、主体、数字、专名和成品反查；AI负责逐命题语义蕴含审核。",
-                "同一观点的formal_claim必须逐字进入所属观点簇details；最终Word、HTML和report_data必须保留同一evidence_id映射，否则发布门禁失败。",
-                "AI只做语义相关性、归因和观点聚类，流程顺序与字段完整性由本管线校验。",
+                "严格读取research_plan、execution_policy和analysis_schema；按其中议题、通道、查询/抓取上限、停止规则执行，不得自行扩大范围。",
+                "若有public_article_evidence，先逐议题审核该监测全文池；公众TOP10不是观点证据上限。",
+                "每个实际检索结果都进入候选池并标记eligible、duplicate或excluded及理由；保存查询ID、结果URL快照和真实阻断。",
+                "eligible候选须核验监测期内发布时间并保存完整原文快照及SHA-256；搜索摘要不能冒充原文。",
+                "一篇文章中的不同发言主体分成独立证据；同一主体同一观点的转载只保留一个正式候选。",
+                "每条入选证据保留candidate_id、evidence_id、单一speaker_name、连续source_excerpt及字符位置、45至120汉字的formal_claim；不得增强原文结论。",
+                "bounded_60m每议题选择6至12个、最多12个代表性独立声音，其余有效候选设formal_use=reserve并写reserve_reason；不足4个时须写含reason、search_evidence、reviewed_by的evidence_shortfall。exhaustive才全部成文。",
+                "本节点不填写semantic_review，也不写最终正文；脚本将从formal_claim机械生成cluster.details，独立下一节点再逐命题复核。",
+                "只有证据不足或平台真实受阻时才返回结构化blocker；不得编造链接、引文、人物、ID、快照或状态。",
             ],
         )
         worker_failure = maybe_run_ai_worker(runner, spec, task, target)
         if worker_failure:
             return worker_failure
         if target.exists():
-            problems = validate_analysis_bundle(target, topics)
+            atomic_write_json(target, normalize_analysis(read_json(target)))
+            problems = validate_analysis_bundle(target, topics, require_semantic_review=False)
             if not problems:
                 return StageOutcome.succeeded("AI工作器输出已通过境内观点证据门禁。")
             return StageOutcome.failed(
@@ -1485,11 +1550,22 @@ class CwhPipeline:
                 artifacts={"delivery_audit": str(target)},
                 details={"problems": payload["problems"]},
             )
-        return StageOutcome.succeeded("全部成品与质量门禁通过，可以归档交付。")
+        return StageOutcome.succeeded(
+            "全部成品与质量门禁通过，可以归档交付。",
+            artifacts={
+                "delivery_audit": str(target),
+                "release_mapping_audit": str(self.report / "domestic_evidence_mapping_audit.json"),
+                "cwh_audit": str(audit_path),
+            },
+        )
 
 
 def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    profile_name, profile = execution_profile(str(args.execution_profile or ""))
     return {
+        "execution_profile": profile_name,
+        "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
+        "stage_timeouts_seconds": dict(profile.get("stage_budgets_seconds") or {}),
         "agenda": str(args.agenda or "").strip(),
         "system_workbook": str(Path(args.system_workbook).resolve()) if args.system_workbook else "",
         "raw_input_dir": str(Path(args.raw_input_dir).resolve()) if args.raw_input_dir else "",
@@ -1665,6 +1741,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--foreign-collection-audit", default="")
     result.add_argument("--hotword-audit", default="")
     result.add_argument("--ai-worker-command-json", default=os.environ.get("CWH_PIPELINE_AI_COMMAND_JSON", ""))
+    result.add_argument(
+        "--execution-profile",
+        choices=["bounded_60m", "exhaustive"],
+        default="bounded_60m",
+        help="Default bounded_60m enforces the one-hour execution contract; exhaustive removes time caps.",
+    )
     result.add_argument("--until-stage", default="")
     result.add_argument("--invalidate-from", default="")
     result.add_argument("--no-open", action="store_true", help="Do not launch the local workbench after success.")

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ingest_monitoring_workbook import ingest_workbook
+from cwh_model_contract import WRITING_RULES_PATH, execution_profile
 
 
 SOURCE_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "config" / "source_registry.v1.json"
@@ -15,7 +16,13 @@ def load_source_registry() -> dict[str, Any]:
     return json.loads(SOURCE_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
 
 
-def stable_source_tasks(topic: str, meeting_date: str, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def stable_source_tasks(
+    topic: str,
+    meeting_date: str,
+    sources: list[dict[str, Any]],
+    *,
+    profile_name: str = "exhaustive",
+) -> list[dict[str, Any]]:
     subject = clean_topic(topic)
     tasks = []
     for source in sources:
@@ -57,7 +64,48 @@ def stable_source_tasks(topic: str, meeting_date: str, sources: list[dict[str, A
                 "waiting_login_terminal": bool(source.get("waiting_login_terminal", False)),
             }
         )
-    return tasks
+    if profile_name == "exhaustive":
+        return tasks
+
+    # The bounded profile searches source lanes rather than forcing a weak
+    # model to execute and transcribe dozens of near-identical per-site tasks.
+    # Public platforms stay separate because their adapters and blocker states
+    # are different. Every constituent registry source remains visible in the
+    # lane metadata for audit and later exhaustive expansion.
+    grouped: list[dict[str, Any]] = []
+    for lane_id, tiers in (
+        ("lane_authoritative", {"authoritative"}),
+        ("lane_mainstream", {"mainstream"}),
+        ("lane_industry_expert", {"finance_industry"}),
+    ):
+        members = [row for row in sources if row.get("must_check") and row.get("tier") in tiers]
+        domains = sorted({domain for row in members for domain in row.get("domains") or [] if domain})
+        domain_query = " OR ".join(f"site:{domain}" for domain in domains)
+        grouped.append(
+            {
+                "source_id": lane_id,
+                "source_name": lane_id.removeprefix("lane_").replace("_", "/"),
+                "source_ids": [str(row.get("id")) for row in members],
+                "region": "domestic",
+                "tier": lane_id.removeprefix("lane_"),
+                "must_check": True,
+                "query": f"({domain_query}) {meeting_date} 国务院常务会议 {subject}",
+                "query_families": [f"({domain_query}) {meeting_date} 国务院常务会议 {subject}"],
+                "execution_mode": "site_restricted_search",
+                "lane": lane_id.removeprefix("lane_"),
+                "bounded": True,
+            }
+        )
+    grouped.extend(
+        {
+            **row,
+            "query_families": list(row.get("query_families") or [])[:1],
+            "bounded": True,
+        }
+        for row in tasks
+        if row.get("source_id") in {"toutiao_articles", "wechat_public", "baijiahao"}
+    )
+    return grouped
 
 
 def clean_topic(value: str) -> str:
@@ -104,8 +152,12 @@ def research_queries(topic: str, meeting_date: str) -> dict[str, list[str]]:
     }
 
 
-def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
+def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str = "") -> dict[str, Any]:
     system_data = ingest_workbook(workbook_path)
+    profile_name, profile = execution_profile(execution_profile_name)
+    research_policy = profile.get("research") or {}
+    comments_policy = profile.get("comments") or {}
+    overseas_policy = profile.get("overseas") or {}
     registry = load_source_registry()
     sources = registry.get("sources") or []
     paused_platforms = {
@@ -117,8 +169,20 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
     period = system_data.get("monitoring_period") or {}
     meeting_date = str(period.get("start") or "")
     topics = [str(item.get("title") or "").strip() for item in system_data.get("topics") or []]
+    bounded = profile_name == "bounded_60m"
+    zero_rounds = int(research_policy.get("required_zero_new_rounds") or 2)
+    stop_rule = str(research_policy.get("stop_rule") or "two_consecutive_rounds_no_material_new_independent_viewpoint")
     return {
-        "version": "2.0",
+        "version": "3.0",
+        "execution_profile": profile_name,
+        "execution_budget": {
+            "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
+            "parallel_lanes": bool(research_policy.get("parallel_lanes")),
+            "max_query_executions_per_topic": int(research_policy.get("max_query_executions_per_topic") or 0),
+            "max_results_per_query": int(research_policy.get("max_results_per_query") or 0),
+            "max_full_page_fetches_per_topic": int(research_policy.get("max_full_page_fetches_per_topic") or 0),
+        },
+        "formal_writing_rules": str(WRITING_RULES_PATH),
         "input_contract": {
             "user_inputs": ["meeting_agenda_or_date", "monitoring_system_workbook"],
             "agenda": agenda,
@@ -129,11 +193,20 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
             {
                 "topic": topic,
                 "queries": research_queries(topic, meeting_date),
-                "stable_source_tasks": stable_source_tasks(topic, meeting_date, sources),
+                "stable_source_tasks": stable_source_tasks(
+                    topic,
+                    meeting_date,
+                    sources,
+                    profile_name=profile_name,
+                ),
                 "minimum_evidence": {
                     "fixed_result_target": None,
-                    "stop_rule": "candidate_pool_saturation_not_item_count",
-                    "formal_sources_per_mature_cluster": "all_eligible_independent_samples_no_upper_cap",
+                    "stop_rule": stop_rule,
+                    "formal_sources_per_mature_cluster": (
+                        "bounded_selected_eligible_with_audited_reserve"
+                        if bounded
+                        else "all_eligible_independent_samples_no_upper_cap"
+                    ),
                     "viewpoint_clusters": "evidence_driven_normally_2_to_6",
                     "traceable_public_comments": 0,
                 },
@@ -158,8 +231,8 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
                         "decision_reason",
                     ],
                     "saturation_rule": {
-                        "stop_reason": "two_consecutive_rounds_no_material_new_independent_viewpoint",
-                        "required_zero_new_rounds": 2,
+                        "stop_reason": stop_rule,
+                        "required_zero_new_rounds": zero_rounds,
                         "required_route_coverage": ["open_web", "public_platform"],
                         "platform_empty_result_rule": "Only a platform-specific executed query may conclude no_relevant_result; a generic web-search miss is not a platform result.",
                         "round_fields": [
@@ -188,11 +261,12 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
                         ),
                     },
                     "formal_selection_rule": (
-                        "Cluster the complete eligible pool first. Every eligible independent sample must be assigned to "
-                        "an existing viewpoint cluster or create a new cluster, and every assigned sample must enter both "
-                        "the dashboard and formal prose. Exact mirrors remain duplicate audit records and never become "
-                        "visible cards, formal sentences or independent voices; keep the decision reason on every row."
+                        "Select the strongest independent voices across distinct viewpoint families for formal prose. "
+                        "In bounded_60m, retain additional valid candidates as decision=eligible, formal_use=reserve with "
+                        "a reserve_reason; reserve rows stay in audit and do not expand prose. In exhaustive mode every "
+                        "eligible row enters formal prose. Exact mirrors remain duplicate audit records."
                     ),
+                    "max_formal_voices_per_topic": int(research_policy.get("max_formal_voices_per_topic") or 0),
                 },
                 "domestic_viewpoint_contract": {
                     "distinct_voice_per_cluster": True,
@@ -210,7 +284,9 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
                     ],
                     "topic_density": {
                         "normal_mature_clusters": [2, 4],
-                        "independent_voices_per_cluster": "all_eligible_no_upper_cap",
+                        "independent_voices_per_cluster": (
+                            "bounded_2_to_4_with_audited_reserve" if bounded else "all_eligible_no_upper_cap"
+                        ),
                         "preferred_claim_cjk_range_per_voice": [45, 120],
                         "cluster_detail_length": "scales_with_eligible_voice_count_no_upper_cap",
                         "single_cluster_rule": (
@@ -236,12 +312,26 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
             },
             "public_comments": {
                 "target_topics": "all_workbook_topics",
-                "target_quotes": None,
+                "target_quotes": (
+                    [
+                        int(comments_policy.get("minimum_selected_comments_per_ready_topic") or 2),
+                        int(comments_policy.get("max_selected_comments_per_topic") or 3),
+                    ]
+                    if bounded
+                    else None
+                ),
                 "fixed_result_target": None,
-                "stop_rule": "per_topic_platform_coverage_and_saturation_not_quote_count",
+                "max_query_executions_per_topic": int(comments_policy.get("max_query_executions_per_topic") or 0),
+                "max_retained_candidates_per_topic": int(comments_policy.get("max_retained_candidates_per_topic") or 0),
+                "stop_rule": (
+                    "platform_coverage_then_budget_or_saturation"
+                    if bounded
+                    else "per_topic_platform_coverage_and_saturation_not_quote_count"
+                ),
                 "rule": (
                     "Search every workbook topic through every currently permitted comment adapter and topic-specific query family. "
-                    "Retain the complete accessible candidate pool and stop by saturation or a recorded platform blocker, never after a fixed quote count. "
+                    "In bounded_60m, obey the query and candidate caps while preserving every reviewed row inside those caps; "
+                    "in exhaustive mode retain the complete accessible candidate pool. Stop by saturation, budget, or a recorded platform blocker. "
                     "Only verbatim text with an original platform URL and comment identifier may be quoted; otherwise preserve an unquoted public-discussion summary."
                 ),
                 "audit_granularity": "topic_by_platform",
@@ -261,8 +351,14 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
                     "platforms": foreign_platforms,
                     "paused_platforms": sorted(paused_platforms),
                     "foreign_mode": "fallback-only",
-                    "deep_crawl": True,
-                    "run_until": "no material new high-relevance URLs are found or a platform blocker is recorded",
+                    "deep_crawl": not bounded,
+                    "max_supplemental_queries_per_topic": int(overseas_policy.get("max_supplemental_queries_per_topic") or 0),
+                    "max_full_page_fetches_per_topic": int(overseas_policy.get("max_full_page_fetches_per_topic") or 0),
+                    "run_until": (
+                        "budget_or_query_cap_after_workbook_review"
+                        if bounded
+                        else "no material new high-relevance URLs are found or a platform blocker is recorded"
+                    ),
                 },
             },
         },
@@ -270,7 +366,15 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
             "version": registry.get("version"),
             "path": str(SOURCE_REGISTRY_PATH),
             "mode": (registry.get("execution") or {}).get("mode"),
-            "required_source_ids": [row["id"] for row in sources if row.get("must_check")],
+            "required_source_ids": [
+                row["source_id"]
+                for row in stable_source_tasks(
+                    topics[0] if topics else "",
+                    meeting_date,
+                    sources,
+                    profile_name=profile_name,
+                )
+            ],
             "domestic_media_ids": [row["id"] for row in sources if row.get("region") == "domestic" and row.get("tier") != "comment_platform"],
             "domestic_comment_ids": [row["id"] for row in sources if row.get("tier") == "comment_platform"],
             "overseas_media_ids": [row["id"] for row in sources if row.get("region") == "overseas"],
@@ -283,7 +387,10 @@ def build_plan(workbook_path: str, agenda: str = "") -> dict[str, Any]:
             "candidate_pool_required": True,
             "saturation_required": True,
             "fixed_result_target_disabled": True,
-            "rule": "先逐项执行稳定来源库，再做不受名单限制的开放检索；保留全部候选和筛选理由，连续两轮无新增高相关独立观点后才停止，媒体文章与评论采集不得混用状态。",
+            "execution_profile": profile_name,
+            "required_zero_new_rounds": zero_rounds,
+            "stop_rule": stop_rule,
+            "rule": "先执行监测全文池和必查来源通道，再做开放检索；保留全部候选与筛选理由。默认快速正式模式达到通道覆盖和最低独立声音后，一轮无新增即可停止；穷尽模式仍要求连续两轮。",
         },
         "authority_rules": [
             "All totals, channel counts, daily trends, subevent counts, overseas counts and WeChat TOP metrics come from the monitoring workbook. Formal sentiment ratios come only from audited comment-level analysis.",
@@ -307,11 +414,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build the internal research plan for a two-input CWH report run.")
     parser.add_argument("system_workbook")
     parser.add_argument("--agenda", default="")
+    parser.add_argument("--execution-profile", default="")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(build_plan(args.system_workbook, args.agenda), ensure_ascii=False, indent=2), encoding="utf-8")
+    output.write_text(
+        json.dumps(build_plan(args.system_workbook, args.agenda, args.execution_profile), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     print(output)
 
 

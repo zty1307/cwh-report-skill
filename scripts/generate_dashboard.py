@@ -1066,6 +1066,10 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
     )
 
     return {
+        # Keep the immutable upstream evidence mapping in the self-contained
+        # dashboard. The delivery gate compares this exact structure with
+        # report_data.json; a flattened display-only projection is not enough.
+        "analysis_bundle": data.get("analysis_bundle") or {},
         "title": title,
         "sentiment_available": formal_sentiment_available(data),
         "meeting_date": chinese_date(meeting_date),

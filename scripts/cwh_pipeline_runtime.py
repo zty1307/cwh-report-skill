@@ -39,8 +39,26 @@ def stable_hash(value: Any) -> str:
 def atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Windows readers/indexers can briefly deny replacement. Never truncate
+        # or delete the accepted checkpoint to work around an occupied file.
+        delays = (0.05, 0.1, 0.2, 0.4, 0.8, 1.0)
+        for attempt in range(len(delays) + 1):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt == len(delays):
+                    raise
+                time.sleep(delays[attempt])
+    finally:
+        # This path belongs exclusively to this write. Cleanup must not hide
+        # the original error when a scanner also holds the temporary file.
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 @dataclass(frozen=True)
@@ -117,8 +135,31 @@ class PipelineLock:
     def _pid_alive(pid: int) -> bool:
         if pid <= 0:
             return False
+        if os.name == "nt":
+            # os.kill(pid, 0) is not a non-mutating process probe on Windows.
+            import ctypes
+            from ctypes import wintypes
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.GetExitCodeProcess.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                # Access denied/unknown errors must not authorize lock stealing.
+                return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER: absent PID
+            try:
+                code = wintypes.DWORD()
+                return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+            finally:
+                kernel.CloseHandle(handle)
         try:
             os.kill(pid, 0)
+        except PermissionError:
+            return True
         except OSError:
             return False
         return True
@@ -143,10 +184,10 @@ class PipelineLock:
                     current = json.loads(self.path.read_text(encoding="utf-8"))
                 except (OSError, ValueError, json.JSONDecodeError):
                     current = {}
-                age = time.time() - float(current.get("created_epoch") or 0)
+                age = time.time() - float(current.get("created_epoch") or self.path.stat().st_mtime)
                 same_host = str(current.get("host") or "") == socket.gethostname()
                 alive = same_host and self._pid_alive(int(current.get("pid") or 0))
-                if age > self.stale_after_seconds or not alive:
+                if (same_host and not alive and current.get("pid")) or (not same_host and age > self.stale_after_seconds):
                     self.path.unlink(missing_ok=True)
                     continue
                 raise PipelineBusyError(
@@ -188,7 +229,10 @@ class PipelineRunner:
         self.pipeline_name = pipeline_name
         self.input_contract = input_contract
         self._validate_graph()
-        self.state = self._load_or_initialize()
+        # Loading can recover an interrupted checkpoint; protect that write
+        # from a second controller while the real worker is still running.
+        with PipelineLock(self.lock_path):
+            self.state = self._load_or_initialize()
 
     def _validate_graph(self) -> None:
         seen: set[str] = set()
@@ -222,6 +266,9 @@ class PipelineRunner:
                     "dependencies": list(spec.dependencies),
                     "status": "pending",
                     "attempts": 0,
+                    "total_attempts": 0,
+                    "retry_cycles": 0,
+                    "command_count": 0,
                     "wait_count": 0,
                     "max_attempts": spec.max_attempts,
                     "message": "",
@@ -256,7 +303,51 @@ class PipelineRunner:
         if known != expected:
             raise ValueError("Pipeline stage definition changed for an existing job; migration is required.")
         self._recover_interrupted_state(state)
+        self._validate_event_history(state)
         return state
+
+    def _validate_event_history(self, state: dict[str, Any]) -> None:
+        """Reject a state file that was rolled back behind its append-only event log."""
+        if not self.events_path.exists():
+            if state.get("status") == "succeeded" or any(
+                row.get("status") in TERMINAL_STAGE_STATUSES for row in state.get("stages") or []
+            ):
+                raise ValueError("Completed pipeline state has no event history; restore the event log or start a new job.")
+            return
+        max_run_count = 0
+        last_terminal_event = ""
+        last_stage_terminal: dict[str, dict[str, Any]] = {}
+        for raw_line in self.events_path.read_text(encoding="utf-8").splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("pipeline_id") not in {"", state.get("pipeline_id")}:
+                continue
+            if event.get("event") == "pipeline_run_started":
+                max_run_count = max(max_run_count, int((event.get("details") or {}).get("run_count") or 0))
+            if event.get("event") in {"pipeline_succeeded", "stage_failed", "stage_waiting"}:
+                last_terminal_event = str(event.get("event") or "")
+            if event.get("stage_id") and event.get("event") in {"stage_succeeded", "stage_failed", "stage_waiting"}:
+                last_stage_terminal[str(event["stage_id"])] = event
+        if int(state.get("run_count") or 0) < max_run_count:
+            raise ValueError("Pipeline state is older than its append-only event history; restore the latest state or start a new job.")
+        if state.get("status") == "succeeded" and last_terminal_event and last_terminal_event != "pipeline_succeeded":
+            raise ValueError("Pipeline state claims success but the latest event history does not; restore the latest state or start a new job.")
+        for row in state.get("stages") or []:
+            if row.get("status") not in TERMINAL_STAGE_STATUSES:
+                continue
+            event = last_stage_terminal.get(str(row.get("stage_id") or ""))
+            if not event or event.get("event") != "stage_succeeded":
+                raise ValueError(
+                    f"Stage {row.get('stage_id')} claims success without a matching latest success event; "
+                    "restore the latest state or start a new job."
+                )
+            event_fingerprint = str((event.get("details") or {}).get("output_fingerprint") or "")
+            if event_fingerprint and event_fingerprint != str(row.get("output_fingerprint") or ""):
+                raise ValueError(f"Stage {row.get('stage_id')} output fingerprint conflicts with the append-only event history.")
 
     def _recover_interrupted_state(self, state: dict[str, Any]) -> None:
         changed = False
@@ -277,7 +368,39 @@ class PipelineRunner:
 
     def _save(self) -> None:
         self.state["updated_at"] = utc_now()
+        if self.state.get("budget_started_epoch"):
+            self.state["wall_clock_elapsed_seconds"] = round(max(
+                0.0, time.time() - self.state["budget_started_epoch"]
+            ), 3)
         atomic_write_json(self.state_path, self.state)
+
+    def remaining_budget_seconds(self, stage_id: str = "") -> float | None:
+        limits: list[float] = []
+        now = time.time()
+        budget = float(self.input_contract.get("wall_clock_budget_seconds") or 0)
+        started = self.state.get("budget_started_epoch")
+        if budget and started is not None:
+            limits.append(budget - max(0.0, now - float(started)))
+        if stage_id:
+            row = self.stage_state(stage_id)
+            stage_budget = float((self.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id) or 0)
+            stage_started = row.get("budget_started_epoch")
+            if stage_budget and stage_started is not None:
+                limits.append(stage_budget - max(0.0, now - float(stage_started)))
+        return min(limits) if limits else None
+
+    def _stop_if_budget_exhausted(self, stage_id: str) -> bool:
+        remaining = self.remaining_budget_seconds(stage_id)
+        if remaining is None or remaining > 0:
+            return False
+        message = "任务或节点累计时间预算已耗尽（含等待与重试）；保留断点和审计，记录本次超时。新一轮测试须使用新任务目录，run/invalidate不会重置预算。"
+        self.stage_state(stage_id).update(status="blocked", message=message)
+        self.state.update(status="blocked", current_stage=stage_id, next_action={
+            "type": "time_budget_exhausted", "stage_id": stage_id, "message": message,
+        })
+        self._save()
+        self._event("pipeline_time_budget_exhausted", stage_id=stage_id, details=self.state["next_action"])
+        return True
 
     def _event(self, event: str, *, stage_id: str = "", details: dict[str, Any] | None = None) -> None:
         row = {
@@ -334,6 +457,19 @@ class PipelineRunner:
                 "pipeline_input": self.state.get("input_fingerprint"),
                 "stage": spec.stage_id,
                 "kind": spec.kind,
+                "stage_definition": {
+                    "dependencies": list(spec.dependencies),
+                    "artifacts": [
+                        {
+                            "name": item.name,
+                            "path": item.path,
+                            "required": item.required,
+                            "minimum_bytes": item.minimum_bytes,
+                        }
+                        for item in spec.artifacts
+                    ],
+                    "max_attempts": spec.max_attempts,
+                },
                 "upstream": upstream,
             }
         )
@@ -363,14 +499,26 @@ class PipelineRunner:
         *,
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
-        timeout_seconds: int | None = None,
+        timeout_seconds: float | None = None,
     ) -> tuple[int, Path]:
         row = self.stage_state(stage_id)
-        attempt = int(row.get("attempts") or 1)
-        log_path = self.logs_dir / f"{stage_id}.attempt-{attempt}.log"
+        if timeout_seconds is None:
+            configured = (self.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id)
+            timeout_seconds = int(configured) if configured not in (None, "", 0) else None
+        attempt = int(row.get("total_attempts") or row.get("attempts") or 1)
+        row["command_count"] = int(row.get("command_count") or 0) + 1
+        command_count = row["command_count"]
+        self._save()
+        log_path = self.logs_dir / f"{stage_id}.attempt-{attempt}.command-{command_count}.log"
         with log_path.open("w", encoding="utf-8", errors="replace") as log:
             log.write("COMMAND: " + json.dumps(command, ensure_ascii=False) + "\n")
             log.flush()
+            remaining = self.remaining_budget_seconds(stage_id)
+            if remaining is not None:
+                if remaining <= 0:
+                    log.write("TIMEOUT: cumulative task/stage budget exhausted before command launch\n")
+                    return 124, log_path
+                timeout_seconds = min(timeout_seconds, remaining) if timeout_seconds is not None else remaining
             try:
                 process = subprocess.run(
                     command,
@@ -414,6 +562,7 @@ class PipelineRunner:
         self.state["status"] = "pending"
         self.state["current_stage"] = ""
         self.state["next_action"] = {}
+        self.state.pop("completed_elapsed_seconds", None)
         self._save()
         self._event("pipeline_invalidated", stage_id=stage_id, details={"reason": reason})
 
@@ -424,6 +573,8 @@ class PipelineRunner:
         with PipelineLock(self.lock_path):
             self.state = json.loads(self.state_path.read_text(encoding="utf-8"))
             self._recover_interrupted_state(self.state)
+            self._validate_event_history(self.state)
+            self.state.setdefault("budget_started_epoch", time.time())
             self.state["run_count"] = int(self.state.get("run_count") or 0) + 1
             self.state["status"] = "running"
             self.state["next_action"] = {}
@@ -454,10 +605,29 @@ class PipelineRunner:
                     self.invalidate_from(spec.stage_id, reason="输入或上游产物发生变化")
                     row = self.stage_state(spec.stage_id)
 
+                if row.get("status") == "failed":
+                    row["attempts"] = 0
+                    row["retry_cycles"] = int(row.get("retry_cycles") or 0) + 1
+                    row["status"] = "pending"
+                    row["message"] = "已为本次显式续跑重新开放重试预算。"
+                    self._save()
+                    self._event(
+                        "stage_rearmed",
+                        stage_id=spec.stage_id,
+                        details={"retry_cycle": row["retry_cycles"]},
+                    )
+
                 last_outcome: StageOutcome | None = None
+                row.setdefault("budget_started_epoch", time.time())
+                if self._stop_if_budget_exhausted(spec.stage_id):
+                    return self.state
                 while int(row.get("attempts") or 0) < spec.max_attempts:
+                    if self._stop_if_budget_exhausted(spec.stage_id):
+                        return self.state
                     row["status"] = "running"
                     row["attempts"] = int(row.get("attempts") or 0) + 1
+                    row["total_attempts"] = int(row.get("total_attempts") or 0) + 1
+                    row["command_count"] = 0
                     row["started_at"] = utc_now()
                     row["finished_at"] = ""
                     row["message"] = ""
@@ -465,7 +635,11 @@ class PipelineRunner:
                     row["last_error"] = {}
                     self.state["current_stage"] = spec.stage_id
                     self._save()
-                    self._event("stage_started", stage_id=spec.stage_id, details={"attempt": row["attempts"]})
+                    self._event(
+                        "stage_started",
+                        stage_id=spec.stage_id,
+                        details={"attempt": row["attempts"], "total_attempt": row["total_attempts"]},
+                    )
                     try:
                         outcome = self.executors[spec.stage_id](self, spec)
                     except Exception as exc:
@@ -475,6 +649,8 @@ class PipelineRunner:
                             error_code="uncaught_exception",
                         )
                     last_outcome = outcome
+                    if self._stop_if_budget_exhausted(spec.stage_id):
+                        return self.state
 
                     if outcome.status == "succeeded":
                         try:
@@ -487,6 +663,8 @@ class PipelineRunner:
                             )
                             last_outcome = outcome
                         else:
+                            if self._stop_if_budget_exhausted(spec.stage_id):
+                                return self.state
                             row.update(
                                 {
                                     "status": "succeeded",
@@ -498,8 +676,19 @@ class PipelineRunner:
                                     "details": outcome.details,
                                 }
                             )
+                            # Journal first: a crash before the checkpoint save
+                            # leaves a resumable running stage, never a success
+                            # snapshot without its required success event.
+                            self._event(
+                                "stage_succeeded",
+                                stage_id=spec.stage_id,
+                                details={
+                                    "artifacts": artifacts,
+                                    "artifact_hashes": hashes,
+                                    "output_fingerprint": row["output_fingerprint"],
+                                },
+                            )
                             self._save()
-                            self._event("stage_succeeded", stage_id=spec.stage_id, details={"artifacts": artifacts})
                             break
 
                     if outcome.status in WAITING_STAGE_STATUSES:
@@ -579,8 +768,11 @@ class PipelineRunner:
             self.state["current_stage"] = ""
             self.state["next_action"] = {}
             self.state["finished_at"] = utc_now()
-            self._save()
+            self.state.setdefault("completed_elapsed_seconds", round(max(
+                0.0, time.time() - self.state["budget_started_epoch"]
+            ), 3))
             self._event("pipeline_succeeded")
+            self._save()
             return self.state
 
 

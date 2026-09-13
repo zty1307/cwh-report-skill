@@ -314,9 +314,9 @@ class CwhResumablePipelineTests(unittest.TestCase):
         self.assertTrue(viewpoint_task.exists())
         task_rules = " ".join(MODULE.read_json(viewpoint_task)["rules"])
         self.assertIn("候选池", task_rules)
-        self.assertIn("连续两轮", task_rules)
-        self.assertIn("绝不是检索或成文停止点", task_rules)
-        self.assertIn("不设2条或4条上限", task_rules)
+        self.assertIn("查询/抓取上限", task_rules)
+        self.assertIn("最多12个代表性独立声音", task_rules)
+        self.assertIn("formal_use=reserve", task_rules)
 
         analysis = {
             "metadata": {
@@ -396,6 +396,24 @@ class CwhResumablePipelineTests(unittest.TestCase):
         self.assertIn("独立第二遍", " ".join(verification_task["rules"]))
         self.assertEqual(workbook_hash, pipeline.runner.stage_state("workbook")["output_fingerprint"])
         self.assertEqual(1, pipeline.runner.stage_state("workbook")["attempts"])
+
+        # Exercise the automatic worker return path with the same evidence,
+        # without author self-certification. It must reach the review stage.
+        for item in analysis["viewpoints"]["by_topic"]:
+            for cluster in item["clusters"]:
+                for evidence in cluster["evidence"]:
+                    evidence.pop("semantic_review", None)
+        automatic = MODULE.CwhPipeline(self.job / "automatic", self.contract)
+
+        def write_draft(runner, spec, task, output):
+            MODULE.atomic_write_json(output, analysis)
+            return None
+
+        with mock.patch.object(MODULE, "topic_titles", return_value=["听取数字中国建设情况汇报"]), mock.patch.object(MODULE, "maybe_run_ai_worker", side_effect=write_draft):
+            result = automatic.domestic_viewpoints(automatic.runner, automatic.runner.spec_by_id["domestic_viewpoints"])
+        self.assertEqual("succeeded", result.status, result.message)
+        unreviewed = automatic.artifacts / "analysis_bundle.json"
+        self.assertTrue(MODULE.validate_analysis_bundle(unreviewed, ["听取数字中国建设情况汇报"], require_semantic_review=True))
 
     def test_data_workbook_gate_rejects_comment_inflated_spread_total(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -499,38 +517,52 @@ class CwhResumablePipelineTests(unittest.TestCase):
         source_ids = {row["source_id"] for row in plan["topics"][0]["stable_source_tasks"]}
         self.assertIn("toutiao_articles", source_ids)
         self.assertIn("baijiahao", source_ids)
-        self.assertIn("xinhua", source_ids)
+        self.assertIn("lane_authoritative", source_ids)
+        self.assertIn("lane_mainstream", source_ids)
+        self.assertIn("lane_industry_expert", source_ids)
         self.assertTrue(plan["research_audit_contract"]["open_search_required"])
         self.assertTrue(plan["research_audit_contract"]["candidate_pool_required"])
         self.assertTrue(plan["research_audit_contract"]["saturation_required"])
         contract = plan["topics"][0]["candidate_pool_contract"]
         self.assertEqual("priority_seed_not_allowlist", contract["registry_role"])
-        self.assertEqual(2, contract["saturation_rule"]["required_zero_new_rounds"])
+        self.assertEqual(1, contract["saturation_rule"]["required_zero_new_rounds"])
         self.assertEqual(
             ["open_web", "public_platform"],
             contract["saturation_rule"]["required_route_coverage"],
         )
         toutiao = next(row for row in plan["topics"][0]["stable_source_tasks"] if row["source_id"] == "toutiao_articles")
         self.assertEqual("platform_specific", toutiao["execution_mode"])
-        self.assertGreaterEqual(len(toutiao["query_families"]), 3)
+        self.assertEqual(1, len(toutiao["query_families"]))
         baijiahao = next(row for row in plan["topics"][0]["stable_source_tasks"] if row["source_id"] == "baijiahao")
         self.assertTrue(baijiahao["must_check"])
         self.assertEqual("platform_specific", baijiahao["execution_mode"])
         self.assertIn("executions", contract["saturation_rule"]["round_fields"])
         self.assertIn("result_urls", contract["saturation_rule"]["execution_fields"])
         self.assertIsNone(plan["topics"][0]["minimum_evidence"]["fixed_result_target"])
+        self.assertEqual("bounded_60m", plan["execution_profile"])
+        self.assertEqual(12, contract["max_formal_voices_per_topic"])
         self.assertEqual(
-            "all_eligible_independent_samples_no_upper_cap",
+            "bounded_selected_eligible_with_audited_reserve",
             plan["topics"][0]["minimum_evidence"]["formal_sources_per_mature_cluster"],
         )
         self.assertEqual(
-            "all_eligible_no_upper_cap",
+            "bounded_2_to_4_with_audited_reserve",
             plan["topics"][0]["domestic_viewpoint_contract"]["topic_density"]["independent_voices_per_cluster"],
         )
         self.assertEqual("all_workbook_topics", plan["global_tasks"]["public_comments"]["target_topics"])
-        self.assertIsNone(plan["global_tasks"]["public_comments"]["target_quotes"])
+        self.assertEqual([2, 3], plan["global_tasks"]["public_comments"]["target_quotes"])
+        self.assertEqual(6, plan["global_tasks"]["public_comments"]["max_query_executions_per_topic"])
         self.assertNotIn("reddit", plan["global_tasks"]["overseas"]["mediaspider_foreign"]["platforms"])
         self.assertIn("reddit", plan["global_tasks"]["overseas"]["mediaspider_foreign"]["paused_platforms"])
+
+        exhaustive = build_plan(str(self.workbook), self.contract["agenda"], "exhaustive")
+        exhaustive_ids = {row["source_id"] for row in exhaustive["topics"][0]["stable_source_tasks"]}
+        self.assertIn("xinhua", exhaustive_ids)
+        self.assertEqual(2, exhaustive["topics"][0]["candidate_pool_contract"]["saturation_rule"]["required_zero_new_rounds"])
+        self.assertEqual(
+            "all_eligible_independent_samples_no_upper_cap",
+            exhaustive["topics"][0]["minimum_evidence"]["formal_sources_per_mature_cluster"],
+        )
 
     def test_analysis_validator_rejects_generic_search_miss_as_platform_no_result(self) -> None:
         topic = "听取数字中国建设情况汇报"
@@ -676,7 +708,7 @@ class CwhResumablePipelineTests(unittest.TestCase):
             encoding="utf-8",
         )
         problems = MODULE.validate_analysis_bundle(path, [topic])
-        self.assertTrue(any("连续两轮" in item for item in problems))
+        self.assertTrue(any("缺少2轮" in item for item in problems))
 
     def test_analysis_validator_rejects_unverified_or_out_of_window_candidate_date(self) -> None:
         topic = "听取数字中国建设情况汇报"

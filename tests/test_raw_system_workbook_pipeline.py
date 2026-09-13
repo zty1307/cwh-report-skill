@@ -307,7 +307,7 @@ class StageBoundaryTests(unittest.TestCase):
     def test_skill_routes_raw_and_standard_inputs_without_forcing_report_stage(self):
         skill_text = SKILL_PATH.read_text(encoding="utf-8")
         self.assertIn("## Input Routing and Stage Boundaries", skill_text)
-        self.assertIn("stop after stage 1", skill_text)
+        self.assertIn("stop after `workbook`", skill_text)
         self.assertIn("references/raw_workbook_pipeline.md", skill_text)
         self.assertTrue(RAW_REFERENCE_PATH.exists())
 

@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "default_profile": "bounded_60m",
+  "profiles": {
+    "bounded_60m": {
+      "formal": true,
+      "wall_clock_budget_seconds": 3600,
+      "reserved_delivery_buffer_seconds": 480,
+      "stage_budgets_seconds": {
+        "preflight": 90,
+        "intake": 30,
+        "workbook": 300,
+        "research_plan": 60,
+        "domestic_viewpoints": 780,
+        "domestic_evidence_verification": 360,
+        "domestic_comments_sentiment": 540,
+        "overseas_evidence": 420,
+        "hotwords": 180,
+        "render": 180,
+        "delivery_gate": 120
+      },
+      "model_contract": {
+        "max_repair_rounds_per_stage": 2,
+        "temperature_guidance": 0.1,
+        "require_json_only": true,
+        "allow_skill_mutation": false,
+        "allow_pipeline_state_mutation": false,
+        "allow_validator_mutation": false,
+        "allow_manual_artifact_hashes": false,
+        "on_missing_evidence": "return_structured_blocker",
+        "on_validation_error": "repair_only_reported_fields"
+      },
+      "research": {
+        "parallel_lanes": true,
+        "required_lanes": [
+          "monitoring_corpus",
+          "official_mainstream",
+          "industry_expert",
+          "public_platform"
+        ],
+        "max_query_executions_per_topic": 10,
+        "max_results_per_query": 8,
+        "max_full_page_fetches_per_topic": 24,
+        "max_named_entity_expansions_per_topic": 4,
+        "required_zero_new_rounds": 1,
+        "minimum_independent_voices_per_topic": 4,
+        "target_independent_voices_per_topic": [6, 12],
+        "target_mature_clusters_per_topic": [2, 4],
+        "max_formal_voices_per_topic": 12,
+        "reserve_policy": "retain additional eligible candidates in audit with formal_use=reserve",
+        "blocked_platform_policy": "record blocker and continue available lanes",
+        "stop_rule": "coverage_minimum_then_one_zero_new_round_or_budget_exhausted"
+      },
+      "comments": {
+        "parallel_with_domestic_research": true,
+        "preferred_sources": ["system_detail", "authorized_platform", "no_login_public_adapter"],
+        "max_query_executions_per_topic": 6,
+        "max_retained_candidates_per_topic": 30,
+        "max_selected_comments_per_topic": 3,
+        "minimum_selected_comments_per_ready_topic": 2,
+        "budget_exhaustion_is_honest_blocker": true
+      },
+      "overseas": {
+        "parallel_with_domestic_research": true,
+        "review_workbook_rows_first": true,
+        "max_supplemental_queries_per_topic": 2,
+        "max_full_page_fetches_per_topic": 8,
+        "max_formal_interpretive_reports": 3
+      },
+      "writing": {
+        "deterministic_structure": true,
+        "deterministic_sentence_assembly": true,
+        "model_may_only_supply": [
+          "candidate_decision",
+          "speaker_identity",
+          "source_excerpt",
+          "atomic_claim",
+          "stance",
+          "cluster_key",
+          "semantic_review",
+          "translation_review"
+        ]
+      }
+    },
+    "exhaustive": {
+      "formal": true,
+      "wall_clock_budget_seconds": 0,
+      "reserved_delivery_buffer_seconds": 0,
+      "stage_budgets_seconds": {},
+      "model_contract": {
+        "max_repair_rounds_per_stage": 3,
+        "temperature_guidance": 0.1,
+        "require_json_only": true,
+        "allow_skill_mutation": false,
+        "allow_pipeline_state_mutation": false,
+        "allow_validator_mutation": false,
+        "allow_manual_artifact_hashes": false,
+        "on_missing_evidence": "return_structured_blocker",
+        "on_validation_error": "repair_only_reported_fields"
+      },
+      "research": {
+        "parallel_lanes": true,
+        "required_zero_new_rounds": 2,
+        "max_formal_voices_per_topic": 0,
+        "stop_rule": "two_consecutive_rounds_no_material_new_independent_viewpoint"
+      }
+    }
+  }
+}

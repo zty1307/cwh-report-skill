@@ -19,6 +19,7 @@ from typing import Any
 
 from ingest_monitoring_workbook import ingest_workbook
 from report_rules import domestic_viewpoint_quality_issues
+from cwh_viewpoint_gate import cluster_density_result
 
 SCHEMA_VERSION = "0.3"
 DEFAULT_DATE = "2026-06-29"
@@ -3335,15 +3336,19 @@ def build_system_audit(
         blockers.append("以下子议题缺少可追溯的媒体/自媒体观点证据：" + "、".join(missing_viewpoint_topics) + "。")
     missing_comment_topics = [topic_display(topic) for topic in topics if not any(sample.get("topic") == topic or topic in (sample.get("topic_hits") or []) for sample in traceable_comments)]
     thin_viewpoint_clusters: list[str] = []
+    viewpoint_density_exceptions: list[dict[str, Any]] = []
     for item in viewpoints.get("by_topic") or []:
         topic_name = topic_display(str(item.get("topic") or ""))
         for cluster in item.get("clusters") or []:
-            evidence_count = len(cluster.get("evidence") or [])
-            details = str(cluster.get("details") or "").strip()
-            detail_length = len(details)
-            attribution_count = len(re.findall(r"(?:认为|指出|表示|建议|称|分析称|提到)", details))
-            if detail_length < 120 or (evidence_count < 2 and attribution_count < 2):
+            density = cluster_density_result(cluster)
+            if not density["passed"]:
                 thin_viewpoint_clusters.append(f"{topic_name}：{cluster.get('summary') or '未命名观点'}")
+            elif density["accepted_exception"]:
+                viewpoint_density_exceptions.append({
+                    "topic": topic_name,
+                    "summary": cluster.get("summary"),
+                    **density,
+                })
     if thin_viewpoint_clusters:
         blockers.append(
             "以下境内观点簇未达到正式成稿的来源与论述密度门禁："
@@ -3398,7 +3403,7 @@ def build_system_audit(
         actions.append({
             "priority": "P1",
             "action": "deepen_viewpoint_evidence",
-            "reason": f"{len(thin_viewpoint_clusters)}个观点簇尚未达到两家独立来源且正文说明不少于120字的成稿密度。",
+            "reason": f"{len(thin_viewpoint_clusters)}个观点簇未通过共享成文密度门禁；补充真实证据或可审核的thin_cluster_exception，不得堆字或重复归因。",
         })
     if viewpoint_quality_issues:
         actions.append({
@@ -3438,6 +3443,7 @@ def build_system_audit(
             "missing_viewpoint_topics": missing_viewpoint_topics,
             "missing_comment_topics": missing_comment_topics,
             "thin_viewpoint_clusters": thin_viewpoint_clusters,
+            "viewpoint_density_exceptions": viewpoint_density_exceptions,
             "thin_comment_groups": thin_comment_groups,
             "domestic_viewpoint_quality_issues": viewpoint_quality_issues,
         },

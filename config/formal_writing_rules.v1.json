@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "derived_from": "reviewed_cross-topic_baseline_reports",
+  "scope": "meeting_agnostic",
+  "document": {
+    "opening_order": ["event_context", "monitoring_window", "total_volume", "peak_or_stage", "overall_assessment", "section_preview"],
+    "fixed_chapters": ["一、舆情传播情况", "二、境内舆论情况", "三、境外舆论情况", "附录"],
+    "domestic_subsections": ["（一）境内媒体自媒体情况", "（二）网民评论情况", "（三）热词分布情况"],
+    "overseas_subsections": ["（一）境外媒体情况", "（二）境外网民评论"]
+  },
+  "viewpoint": {
+    "heading_stance_verbs": ["建议", "认可", "肯定", "认为", "期待", "希望", "支持", "呼吁", "质疑", "担忧"],
+    "cluster_ordinal_prefixes": ["一是", "二是", "三是", "四是", "五是", "六是", "七是", "八是"],
+    "attribution_verbs": ["认为", "指出", "表示", "建议", "强调", "称", "提到"],
+    "claim_cjk_range": [45, 120],
+    "minimum_claim_cjk": 30,
+    "density_gate": {
+      "minimum_independent_voices": 2,
+      "minimum_details_cjk": 120,
+      "exception_required_fields": ["reason", "search_evidence", "reviewed_by"]
+    },
+    "mature_cluster_voice_range": [2, 4],
+    "topic_cluster_range": [2, 4],
+    "assembly": "one_speaker_one_sentence",
+    "source_order": ["named_expert", "authoritative_media", "industry_institution", "public_account", "other_traceable_source"],
+    "prohibited_phrases": ["媒体普遍认为", "多家媒体关注", "报道汇集", "样本来源", "公开网络补证", "原始报道汇总"],
+    "prohibited_padding": ["具有重要意义", "引发广泛关注", "为高质量发展注入新动能", "值得关注的是"]
+  },
+  "comments": {
+    "lead_template": "网民观点主要围绕{stance_summaries}等方面展开。主要评论如下：",
+    "one_group_per_topic": true,
+    "quotes_per_ready_topic": [2, 3],
+    "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],
+    "reject_reaction_only": true
+  },
+  "hotwords": {
+    "paragraph_rank_phrases": ["位居前列", "热度较高", "持续热传", "受到关注"],
+    "focus_phrases": ["相关讨论主要聚焦", "讨论内容集中于", "讨论重点进一步延伸至", "相关观点主要讨论", "相关观点多涉及"],
+    "target_total": [36, 42],
+    "target_per_topic": [5, 8],
+    "generic_terms_forbidden": ["召开", "投资", "项目", "工程", "市场"]
+  },
+  "overseas": {
+    "factual_lead_template": "数据周期内，境外媒体以事实性报道为主。如{examples}等",
+    "interpretive_transition": "，少量解读如下：",
+    "no_interpretation_suffix": "，暂无评论性文章。",
+    "max_interpretive_examples": 3,
+    "category_numbering": false
+  },
+  "style": {
+    "lead_with_conclusion": true,
+    "data_before_interpretation": true,
+    "retain_conditions_and_scope": true,
+    "avoid_methodology_in_formal_body": true,
+    "avoid_repeating_same_transition": true,
+    "page_count_is_not_target": true
+  }
+}

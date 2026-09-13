@@ -181,6 +181,22 @@ def test_dashboard_keeps_duplicate_direct_source_pages_in_audit_only() -> None:
     assert [item["source"] for item in result[0]["items"]] == ["微信公众号甲"]
 
 
+def test_dashboard_payload_preserves_analysis_bundle_for_release_mapping(tmp_path: Path) -> None:
+    analysis_bundle = {"metadata": {"evidence_mapping_version": "1.0"}, "viewpoints": {"by_topic": []}}
+    payload = MODULE.prepare_dashboard_data(
+        {
+            "analysis_bundle": analysis_bundle,
+            "meeting": {},
+            "system_data": {},
+            "topic_stats": [],
+            "artifacts": {},
+            "audit": {},
+        },
+        tmp_path,
+    )
+    assert payload["analysis_bundle"] == analysis_bundle
+
+
 def test_complete_claim_uses_full_cluster_sentence() -> None:
     details = (
         "中指研究院研究总监吴建钦认为，此次部署表明城市更新已成为中央常态化关注和推动的重大事项，"
