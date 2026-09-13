@@ -32,23 +32,23 @@ X月X日国务院常务会议舆情综述
 Opening paragraph:
 
 ```text
-国务院总理李强X月X日主持召开国务院常务会议，{agenda_topics}。本次国务院常务会议舆情传播情况如下：
+X月X日召开的国务院常务会议，{agenda_topics}。本次国务院常务会议舆情传播情况如下：
 ```
 
-Use the original agenda wording as much as possible. The number of subtopics is dynamic.
+Use the original agenda wording as much as possible. The number of subtopics is dynamic. Only an explicit `meeting.chair_name` and its `meeting.chair_source` permit the source-backed chair variant from the configuration; never default to a historical person. Word and Markdown call the same opening helper.
 
 ## Fixed sentence library
 
 Use these as stable sentence frames and replace only bracketed values:
 
 ```text
-本次常务会引发境内外媒体广泛报道，境内外传播总量约{total}条，舆论关注“李强主持召开国务院常务会议 {first_topic}”相关话题。经发酵，舆情热度于{peak_date}达到峰值。
-境内主流媒体如人民网、新华网、央视网等均在显著位置刊文，共有相关报道{domestic_count}条。
+监测期内，相关信息传播总量约{total}条。{supported_peak_sentence}
+境内主流媒体共有相关报道{domestic_count}条。
 新媒体中，微信公众平台相关信息{wechat_count}条、微博相关信息{weibo_count}条，视频号相关信息{video_count}条，新闻客户端、论坛等渠道共有相关信息{other_count}条。
-境外媒体如{overseas_source_1}、{overseas_source_2}、{overseas_source_3}等予以关注，共有相关报道（含转载）{overseas_count}条。具体主流报道情况见附表。
+境外媒体共有相关报道（含转载）{overseas_count}条。{supported_source_examples}
 ```
 
-For domestic viewpoints, support both a single-cluster paragraph and a multi-cluster `一是、二是……` pattern. Use `建议、认可、肯定、认为、期待、希望` only when supported by the evidence cluster.
+The renderer fills these frames from workbook facts. Include a peak only with dated nonzero trend observations and source examples only from actual accepted rows. Never insert assumed prominent placement, broad attention, fixed publishers or a chair into these frames. For domestic viewpoints, support both a single-cluster paragraph and a multi-cluster `一是、二是……` pattern. Use the configured stance verbs only when supported by the evidence cluster.
 
 For overseas coverage, first run an AI relevance review and exclude rows that only overlap with an agenda topic but do not report or interpret the meeting. Classify eligible rows by article body, then use the factual lead and a separate interpretive paragraph specified below. Do not number report categories:
 
@@ -57,7 +57,7 @@ For overseas coverage, first run an AI relevance review and exclude rows that on
 {reviewed_interpretive_prose}
 ```
 
-Use this factual lead only when supported by the reviewed category distribution. If there is no interpretation, use `，暂无评论性文章。` instead. Do not force a missing category into the report. Negative wording, criticism or a crawler-supplied tag alone is not proof of `借题炒作/风险解读`.
+Use this majority lead only when factual reports exceed half of the eligible reviewed rows. Mixed coverage instead uses `境外媒体报道中包括事实性报道` and `相关解读如下`. If there is no interpretation, use `，暂无评论性文章。` instead. Do not force a missing category into the report. Negative wording, criticism or a crawler-supplied tag alone is not proof of `借题炒作/风险解读`.
 
 ## 一、舆情传播情况
 
@@ -68,8 +68,8 @@ This chapter has exactly two sub-sections.
 Required content:
 
 - Overall domestic and overseas spread volume.
-- Main public-opinion focus topic, usually quoted as `“李强主持召开国务院常务会议 {first_topic}等”`.
-- Peak date.
+- Any main focus statement must be grounded in the current evidence, never a fixed name or quoted historical title.
+- Peak date only when supported by dated nonzero workbook trend data.
 - Domestic mainstream media volume.
 - WeChat public-account volume.
 - Weibo volume.
@@ -78,7 +78,7 @@ Required content:
 - Overseas report volume.
 - End by pointing to the appendix: `具体主流报道情况见附表。`
 
-When true full-volume data is unavailable, use the best collected metric and keep the limitation in `cwh_audit.json`; do not put hollow placeholders such as `需补充数据` in the formal report body.
+Numerical propagation facts must use the monitoring workbook's scope. Missing required workbook totals are a blocker; do not replace full-volume counts with a search sample. Keep limitations in `cwh_audit.json`; do not put hollow placeholders such as `需补充数据` in the formal report body.
 
 ### （二）子议题传播情况
 
@@ -111,7 +111,7 @@ Organize by subtopic or stable viewpoint group. Use numbered top-level items:
 3.肯定……
 ```
 
-Before writing, build an audited candidate pool from the priority source registry and open-web discovery. The registry is not an allowlist. Follow the selected profile in `research_plan.json`: `bounded_60m` uses grouped lanes, at most 10 queries and 24 full-page fetches per topic, and stops after lane coverage plus one zero-new round or budget exhaustion; `exhaustive` searches individual required sources and requires two zero-new rounds. Keep a decision for every result actually reviewed within scope.
+Before writing, build an audited candidate pool from the priority source registry and open-web discovery. The registry is not an allowlist. Follow the selected profile in `research_plan.json`: both bounded profiles use grouped lanes and at most 10 queries per topic; full-page limits are 18 for `bounded_40m` and 24 for `bounded_60m`. Stop after lane coverage plus one zero-new round or budget exhaustion; `exhaustive` searches individual required sources and requires two zero-new rounds. Keep a decision for every result actually reviewed within scope. Caps are limits, not mandatory work quotas.
 
 In bounded mode, select the strongest 6-12 independent voices per topic across 2-4 clusters and cap formal prose at 12 voices. Keep additional valid candidates as `formal_use=reserve` with `reserve_reason`; they stay auditable but do not lengthen the report. In exhaustive mode, map every eligible independent voice into prose. Exact mirrors remain duplicate audit records.
 
@@ -119,7 +119,7 @@ Every top-level item must begin with an evidence-supported stance or action verb
 
 The attitude verb is a conclusion from evidence, not a positivity template. Use `肯定/认可/支持` only when the source itself expresses approval, `建议/期待/呼吁` for proposals, `认为/指出` for analytical judgment, and `质疑/担忧` for criticism or risk. Do not rewrite neutral analysis as praise merely to imitate a historical report.
 
-Inside a viewpoint group, use `一是、二是、三是、四是、五是` when there are multiple viewpoint clusters. The text after every ordinal must pass the same stance-verb gate as the top-level heading; do not write bare conclusions such as `一是宏观政策重在……` or `二是项目建设……`. A purely factual cluster may only use the explicit exceptions `尚未形成评论性观点` or `以事实性报道为主`.
+Inside a viewpoint group, use dynamically generated `一是、二是……` when there are multiple viewpoint clusters; there is no fixed five- or eight-group truncation. The text after every ordinal must pass the same stance-verb gate as the top-level heading; do not write bare conclusions such as `一是宏观政策重在……` or `二是项目建设……`. A purely factual cluster may only use the explicit exceptions `尚未形成评论性观点` or `以事实性报道为主`.
 
 Every claim should include evidence sources such as experts, media, institutions, or public accounts:
 
@@ -156,7 +156,7 @@ Lead sentence:
 
 Then group representative raw comments:
 
-Search all workbook topics before selection. In `bounded_60m`, use the configured limit of six query executions and 30 retained candidates per topic, then select 2-3 traceable comments for each ready topic. `exhaustive` may continue to saturation. Preserve a topic-by-platform matrix with exclusions and blockers. Formal prose includes only topics with traceable substantive comments.
+Search all workbook topics before selection. Use the configured per-topic query limit: four for `bounded_40m`, six for `bounded_60m`; both retain at most 30 candidates, then select 2-3 traceable comments for each ready topic. `exhaustive` may continue to saturation. Preserve a topic-by-platform matrix with exclusions and blockers. Formal prose includes only topics with traceable substantive comments.
 
 ```text
 一是认可……并期待……。网民称，“……”“……”。
@@ -196,7 +196,7 @@ Required content:
 - If there is interpretation or risk framing, write it as a separate paragraph after the factual-report sentence.
 - If there is no commentary, use `暂无评论性文章。`
 
-The primary evidence source is the full title and body already contained in the current raw monitoring Excel. Classify every accepted Excel row as factual, interpretive or risk-framed before building the standard workbook, and preserve the classification, reason, confidence and reviewed Simplified Chinese source/title/summary in that workbook. Do not assume interpretation must come from supplemental search, and never silently default an unclassified row to factual. When interpretation exists, the factual paragraph ends `，少量解读如下：` and the next paragraph summarizes a small number of reviewed interpretive reports. Do not number the report categories.
+The primary evidence source is the full title and body already contained in the current raw monitoring Excel. Classify every accepted Excel row as factual, interpretive or risk-framed before building the standard workbook, and preserve the classification, reason, confidence and reviewed Simplified Chinese source/title/summary in that workbook. Do not assume interpretation must come from supplemental search, and never silently default an unclassified row to factual. When interpretation exists, use the distribution-dependent transition above and summarize reviewed interpretive reports in the next paragraph. Do not number the report categories.
 
 After every existing Excel row and linked body has been read and classified, run a separate supplemental overseas-media search as a required pass. Use MediaSpider Supervisor `grounding` and/or Agent Reach news/web search, retain the full candidate and saturation audit, and keep X、YouTube and other permitted social rows in `（二）境外网民评论`; never mix social posts into the overseas-media appendix. Skip any platform explicitly paused by the user (currently Reddit) and record that scope limitation. A supplemental news report may affect the overseas count only if it was admitted before workbook finalization through the complete AI overseas review, monitoring-window check and cross-source deduplication. The report renderer itself never patches aggregate counts.
 

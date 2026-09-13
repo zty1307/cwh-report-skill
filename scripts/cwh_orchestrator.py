@@ -20,6 +20,7 @@ from typing import Any
 from ingest_monitoring_workbook import ingest_workbook
 from report_rules import domestic_viewpoint_quality_issues
 from cwh_viewpoint_gate import cluster_density_result
+from cwh_writing_rules import opening_paragraph
 
 SCHEMA_VERSION = "0.3"
 DEFAULT_DATE = "2026-06-29"
@@ -2854,7 +2855,7 @@ def render_report(data: dict[str, Any]) -> str:
     lines = [
         f"# {title_date}国务院常务会议舆情情况报告",
         "",
-        f"国务院总理李强{title_date}主持召开国务院常务会议，会议议题包括：" + "、".join(topic_display(x) for x in meeting["topics"]) + "。" + generation_note,
+        opening_paragraph(meeting, title_date, "会议议题包括：" + "、".join(topic_display(x) for x in meeting["topics"])) + generation_note,
         "",
         "## 一、整体传播情况",
         "",

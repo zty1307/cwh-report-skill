@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from cwh_writing_rules import writing_rules, writing_rules_sha256
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -44,11 +45,16 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def execution_profile(name: str = "") -> tuple[str, dict[str, Any]]:
     policy = read_json(POLICY_PATH)
-    profile_name = name or str(policy.get("default_profile") or "bounded_60m")
+    profile_name = name or str(policy.get("default_profile") or "bounded_40m")
     profiles = policy.get("profiles") or {}
     if profile_name not in profiles:
         raise ValueError(f"Unknown CWH execution profile: {profile_name}")
     return profile_name, dict(profiles[profile_name])
+
+
+def is_bounded_profile(profile: str | dict[str, Any] = "") -> bool:
+    settings = profile if isinstance(profile, dict) else execution_profile(profile)[1]
+    return int(settings.get("wall_clock_budget_seconds") or 0) > 0
 
 
 def stage_budget_seconds(stage_id: str, profile_name: str = "") -> int | None:
@@ -68,6 +74,7 @@ def build_task_payload(
     rules: list[str],
     profile_name: str = "",
     output_schema: dict[str, Any] | None = None,
+    stage_workspace: Path | None = None,
 ) -> dict[str, Any]:
     resolved_profile, profile = execution_profile(profile_name)
     model_contract = profile.get("model_contract") or {}
@@ -84,6 +91,7 @@ def build_task_payload(
         if inputs.get(key):
             declared_outputs.append(str(inputs[key]))
     declared_outputs = list(dict.fromkeys(declared_outputs))
+    workspace = stage_workspace or (expected_output.parent / "_worker" / stage_id)
     return {
         "schema_version": "2.0",
         "task_id": f"{stage_id}:v2",
@@ -93,10 +101,26 @@ def build_task_payload(
         "time_budget_seconds": budget,
         "expected_output": str(expected_output),
         "declared_outputs": declared_outputs,
+        "stage_workspace": str(workspace),
+        "allowed_write_directories": [str(workspace)],
         "inputs": inputs,
         "output_schema": output_schema or TASK_OUTPUT_SCHEMAS.get(task_type, {"type": "object"}),
         "rules": rules,
         "fixed_writing_rules": str(WRITING_RULES_PATH),
+        "writing_rules_sha256": writing_rules_sha256(),
+        "writing_handoff": {
+            "model_fields": ["heading", "summary", "speaker_name", "source_excerpt", "formal_claim", "semantic_review", "translation"],
+            "script_fields": ["source_order", "details", "opening", "propagation_prose", "numbering", "comment_lead", "hotword_prose", "overseas_frames", "Word/Markdown layout"],
+            "instruction": "Submit only the semantic fields required by this stage. Do not draft whole report sections or polish script-generated paragraphs. Preserve the source meaning and all qualifications.",
+            "claim_cjk_range": writing_rules()["viewpoint"]["claim_cjk_range"],
+            "prohibited_padding": writing_rules()["viewpoint"]["prohibited_padding"],
+        },
+        "mechanical_completion": {
+            "stage": "domestic_viewpoints",
+            "missing_fields_only": ["candidate_id", "snapshot_id", "source_text_sha256", "source_snapshot_id", "source_excerpt_start", "source_excerpt_end", "evidence_id"],
+            "instruction": "The controller fills these draft fields only where exact source inputs determine them uniquely. Preserve existing IDs and consistent query/candidate references. Supply real full text and semantic fields; never invent missing source facts. Frozen reviewed bundles must not be completed again.",
+        },
+        "delivery_boundary": "The controller renders Word, Excel, Markdown and HTML from shared data using shipped templates. Do not generate report files, HTML/CSS/JavaScript, layouts or charts; do not read the large dashboard template during normal stage execution.",
         "forbidden_operations": [
             "modify any file under skill_root",
             "modify pipeline_state.json, pipeline_events.jsonl, hashes, validators or task contracts",
@@ -110,7 +134,7 @@ def build_task_payload(
             "missing_evidence": str(model_contract.get("on_missing_evidence") or "return_structured_blocker"),
         },
         "completion_contract": (
-            "Write only the declared JSON/CSV artifacts to declared_outputs. Do not edit code, pipeline state, validators, hashes or prior accepted artifacts. "
+            "Write final JSON/CSV artifacts only to declared_outputs; store collection seeds, raw responses, temporary batches and helper outputs only under stage_workspace. Do not edit code, pipeline state, validators, hashes or prior accepted artifacts. "
             "The deterministic validator is the sole authority for completion. If evidence is insufficient, return a structured "
             "blocker instead of fabricating or padding."
         ),

@@ -519,6 +519,8 @@ class PipelineRunner:
                     log.write("TIMEOUT: cumulative task/stage budget exhausted before command launch\n")
                     return 124, log_path
                 timeout_seconds = min(timeout_seconds, remaining) if timeout_seconds is not None else remaining
+            command_started = time.monotonic()
+            exit_code: int | None = None
             try:
                 process = subprocess.run(
                     command,
@@ -530,10 +532,20 @@ class PipelineRunner:
                     timeout=timeout_seconds,
                     check=False,
                 )
-                return process.returncode, log_path
+                exit_code = process.returncode
+                return exit_code, log_path
             except subprocess.TimeoutExpired:
                 log.write(f"\nTIMEOUT after {timeout_seconds} seconds\n")
+                exit_code = 124
                 return 124, log_path
+            finally:
+                self._event("command_finished", stage_id=stage_id, details={
+                    "total_attempt": attempt,
+                    "command_index": command_count,
+                    "duration_seconds": round(time.monotonic() - command_started, 3),
+                    "exit_code": exit_code,
+                    "log_path": str(log_path),
+                })
 
     def invalidate_from(self, stage_id: str, *, reason: str) -> None:
         found = False

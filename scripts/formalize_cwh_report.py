@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import zipfile
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from report_rules import (
     formal_sentiment_row_ready,
 )
 from source_identity import public_source_family
+from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256
 
 
 @lru_cache(maxsize=1)
@@ -242,10 +244,7 @@ def attribution_review_marker(cluster: dict[str, Any]) -> str:
 
 
 AGENDA_HEADING_PREFIXES = ("听取", "研究", "审议", "进一步部署", "部署", "决定")
-STANCE_HEADING_PREFIXES = (
-    "建议", "认可", "肯定", "认为", "期待", "希望", "支持", "呼吁",
-    "质疑", "担忧", "强调", "主张", "反对",
-)
+STANCE_HEADING_PREFIXES = tuple(writing_rules()["viewpoint"]["heading_stance_verbs"])
 
 
 def stance_heading(text: Any) -> str:
@@ -267,12 +266,12 @@ def topic_heading(item: dict[str, Any]) -> str:
         summary = re.sub(r"^(舆论|媒体|专家|机构)(普遍)?", "", summary)
         reviewed = stance_heading(summary)
         if reviewed:
-            return reviewed[:34]
+            return reviewed
     return topic_display(str(item.get("topic") or heading))
 
 
 def numbered(index: int) -> str:
-    return ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][index]
+    return chinese_number(index + 1)
 
 
 def clean_sentence(text: Any) -> str:
@@ -447,12 +446,9 @@ def joined_agenda_topics(topics: list[str]) -> str:
 
 
 def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
-    meeting = data.get("meeting", {})
     stats = data.get("statistics", {})
     buckets = source_bucket_counts(stats)
-    topics = meeting.get("topics") or []
-    first_topic = quote_title(topics[0]) if topics else "有关议题"
-    total = int(stats.get("total_spread") or 0) or int(stats.get("total_samples") or 0)
+    total = int(stats["total_spread"]) if stats.get("total_spread") is not None else int(stats.get("total_samples") or 0)
     domestic = buckets.get("domestic_media", 0)
     overseas = buckets.get("overseas_media", 0)
     wechat = platform_count(stats, "微信", "wechat", "weixin")
@@ -461,16 +457,27 @@ def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
     other_new_media = platform_count(stats, "new_media")
     if other_new_media <= 0:
         other_new_media = max(0, buckets.get("self_media", 0) + buckets.get("comments", 0) - wechat - weibo - video)
-    peak = peak_date_text(stats)
     total_text = f"{total / 10000:.1f}万" if total >= 10000 else str(total)
     representative = representative_overseas_rows(data)
     overseas_sources = "、".join(formal_overseas_source(row) for row in representative[:3] if row.get("source"))
-    overseas_lead = f"境外媒体如{overseas_sources}等予以关注" if overseas_sources else "境外媒体予以关注"
+    frames = writing_rules()["propagation"]
+    dated_counts = {}
+    for key, value in (stats.get("by_date") or {}).items():
+        try:
+            day = date.fromisoformat(str(key))
+            count = int(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            dated_counts[day.isoformat()] = count
+    peak = peak_date_text({"by_date": dated_counts})
+    peak_sentence = frames["peak_template"].format(peak_date=peak) if dated_counts else ""
+    examples = frames["overseas_examples_template"].format(sources=overseas_sources) if overseas_sources and overseas > 0 else ""
     return [
-        f"本次常务会引发境内外媒体广泛报道，境内外传播总量约{total_text}条，舆论关注“李强主持召开国务院常务会议 {first_topic}”相关话题。经发酵，舆情热度于{peak}达到峰值。",
-        f"境内主流媒体如人民网、新华网、央视网等均在显著位置刊文，共有相关报道{domestic}条。",
-        f"新媒体中，微信公众平台相关信息{wechat}条、微博相关信息{weibo}条，视频号相关信息{video}条，新闻客户端、论坛等渠道共有相关信息{other_new_media}条。",
-        f"{overseas_lead}，共有相关报道（含转载）{overseas}条。具体主流报道情况见附表。",
+        frames["total_template"].format(total_text=total_text, peak_sentence=peak_sentence),
+        frames["domestic_template"].format(count=domestic),
+        frames["new_media_template"].format(wechat=wechat, weibo=weibo, video=video, other=other_new_media),
+        frames["overseas_template"].format(count=overseas, examples=examples),
     ]
 
 
@@ -528,7 +535,17 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         if heading:
             output.append((heading, deduped))
     output.sort(key=lambda item: min(int(row.get("report_order") or 999) for row in item[1]))
-    return output[:8]
+    return output
+
+
+def comment_lead(data: dict[str, Any], groups: list[tuple[str, list[dict[str, Any]]]]) -> str:
+    rules = writing_rules()["comments"]
+    summaries = "、".join(name for name, _ in groups)
+    if formal_sentiment_available(data):
+        return rules["sentiment_lead_template"].format(
+            sentiment_lead=netizen_sentiment_lead(data).rstrip("。"), stance_summaries=summaries,
+        )
+    return rules["lead_template"].format(stance_summaries=summaries)
 
 
 def comment_is_substantive(item: dict[str, Any], text: str | None = None) -> bool:
@@ -558,7 +575,7 @@ def comment_is_report_quote_suitable(text: str) -> bool:
 
 def comment_wording(rows: list[dict[str, Any]]) -> str:
     parts = []
-    for item in rows[:3]:
+    for item in rows:
         text = clean_sentence(clean_formal_comment(item.get("content") or item.get("title")))
         if not text:
             continue
@@ -566,12 +583,15 @@ def comment_wording(rows: list[dict[str, Any]]) -> str:
             parts.append(f"“{text}”")
         else:
             parts.append(f"有网民关注{text}。")
+        if len(parts) >= writing_rules()["comments"]["quotes_per_ready_topic"][1]:
+            break
     if parts and all(part.startswith("“") for part in parts):
         return "网民称，" + "".join(parts) + "。"
     return " ".join(parts)
 
 
 def hotword_paragraph(data: dict[str, Any]) -> str:
+    frames = writing_rules()["hotwords"]
     hotwords = data.get("hotwords") or []
     if not hotwords:
         return "从热词分布来看，当前批次样本不足，尚未形成稳定热词分布。"
@@ -584,7 +604,7 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         for row in data.get("topic_stats") or []
     }
     ordered_topics = sorted(by_topic, key=lambda topic: topic_totals.get(topic, 0), reverse=True)
-    rank_phrases = ["位居前列", "热度较高", "持续热传", "受到关注", "讨论较多", "频繁出现"]
+    rank_phrases = frames["paragraph_rank_phrases"]
     focus_by_topic: dict[str, str] = {}
     for item in (data.get("viewpoints") or {}).get("by_topic") or []:
         display = topic_display(str(item.get("topic") or ""))
@@ -592,29 +612,22 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         if clusters:
             focus = clean_sentence(clusters[0].get("summary") or clusters[0].get("details"))
             focus = re.sub(r"^(?:舆论|媒体|专家|网民)(?:普遍)?(?:认为|关注|指出|建议|表示|强调)", "", focus)
-            focus_by_topic[display] = focus[:48]
-    focus_phrases = [
-        "相关讨论主要聚焦{focus}",
-        "讨论内容集中于{focus}",
-        "讨论重点进一步延伸至{focus}",
-        "相关观点主要讨论{focus}",
-        "相关观点多涉及{focus}",
-        "讨论中较多提及{focus}",
-    ]
-    for index, topic in enumerate(ordered_topics[:6]):
+            focus_by_topic[display] = focus
+    focus_phrases = frames["focus_phrases"]
+    for index, topic in enumerate(ordered_topics):
         words = by_topic[topic]
-        selected = [w for w in words if w][:3]
+        selected = [w for w in words if w][:frames["words_per_topic_in_prose"]]
         if not selected:
             continue
         quoted = "、".join(f"“{word}”" for word in selected)
         rank = rank_phrases[min(index, len(rank_phrases) - 1)]
-        focus = focus_by_topic.get(topic) or f"{topic}相关部署"
-        focus_clause = focus_phrases[min(index, len(focus_phrases) - 1)].format(focus=focus)
+        focus = focus_by_topic.get(topic)
+        focus_clause = ("，" + focus_phrases[index % len(focus_phrases)] + focus) if focus else ""
         lead = "" if index < 4 else "此外，" if index == 4 else "同时，"
-        chunks.append(f"{lead}{quoted}等词{rank}，{focus_clause}")
+        chunks.append(f"{lead}{quoted}等词{rank}{focus_clause}")
     if not chunks:
         return "从热词分布来看，当前批次样本不足，尚未形成稳定热词分布。"
-    return "从热词分布来看，" + "。".join(chunks) + "。"
+    return frames["opening"] + "。".join(chunks) + "。"
 
 
 def overseas_report_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1120,6 +1133,7 @@ def representative_overseas_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
+    frames = writing_rules()["overseas"]
     appendix_rows = appendix_overseas_rows(data)
     if not appendix_rows:
         return ["数据周期内，暂未取得通过相关性、报道类型和简体中文门禁的境外报道样本，不据此推断整体关注度。"]
@@ -1135,7 +1149,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
     if factual_rows:
         representative_keys = {
             str(row.get("url") or row.get("title") or "")
-            for row in representative_overseas_rows(data)[:3]
+            for row in representative_overseas_rows(data)[:frames["max_factual_examples"]]
         }
         ordered_rows = [
             *[row for row in factual_rows if str(row.get("url") or row.get("title") or "") in representative_keys],
@@ -1143,14 +1157,16 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
         ]
         examples = "、".join(
             f"{formal_overseas_source(row)}文章《{row.get('_formal_title_cn')}》"
-            for row in ordered_rows[:3]
+            for row in ordered_rows[:frames["max_factual_examples"]]
         )
-        ending = "，另有少量解读如下：" if interpretive_rows else "，暂无评论性文章。"
-        paragraphs.append(f"数据周期内，境外媒体以事实性报道为主。如{examples}等{ending}")
+        factual_majority = len(factual_rows) > len(appendix_rows) / 2
+        lead_key = "factual_lead_template" if factual_majority else "mixed_factual_lead_template"
+        ending_key = ("interpretive_transition" if factual_majority else "mixed_interpretive_transition") if interpretive_rows else "no_interpretation_suffix"
+        paragraphs.append(frames[lead_key].format(examples=examples) + frames[ending_key])
 
     if interpretive_rows:
         descriptions = []
-        for row in interpretive_rows[:3]:
+        for row in interpretive_rows[:frames["max_interpretive_examples"]]:
             source = formal_overseas_source(row)
             title = str(row.get("_formal_title_cn") or "").strip()
             summary = clean_sentence(row.get("_formal_summary_cn"))
@@ -1159,7 +1175,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
                 descriptions.append(f"{source}文章《{title}》{summary}")
             else:
                 descriptions.append(f"{source}文章《{title}》认为，{summary}")
-        paragraphs.append("境外媒体围绕会议议题的政策影响展开解读。其中，" + "；".join(descriptions) + "。")
+        paragraphs.append(frames["interpretive_lead"] + "；".join(descriptions) + "。")
 
     if not paragraphs:
         return ["数据周期内，暂未取得通过报道类型和简体中文门禁的境外报道样本。"]
@@ -1439,6 +1455,7 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
 
 
 def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
+    document_rules = writing_rules()["document"]
     meeting = data["meeting"]
     stats = data["statistics"]
     topics = meeting.get("topics", [])
@@ -1446,11 +1463,11 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     agenda_topics = joined_agenda_topics(topics) or meeting.get("agenda", "")
 
     lines: list[str] = [
-        f"# {month_day}国务院常务会议舆情综述",
+        "# " + document_rules["title_template"].format(date=month_day),
         "",
-        f"国务院总理李强{month_day}主持召开国务院常务会议，{agenda_topics}。本次国务院常务会议舆情传播情况如下：",
+        opening_paragraph(meeting, month_day, agenda_topics),
         "",
-        "## 一、舆情传播情况",
+        "## " + document_rules["fixed_chapters"][0],
         "",
         "### （一）总事件传播情况",
         "",
@@ -1463,7 +1480,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
         topic_headers.extend(["正面", "中立", "负面"])
     lines.append(md_table(topic_headers, formal_topic_rows(data, sentiment_visible)))
 
-    lines.extend(["", "## 二、境内舆论情况", "", "### （一）境内媒体自媒体情况", ""])
+    lines.extend(["", "## " + document_rules["fixed_chapters"][1], "", "### " + document_rules["domestic_subsections"][0], ""])
     for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
         clusters = item.get("clusters") or []
         if not clusters:
@@ -1479,39 +1496,35 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             lines.append("")
             continue
         lines.append(f"{topic_idx}.{topic_heading(item)}")
-        for idx, cluster in enumerate(clusters[:8], 1):
-            prefix = ["一是", "二是", "三是", "四是", "五是", "六是", "七是", "八是"][idx - 1]
+        for idx, cluster in enumerate(clusters, 1):
+            prefix = ordinal_prefix(idx)
             lines.append(f"{prefix}{cluster_wording(cluster)}")
         lines.append("")
 
     comments = data.get("comments", {}).get("selected") or []
-    lines.extend(["### （二）网民评论情况", ""])
+    lines.extend(["### " + document_rules["domestic_subsections"][1], ""])
     groups = comment_groups(comments)
     if groups:
-        summary_topics = "、".join(name for name, _ in groups[:5]) or "相关议题"
-        if formal_sentiment_available(data):
-            lines.append(f"{netizen_sentiment_lead(data).rstrip('。')}，主要有{summary_topics}等观点。主要评论如下：")
-        else:
-            lines.append(f"网民有关本次国务院常务会议的讨论主要有{summary_topics}等观点。主要评论如下：")
+        lines.append(comment_lead(data, groups))
         for idx, (name, rows) in enumerate(groups, 1):
-            prefix = ["一是", "二是", "三是", "四是", "五是", "六是"][idx - 1]
+            prefix = ordinal_prefix(idx)
             lines.append(f"{prefix}{name}。{comment_wording(rows)}")
     else:
         lines.append("当前批次暂未取得可核验原始评论，暂不判断网民情感倾向。")
 
-    lines.extend(["", "### （三）热词分布情况", "", hotword_paragraph(data)])
+    lines.extend(["", "### " + document_rules["domestic_subsections"][2], "", hotword_paragraph(data)])
 
     appendix_rows = formal_appendix_overseas_rows(data)
-    lines.extend(["", "## 三、境外舆论情况", "", "### （一）境外媒体情况", ""])
+    lines.extend(["", "## " + document_rules["fixed_chapters"][2], "", "### " + document_rules["overseas_subsections"][0], ""])
     lines.extend(overseas_media_body_paragraphs(data))
     foreign_comment_paragraphs = overseas_comment_paragraphs(data)
-    lines.extend(["", "### （二）境外网民评论"])
+    lines.extend(["", "### " + document_rules["overseas_subsections"][1]])
     if foreign_comment_paragraphs:
         lines.extend(["", *foreign_comment_paragraphs])
     else:
         lines.append("境外网民对本次国务院常务会议关注度较低，暂无评论性观点。")
 
-    lines.extend(["", "## 附录", "", "### （一）外媒报道列表（部分）", ""])
+    lines.extend(["", "## " + document_rules["fixed_chapters"][3], "", "### （一）外媒报道列表（部分）", ""])
     lines.append(
         md_table(
             ["序号", "来源", "报道日期", "超链接标题"],
@@ -2006,13 +2019,14 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     from docx.shared import Inches
 
     document = new_document()
+    document_rules = writing_rules()["document"]
     meeting = data["meeting"]
     month_day = month_day_text(meeting.get("date", ""))
     topics = meeting.get("topics") or []
     agenda_topics = joined_agenda_topics(topics) or meeting.get("agenda", "")
-    add_docx_title(document, f"{month_day}国务院常务会议舆情综述")
+    add_docx_title(document, document_rules["title_template"].format(date=month_day))
     document.add_paragraph("")
-    document.add_paragraph(f"国务院总理李强{month_day}主持召开国务院常务会议，{agenda_topics}。本次国务院常务会议舆情传播情况如下：")
+    document.add_paragraph(opening_paragraph(meeting, month_day, agenda_topics))
     document.add_paragraph("")
 
     one_override = section_override(data, "one")
@@ -2024,7 +2038,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     if one_override:
         write_override_section(document, data, "one", one_override, docx_charts)
     else:
-        add_docx_heading(document, "一、舆情传播情况", 1)
+        add_docx_heading(document, document_rules["fixed_chapters"][0], 1)
         add_docx_heading(document, "（一）总事件传播情况", 2)
         add_paragraphs(document, total_event_paragraphs(data))
         chart = docx_charts.get("trend_distribution")
@@ -2040,8 +2054,8 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     if two_override:
         write_override_section(document, data, "two", two_override, docx_charts)
     else:
-        add_docx_heading(document, "二、境内舆论情况", 1)
-        add_docx_heading(document, "（一）境内媒体自媒体情况", 2)
+        add_docx_heading(document, document_rules["fixed_chapters"][1], 1)
+        add_docx_heading(document, document_rules["domestic_subsections"][0], 2)
         for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
             clusters = item.get("clusters") or []
             if not clusters:
@@ -2052,27 +2066,22 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
                 add_single_topic_paragraph(document, topic_idx, item, clusters[0])
                 continue
             add_docx_heading(document, f"{topic_idx}.{topic_heading(item)}", 3)
-            for idx, cluster in enumerate(clusters[:8], 1):
-                prefix = ["一是", "二是", "三是", "四是", "五是", "六是", "七是", "八是"][idx - 1]
+            for idx, cluster in enumerate(clusters, 1):
+                prefix = ordinal_prefix(idx)
                 add_cluster_paragraph(document, prefix, cluster)
 
-        add_docx_heading(document, "（二）网民评论情况", 2)
+        add_docx_heading(document, document_rules["domestic_subsections"][1], 2)
         comments = data.get("comments", {}).get("selected") or []
         groups = comment_groups(comments)
         if groups:
-            summary_topics = "、".join(name for name, _ in groups[:5]) or "相关议题"
-            if sentiment_visible:
-                lead = f"{netizen_sentiment_lead(data).rstrip('。')}，主要有{summary_topics}等观点。"
-            else:
-                lead = f"网民观点主要围绕{summary_topics}等方面展开。"
-            document.add_paragraph(f"{lead}主要评论如下：")
+            document.add_paragraph(comment_lead(data, groups))
             for idx, (name, rows) in enumerate(groups, 1):
-                prefix = ["一是", "二是", "三是", "四是", "五是", "六是"][idx - 1]
+                prefix = ordinal_prefix(idx)
                 add_comment_group_paragraph(document, prefix, name, rows)
         else:
             document.add_paragraph("当前批次暂未取得可核验原始评论，暂不判断网民情感倾向。")
 
-        add_docx_heading(document, "（三）热词分布情况", 2)
+        add_docx_heading(document, document_rules["domestic_subsections"][2], 2)
         document.add_paragraph(hotword_paragraph(data))
         chart = docx_charts.get("hotword_distribution")
         if chart and Path(chart).exists():
@@ -2088,10 +2097,10 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     if three_override:
         write_override_section(document, data, "three", three_override, docx_charts)
     else:
-        add_docx_heading(document, "三、境外舆论情况", 1)
-        add_docx_heading(document, "（一）境外媒体情况", 2)
+        add_docx_heading(document, document_rules["fixed_chapters"][2], 1)
+        add_docx_heading(document, document_rules["overseas_subsections"][0], 2)
         add_paragraphs(document, overseas_media_body_paragraphs(data))
-        add_docx_heading(document, "（二）境外网民评论", 2)
+        add_docx_heading(document, document_rules["overseas_subsections"][1], 2)
         foreign_comment_paragraphs = overseas_comment_paragraphs(data)
         if foreign_comment_paragraphs:
             add_paragraphs(document, foreign_comment_paragraphs)
@@ -2105,7 +2114,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     if four_override:
         write_override_section(document, data, "four", four_override, docx_charts)
     else:
-        add_docx_heading(document, "附录", 1)
+        add_docx_heading(document, document_rules["fixed_chapters"][3], 1)
         add_docx_heading(document, "（一）外媒报道列表（部分）", 2)
         add_overseas_table(document, formal_appendix_overseas_rows(data))
         add_docx_heading(document, "（二）传播量较大的公众号文章", 2)
@@ -2162,6 +2171,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
 def formalize_report(data: dict[str, Any], out_dir: Path) -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     enrich_viewpoint_titles(data)
+    data.setdefault("audit", {})["writing_rules_sha256"] = writing_rules_sha256()
     formal_md = out_dir / "cwh_formal_report.md"
     formal_docx = out_dir / "cwh_formal_report.docx"
     formal_md.write_text(render_formal_markdown(data, out_dir), encoding="utf-8")

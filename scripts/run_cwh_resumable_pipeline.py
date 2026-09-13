@@ -25,6 +25,7 @@ from domestic_evidence_mapping import (
 )
 from cwh_model_contract import build_task_payload, execution_profile, stage_budget_seconds
 from normalize_cwh_analysis import normalize_analysis
+from complete_cwh_evidence_structure import complete_analysis_structure
 from cwh_viewpoint_gate import cluster_density_result
 from report_rules import domestic_viewpoint_quality_issues
 
@@ -190,7 +191,9 @@ def ai_task(
         rules=rules,
         profile_name=str(runner.input_contract.get("execution_profile") or ""),
         output_schema=output_schema,
+        stage_workspace=runner.root / "worker" / stage_id,
     )
+    Path(payload["stage_workspace"]).mkdir(parents=True, exist_ok=True)
     atomic_write_json(path, payload)
     return path
 
@@ -646,7 +649,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             if str(candidate.get("formal_use") or "").strip().lower() == "reserve"
         }
         if reserve_candidates and not bounded_profile:
-            problems.append(f"{topic}仅bounded_60m允许使用formal_use=reserve")
+            problems.append(f"{topic}仅bounded限时档允许使用formal_use=reserve")
         for candidate_id in sorted(reserve_candidates):
             if not str(eligible_candidates[candidate_id].get("reserve_reason") or "").strip():
                 problems.append(f"{topic}候选{candidate_id}标记为reserve但缺少reserve_reason")
@@ -658,12 +661,12 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             )
         if bounded_profile:
             if len(formal_candidate_ids) > 12:
-                problems.append(f"{topic}bounded_60m正式声音{len(formal_candidate_ids)}条，超过12条硬上限")
+                problems.append(f"{topic}bounded限时档正式声音{len(formal_candidate_ids)}条，超过12条硬上限")
             if len(formal_candidate_ids) < 4:
                 shortfall = item.get("evidence_shortfall") or {}
                 if not all(str(shortfall.get(field) or "").strip() for field in ("reason", "search_evidence", "reviewed_by")):
                     problems.append(
-                        f"{topic}bounded_60m正式声音仅{len(formal_candidate_ids)}条，"
+                        f"{topic}bounded限时档正式声音仅{len(formal_candidate_ids)}条，"
                         "低于4条且缺少evidence_shortfall审计"
                     )
     for issue in domestic_viewpoint_quality_issues(data):
@@ -1135,7 +1138,7 @@ class CwhPipeline:
             "--output",
             str(target),
             "--execution-profile",
-            str(self.contract.get("execution_profile") or "bounded_60m"),
+            str(self.contract.get("execution_profile") or execution_profile()[0]),
         ]
         code, log_path = runner.run_command(spec.stage_id, command, cwd=SKILL_ROOT.parent)
         if code != 0:
@@ -1154,14 +1157,25 @@ class CwhPipeline:
         supplied = str(self.contract.get("analysis_bundle") or "").strip()
         if supplied and not target.exists():
             shutil.copy2(supplied, target)
-        if target.exists():
-            atomic_write_json(target, normalize_analysis(read_json(target)))
         topics = topic_titles(self.artifacts / "CWH舆情情况_标准总表.xlsx")
-        problems = (
-            validate_analysis_bundle(target, topics, require_semantic_review=False)
-            if target.exists()
-            else ["尚未生成analysis_bundle.json"]
-        )
+
+        def evaluate_draft() -> list[str]:
+            if not target.exists():
+                return ["尚未生成analysis_bundle.json"]
+            try:
+                draft = read_json(target)
+                if not isinstance(draft, dict):
+                    return ["analysis_bundle.json顶层必须是JSON对象"]
+                normalized = normalize_analysis(complete_analysis_structure(draft))
+            except (ValueError, TypeError, AttributeError) as exc:
+                return [f"analysis_bundle.json无法解析或结构无效：{type(exc).__name__}: {exc}"]
+            atomic_write_json(target, normalized)
+            try:
+                return validate_analysis_bundle(target, topics, require_semantic_review=False)
+            except (ValueError, TypeError, AttributeError) as exc:
+                return [f"analysis_bundle.json字段类型无效：{type(exc).__name__}: {exc}"]
+
+        problems = evaluate_draft()
         if not problems:
             return StageOutcome.succeeded("境内媒体自媒体观点已覆盖全部子议题并通过证据门禁。")
         task = ai_task(
@@ -1190,7 +1204,7 @@ class CwhPipeline:
                 "eligible候选须核验监测期内发布时间并保存完整原文快照及SHA-256；搜索摘要不能冒充原文。",
                 "一篇文章中的不同发言主体分成独立证据；同一主体同一观点的转载只保留一个正式候选。",
                 "每条入选证据保留candidate_id、evidence_id、单一speaker_name、连续source_excerpt及字符位置、45至120汉字的formal_claim；不得增强原文结论。",
-                "bounded_60m每议题选择6至12个、最多12个代表性独立声音，其余有效候选设formal_use=reserve并写reserve_reason；不足4个时须写含reason、search_evidence、reviewed_by的evidence_shortfall。exhaustive才全部成文。",
+                "bounded限时档每议题选择6至12个、最多12个代表性独立声音，其余有效候选设formal_use=reserve并写reserve_reason；不足4个时须写含reason、search_evidence、reviewed_by的evidence_shortfall。exhaustive才全部成文。",
                 "本节点不填写semantic_review，也不写最终正文；脚本将从formal_claim机械生成cluster.details，独立下一节点再逐命题复核。",
                 "只有证据不足或平台真实受阻时才返回结构化blocker；不得编造链接、引文、人物、ID、快照或状态。",
             ],
@@ -1199,8 +1213,7 @@ class CwhPipeline:
         if worker_failure:
             return worker_failure
         if target.exists():
-            atomic_write_json(target, normalize_analysis(read_json(target)))
-            problems = validate_analysis_bundle(target, topics, require_semantic_review=False)
+            problems = evaluate_draft()
             if not problems:
                 return StageOutcome.succeeded("AI工作器输出已通过境内观点证据门禁。")
             return StageOutcome.failed(
@@ -1438,6 +1451,16 @@ class CwhPipeline:
         worker_failure = maybe_run_ai_worker(runner, spec, task, target)
         if worker_failure:
             return worker_failure
+        if target.exists():
+            problems = validate_hotword_audit(target, topics)
+            if not problems:
+                return StageOutcome.succeeded("AI工作器已完成热词证据审核与二次自审。")
+            return StageOutcome.failed(
+                "热词审核产物未通过门禁：" + "；".join(problems[:12]),
+                retryable=True,
+                error_code="hotword_audit_invalid",
+                details={"task": str(task), "problems": problems},
+            )
         return StageOutcome.waiting(
             "waiting_ai",
             "等待热词证据审核与二次自审完成；完成后从本节点继续。",
@@ -1724,6 +1747,22 @@ def should_launch_local_workbench(
     )
 
 
+def cli_state_summary(state: dict[str, Any], job_dir: Path) -> dict[str, Any]:
+    """Keep routine handoffs small without changing the durable full state."""
+    summary = {key: state.get(key) for key in (
+        "pipeline_id", "status", "current_stage", "next_action",
+        "wall_clock_elapsed_seconds", "completed_elapsed_seconds",
+    ) if key in state}
+    summary["state_path"] = str((job_dir / "pipeline_state.json").resolve())
+    summary["stage_statuses"] = {row["stage_id"]: row["status"] for row in state.get("stages") or []}
+    if state.get("workbench"):
+        summary["workbench"] = state["workbench"]
+    current = next((row for row in state.get("stages") or [] if row.get("stage_id") == state.get("current_stage")), {})
+    if current.get("last_error"):
+        summary["current_error"] = current["last_error"]
+    return summary
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Run the CWH formal-report workflow as a durable resumable pipeline.")
     result.add_argument("action", choices=["run", "status", "invalidate"])
@@ -1743,13 +1782,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--ai-worker-command-json", default=os.environ.get("CWH_PIPELINE_AI_COMMAND_JSON", ""))
     result.add_argument(
         "--execution-profile",
-        choices=["bounded_60m", "exhaustive"],
-        default="bounded_60m",
-        help="Default bounded_60m enforces the one-hour execution contract; exhaustive removes time caps.",
+        choices=["bounded_40m", "bounded_60m", "exhaustive"],
+        default=execution_profile()[0],
+        help="Default bounded_40m targets 40 minutes; bounded_60m retains one hour; exhaustive removes time caps.",
     )
     result.add_argument("--until-stage", default="")
     result.add_argument("--invalidate-from", default="")
     result.add_argument("--no-open", action="store_true", help="Do not launch the local workbench after success.")
+    result.add_argument("--output-format", choices=["compact", "full"], default="compact", help="Compact stdout saves model context; full durable state is always saved in pipeline_state.json.")
     return result
 
 
@@ -1774,7 +1814,8 @@ def main() -> None:
         state = pipeline.runner.run(until_stage=args.until_stage)
         if should_launch_local_workbench(state, no_open=args.no_open):
             state["workbench"] = launch_local_workbench(job_dir.resolve())
-    print(json.dumps(state, ensure_ascii=False, indent=2))
+    output = state if args.output_format == "full" else cli_state_summary(state, job_dir)
+    print(json.dumps(output, ensure_ascii=False, indent=2))
     if state.get("status") == "succeeded":
         raise SystemExit(0)
     if state.get("status") in {"waiting_ai", "waiting_login", "waiting_review", "blocked", "paused", "interrupted"}:

@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
+from cwh_writing_rules import source_rank, writing_rules, writing_rules_sha256
 
 
-STANCE_RE = re.compile(r"^(认为|指出|建议|强调|表示|称|提出|研判|预计|呼吁|担忧|主张)")
+STANCE_RE = re.compile("^(?:" + "|".join(re.escape(value) for value in writing_rules()["viewpoint"]["attribution_verbs"]) + ")")
 
 
 def clean_sentence(value: Any) -> str:
@@ -35,11 +36,12 @@ def evidence_sentence(row: dict[str, Any]) -> str:
         or row.get("source")
         or row.get("platform")
     )
-    if not subject or subject in claim:
+    if not subject or claim.startswith(subject):
         return claim
     if STANCE_RE.match(claim):
         return f"{subject}{claim}"
-    return f"{subject}认为，{claim}"
+    verb = writing_rules()["viewpoint"]["default_attribution_verb"]
+    return f"{subject}{verb}，{claim}"
 
 
 def assemble_cluster_details(cluster: dict[str, Any]) -> str:
@@ -64,13 +66,16 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
         for cluster in topic.get("clusters") or []:
             if not isinstance(cluster, dict):
                 continue
+            # Python's stable sort preserves source order within the same
+            # priority class. Only explicit source metadata changes priority.
+            cluster["evidence"] = sorted(cluster.get("evidence") or [], key=lambda row: source_rank(row) if isinstance(row, dict) else 999)
             details = assemble_cluster_details(cluster)
-            if details:
-                cluster["details"] = details
-                cluster.pop("analysis", None)
+            cluster["details"] = details
+            cluster.pop("analysis", None)
     metadata = data.setdefault("metadata", {})
     metadata["writing_contract_version"] = "formal-writing-rules.v1"
     metadata["writing_assembly"] = "deterministic_from_atomic_claims"
+    metadata["writing_rules_sha256"] = writing_rules_sha256()
     return data
 
 

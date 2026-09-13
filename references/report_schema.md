@@ -51,6 +51,10 @@ Normalized samples should use these fields whenever possible:
 
 ## Report rendering rules
 
+Rendering is deterministic and does not request a model to author deliverable files. `cwh_orchestrator.py` generates Word, Markdown, Excel and the workbench from the same structured report. `generate_dashboard.py` injects a JSON payload into the single `__DASHBOARD_DATA__` slot in `assets/cwh_dashboard_template.html`; the model never rewrites HTML, styles, navigation, cards or export controls during report production. Preserve `analysis_bundle` and its evidence IDs in the payload. Existing system chart images remain authoritative assets. Only an explicit Skill-development task changes templates.
+
+`meeting.chair_name` and `meeting.chair_source` are optional source-backed opening metadata. If either is absent, scripts use a neutral opening without a named chair. Never inherit a person from a historical template. `audit.writing_rules_sha256` records the executable writing-rule revision.
+
 - Main body should not contain hollow placeholders such as `需补充数据`.
 - If a required data source is unavailable, put it in `audit.data_gaps` and mention it briefly in the final audit section.
 - Evidence-backed claims should cite sample source names or appendix rows.

@@ -64,7 +64,8 @@ def stable_source_tasks(
                 "waiting_login_terminal": bool(source.get("waiting_login_terminal", False)),
             }
         )
-    if profile_name == "exhaustive":
+    _, profile = execution_profile(profile_name)
+    if int(profile.get("wall_clock_budget_seconds") or 0) <= 0:
         return tasks
 
     # The bounded profile searches source lanes rather than forcing a weak
@@ -169,7 +170,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
     period = system_data.get("monitoring_period") or {}
     meeting_date = str(period.get("start") or "")
     topics = [str(item.get("title") or "").strip() for item in system_data.get("topics") or []]
-    bounded = profile_name == "bounded_60m"
+    bounded = int(profile.get("wall_clock_budget_seconds") or 0) > 0
     zero_rounds = int(research_policy.get("required_zero_new_rounds") or 2)
     stop_rule = str(research_policy.get("stop_rule") or "two_consecutive_rounds_no_material_new_independent_viewpoint")
     return {
@@ -181,6 +182,11 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
             "max_query_executions_per_topic": int(research_policy.get("max_query_executions_per_topic") or 0),
             "max_results_per_query": int(research_policy.get("max_results_per_query") or 0),
             "max_full_page_fetches_per_topic": int(research_policy.get("max_full_page_fetches_per_topic") or 0),
+            "max_named_entity_expansions_per_topic": int(research_policy.get("max_named_entity_expansions_per_topic") or 0),
+            "required_lanes": list(research_policy.get("required_lanes") or []),
+            "stage_budgets_seconds": dict(profile.get("stage_budgets_seconds") or {}),
+            "reserved_delivery_buffer_seconds": int(profile.get("reserved_delivery_buffer_seconds") or 0),
+            "budget_scope": "Stage limits cover all workbook topics together; query and fetch caps are per-topic ceilings, not quotas to fill.",
         },
         "formal_writing_rules": str(WRITING_RULES_PATH),
         "input_contract": {
@@ -262,7 +268,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                     },
                     "formal_selection_rule": (
                         "Select the strongest independent voices across distinct viewpoint families for formal prose. "
-                        "In bounded_60m, retain additional valid candidates as decision=eligible, formal_use=reserve with "
+                        "In bounded profiles, retain additional valid candidates as decision=eligible, formal_use=reserve with "
                         "a reserve_reason; reserve rows stay in audit and do not expand prose. In exhaustive mode every "
                         "eligible row enters formal prose. Exact mirrors remain duplicate audit records."
                     ),
@@ -330,7 +336,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                 ),
                 "rule": (
                     "Search every workbook topic through every currently permitted comment adapter and topic-specific query family. "
-                    "In bounded_60m, obey the query and candidate caps while preserving every reviewed row inside those caps; "
+                    "In bounded profiles, obey the query and candidate caps while preserving every reviewed row inside those caps; "
                     "in exhaustive mode retain the complete accessible candidate pool. Stop by saturation, budget, or a recorded platform blocker. "
                     "Only verbatim text with an original platform URL and comment identifier may be quoted; otherwise preserve an unquoted public-discussion summary."
                 ),
@@ -400,7 +406,11 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
             "Domestic viewpoint prose must preserve source excerpts, avoid reusing one voice across multiple clusters of the same subtopic, distinguish media editorial judgment from quoted expert judgment, and reject attributed claims shorter than 30 Chinese characters.",
             "Stable-source coverage is mandatory before open search. Every required source must be recorded as hit, no_relevant_result, access_failed or not_applicable for every topic.",
             "The registry is a priority seed, not an allowlist. Preserve the complete accessible candidate pool from registry and open-web discovery before selecting representative formal evidence.",
-            "Do not stop after finding two sources. Stop only after two consecutive search rounds add no material independent viewpoint, and record every round plus every candidate decision.",
+            (
+                "Do not stop after finding two sources. After lane coverage and minimum independent voices, stop after one evidenced zero-new round or the research budget; record every round and candidate decision. Missing minimum evidence requires a structured shortfall, never fabricated coverage."
+                if bounded
+                else "Do not stop after finding two sources. Stop only after two consecutive search rounds add no material independent viewpoint, and record every round plus every candidate decision."
+            ),
             "A saturation round is invalid unless it preserves concrete query executions, backend, execution time, result URL snapshot and retained candidate IDs. A self-reported zero count without result evidence never advances the pipeline.",
             "Every substantive topic normally needs at least two mature viewpoint clusters. A single-cluster result requires a structured evidence-based exception; page count is never padded, but thin evidence may not be silently accepted.",
             "A public-platform source may be recorded as no_relevant_result only after a platform-specific or site-restricted query was actually executed and its query evidence was saved; a generic web-search miss is not a platform result.",

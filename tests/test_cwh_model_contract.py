@@ -13,9 +13,10 @@ from cwh_preflight import run_preflight  # noqa: E402
 
 
 class ModelContractTests(unittest.TestCase):
-    def test_default_profile_fits_one_hour_with_delivery_buffer(self) -> None:
+    def test_default_profile_fits_forty_minutes_with_delivery_buffer(self) -> None:
         name, profile = execution_profile()
-        self.assertEqual("bounded_60m", name)
+        self.assertEqual("bounded_40m", name)
+        self.assertEqual(2400, profile["wall_clock_budget_seconds"])
         stage_total = sum(profile["stage_budgets_seconds"].values())
         self.assertLessEqual(
             stage_total + profile["reserved_delivery_buffer_seconds"],
@@ -37,12 +38,15 @@ class ModelContractTests(unittest.TestCase):
         self.assertIn("pipeline_state.json", forbidden)
         self.assertIn("validators", forbidden)
         self.assertNotIn("Codex", payload["completion_contract"])
+        self.assertEqual([payload["stage_workspace"]], payload["allowed_write_directories"])
+        self.assertTrue(Path(payload["stage_workspace"]).is_relative_to(output.parent))
 
     def test_preflight_validates_runtime_and_policy(self) -> None:
         result = run_preflight(ROOT)
         self.assertEqual("passed", result["status"], result["problems"])
         ids = {row["id"] for row in result["checks"] if row["status"] == "passed"}
         self.assertIn("policy:bounded_60m_budget", ids)
+        self.assertIn("policy:bounded_40m_budget", ids)
         self.assertIn("policy:formal_writing_rules", ids)
 
     def test_semantic_reviewer_cannot_write_controller_verified_artifacts(self) -> None:

@@ -3,15 +3,27 @@
   "derived_from": "reviewed_cross-topic_baseline_reports",
   "scope": "meeting_agnostic",
   "document": {
-    "opening_order": ["event_context", "monitoring_window", "total_volume", "peak_or_stage", "overall_assessment", "section_preview"],
+    "opening_order": ["meeting_date", "meeting_context", "agenda_topics", "report_transition"],
+    "title_template": "{date}国务院常务会议舆情综述",
+    "opening_with_chair": "{chair_name}{date}主持召开国务院常务会议，{agenda}。本次国务院常务会议舆情传播情况如下：",
+    "opening_without_chair": "{date}召开的国务院常务会议，{agenda}。本次国务院常务会议舆情传播情况如下：",
     "fixed_chapters": ["一、舆情传播情况", "二、境内舆论情况", "三、境外舆论情况", "附录"],
     "domestic_subsections": ["（一）境内媒体自媒体情况", "（二）网民评论情况", "（三）热词分布情况"],
     "overseas_subsections": ["（一）境外媒体情况", "（二）境外网民评论"]
   },
+  "propagation": {
+    "total_template": "监测期内，相关信息传播总量约{total_text}条。{peak_sentence}",
+    "peak_template": "舆情热度于{peak_date}达到峰值。",
+    "domestic_template": "境内主流媒体共有相关报道{count}条。",
+    "new_media_template": "新媒体中，微信公众平台相关信息{wechat}条、微博相关信息{weibo}条，视频号相关信息{video}条，新闻客户端、论坛等渠道共有相关信息{other}条。",
+    "overseas_template": "境外媒体共有相关报道（含转载）{count}条。{examples}",
+    "overseas_examples_template": "其中包括{sources}等，具体报道情况见附表。"
+  },
   "viewpoint": {
-    "heading_stance_verbs": ["建议", "认可", "肯定", "认为", "期待", "希望", "支持", "呼吁", "质疑", "担忧"],
+    "heading_stance_verbs": ["建议", "认可", "肯定", "认为", "期待", "希望", "支持", "呼吁", "质疑", "担忧", "强调", "主张", "反对"],
     "cluster_ordinal_prefixes": ["一是", "二是", "三是", "四是", "五是", "六是", "七是", "八是"],
-    "attribution_verbs": ["认为", "指出", "表示", "建议", "强调", "称", "提到"],
+    "attribution_verbs": ["认为", "指出", "表示", "建议", "强调", "称", "提到", "提出", "研判", "预计", "呼吁", "担忧", "主张"],
+    "default_attribution_verb": "认为",
     "claim_cjk_range": [45, 120],
     "minimum_claim_cjk": 30,
     "density_gate": {
@@ -23,17 +35,25 @@
     "topic_cluster_range": [2, 4],
     "assembly": "one_speaker_one_sentence",
     "source_order": ["named_expert", "authoritative_media", "industry_institution", "public_account", "other_traceable_source"],
+    "source_type_classes": {
+      "central_media": "authoritative_media", "mainstream_media": "authoritative_media", "official_media": "authoritative_media",
+      "industry_institution": "industry_institution", "institution": "industry_institution",
+      "self_media": "public_account", "self_media_article": "public_account", "self_media_post": "public_account", "public_account": "public_account"
+    },
     "prohibited_phrases": ["媒体普遍认为", "多家媒体关注", "报道汇集", "样本来源", "公开网络补证", "原始报道汇总"],
     "prohibited_padding": ["具有重要意义", "引发广泛关注", "为高质量发展注入新动能", "值得关注的是"]
   },
   "comments": {
     "lead_template": "网民观点主要围绕{stance_summaries}等方面展开。主要评论如下：",
+    "sentiment_lead_template": "{sentiment_lead}，主要有{stance_summaries}等观点。主要评论如下：",
     "one_group_per_topic": true,
     "quotes_per_ready_topic": [2, 3],
     "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],
     "reject_reaction_only": true
   },
   "hotwords": {
+    "opening": "从热词分布来看，",
+    "words_per_topic_in_prose": 3,
     "paragraph_rank_phrases": ["位居前列", "热度较高", "持续热传", "受到关注"],
     "focus_phrases": ["相关讨论主要聚焦", "讨论内容集中于", "讨论重点进一步延伸至", "相关观点主要讨论", "相关观点多涉及"],
     "target_total": [36, 42],
@@ -42,9 +62,13 @@
   },
   "overseas": {
     "factual_lead_template": "数据周期内，境外媒体以事实性报道为主。如{examples}等",
+    "mixed_factual_lead_template": "数据周期内，境外媒体报道中包括事实性报道，如{examples}等",
     "interpretive_transition": "，少量解读如下：",
+    "mixed_interpretive_transition": "，相关解读如下：",
+    "interpretive_lead": "境外媒体围绕会议议题的政策影响展开解读。其中，",
     "no_interpretation_suffix": "，暂无评论性文章。",
     "max_interpretive_examples": 3,
+    "max_factual_examples": 3,
     "category_numbering": false
   },
   "style": {

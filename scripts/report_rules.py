@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from cwh_writing_rules import unsupported_padding_issues, writing_rules
 
 
 ROLE_PATTERN = (
@@ -22,7 +23,7 @@ TITLED_PERSON_PATTERN = re.compile(
 BARE_PERSON_PATTERN = re.compile(
     rf"(?:^|[。；，、：\s])(?P<person>[\u4e00-\u9fff]{{2,4}})(?={OPINION_PATTERN})"
 )
-MIN_ATTRIBUTED_CLAIM_CJK = 30
+MIN_ATTRIBUTED_CLAIM_CJK = writing_rules()["viewpoint"]["minimum_claim_cjk"]
 GENERIC_VOICES = {
     "媒体",
     "专家",
@@ -202,10 +203,7 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
         topic = str(viewpoint.get("topic") or viewpoint.get("heading") or "未命名子议题")
         heading = str(viewpoint.get("heading") or "").strip().rstrip("。")
         reviewed_heading = re.sub(r"^(?:舆论|媒体|专家|机构)(?:普遍)?", "", heading).strip()
-        stance_prefixes = (
-            "建议", "认可", "肯定", "认为", "期待", "希望", "支持", "呼吁",
-            "质疑", "担忧", "强调", "主张", "反对",
-        )
+        stance_prefixes = tuple(writing_rules()["viewpoint"]["heading_stance_verbs"])
         if heading and not reviewed_heading.startswith(stance_prefixes) and "尚未形成评论性观点" not in heading:
             issues.append(
                 {
@@ -223,6 +221,19 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
         for cluster_index, cluster in enumerate(viewpoint.get("clusters") or [], 1):
             details = str(cluster.get("details") or cluster.get("analysis") or "").strip()
             cluster_name = str(cluster.get("summary") or f"分论点{cluster_index}")
+            for phrase in writing_rules()["viewpoint"]["prohibited_phrases"]:
+                if phrase in details or phrase in cluster_name or phrase in heading:
+                    issues.append({
+                        "code": "configured_prohibited_prose", "severity": "error", "topic": topic,
+                        "cluster": cluster_name, "message": f"{topic}的成文包含禁用表述“{phrase}”；请使用具体主体与原文支持的判断。",
+                    })
+            for evidence in cluster.get("evidence") or []:
+                for phrase in unsupported_padding_issues(evidence):
+                    issues.append({
+                        "code": "unsupported_rhetorical_padding", "severity": "error", "topic": topic,
+                        "cluster": cluster_name, "evidence_id": evidence.get("evidence_id"),
+                        "message": f"{topic}的观点新增了原文片段没有的套话“{phrase}”；请回到原文核对，不得填充字数。",
+                    })
             for pattern, reason in PROHIBITED_VIEWPOINT_PROSE_PATTERNS:
                 if pattern.search(details):
                     issues.append(

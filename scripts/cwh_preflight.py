@@ -17,6 +17,50 @@ REQUIRED_MODULES = {
 }
 
 
+REQUIRED_STAGES = {
+    "preflight", "intake", "workbook", "research_plan", "domestic_viewpoints",
+    "domestic_evidence_verification", "domestic_comments_sentiment",
+    "overseas_evidence", "hotwords", "render", "delivery_gate",
+}
+
+
+def execution_policy_checks(policy: dict[str, Any]) -> list[dict[str, Any]]:
+    """Check every shipped profile, including the explicitly selected legacy one."""
+    profiles = policy.get("profiles") or {}
+    default_name = str(policy.get("default_profile") or "")
+    checks = [{
+        "id": "policy:default_profile",
+        "status": "passed" if default_name in {"bounded_40m", "bounded_60m"} and default_name in profiles else "failed",
+        "profile": default_name,
+    }]
+    for name, expected_wall in (("bounded_40m", 2400), ("bounded_60m", 3600), ("exhaustive", 0)):
+        try:
+            profile = profiles[name]
+            wall_clock = int(profile.get("wall_clock_budget_seconds") or 0)
+            reserve = int(profile.get("reserved_delivery_buffer_seconds") or 0)
+            stages = profile.get("stage_budgets_seconds") or {}
+            stage_total = sum(int(value) for value in stages.values())
+            valid = wall_clock == expected_wall and reserve >= 0
+            if expected_wall:
+                valid = (
+                    valid and set(stages) == REQUIRED_STAGES
+                    and all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in stages.values())
+                    and stage_total + reserve <= wall_clock
+                )
+            else:
+                valid = valid and reserve == 0 and not stages
+            checks.append({
+                "id": f"policy:{name}_budget",
+                "status": "passed" if valid else "failed",
+                "wall_clock_seconds": wall_clock,
+                "stage_total_seconds": stage_total,
+                "reserve_seconds": reserve,
+            })
+        except Exception as exc:
+            checks.append({"id": f"policy:{name}_budget", "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
+    return checks
+
+
 def run_preflight(skill_root: Path) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     for module_name, package in REQUIRED_MODULES.items():
@@ -42,10 +86,14 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "scripts/run_cwh_resumable_pipeline.py",
         "scripts/cwh_model_contract.py",
         "scripts/cwh_viewpoint_gate.py",
+        "scripts/cwh_writing_rules.py",
+        "scripts/complete_cwh_evidence_structure.py",
+        "scripts/cwh_timing_report.py",
         "scripts/cwh_pipeline_runtime.py",
         "scripts/normalize_cwh_analysis.py",
         "scripts/cwh_orchestrator.py",
         "scripts/generate_dashboard.py",
+        "assets/cwh_dashboard_template.html",
         "templates/formal_report_template_complete_20260714.docx",
     ]
     for relative in required_files:
@@ -58,27 +106,22 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
             }
         )
 
+    template = skill_root / "assets" / "cwh_dashboard_template.html"
+    try:
+        placeholder_count = template.read_text(encoding="utf-8").count("__DASHBOARD_DATA__")
+        checks.append({"id": "template:dashboard_data_slot", "status": "passed" if placeholder_count == 1 else "failed", "placeholder_count": placeholder_count})
+    except (OSError, UnicodeError) as exc:
+        checks.append({"id": "template:dashboard_data_slot", "status": "failed", "message": type(exc).__name__})
+
     try:
         policy = json.loads((skill_root / "config" / "execution_policy.v1.json").read_text(encoding="utf-8"))
-        default_name = str(policy.get("default_profile") or "")
-        default_profile = (policy.get("profiles") or {})[default_name]
-        wall_clock = int(default_profile.get("wall_clock_budget_seconds") or 0)
-        reserve = int(default_profile.get("reserved_delivery_buffer_seconds") or 0)
-        stage_total = sum(int(value or 0) for value in (default_profile.get("stage_budgets_seconds") or {}).values())
-        valid_budget = default_name == "bounded_60m" and wall_clock > 0 and stage_total + reserve <= wall_clock
-        checks.append({
-            "id": "policy:bounded_60m_budget",
-            "status": "passed" if valid_budget else "failed",
-            "wall_clock_seconds": wall_clock,
-            "stage_total_seconds": stage_total,
-            "reserve_seconds": reserve,
-        })
+        checks.extend(execution_policy_checks(policy))
     except Exception as exc:
-        checks.append({"id": "policy:bounded_60m_budget", "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
+        checks.append({"id": "policy:execution_policy", "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
 
     try:
         writing = json.loads((skill_root / "config" / "formal_writing_rules.v1.json").read_text(encoding="utf-8"))
-        required_sections = {"document", "viewpoint", "comments", "hotwords", "overseas", "style"}
+        required_sections = {"document", "propagation", "viewpoint", "comments", "hotwords", "overseas", "style"}
         missing_sections = sorted(required_sections - set(writing))
         density = writing.get("viewpoint", {}).get("density_gate", {})
         valid_density = (

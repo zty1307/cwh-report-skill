@@ -487,8 +487,9 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
         paragraphs = FORMALIZE.overseas_media_body_paragraphs(data)
         text = "".join(paragraphs)
 
-        self.assertIn("境外媒体以事实性报道为主", text)
-        self.assertIn("少量解读如下", text)
+        self.assertIn("境外媒体报道中包括事实性报道", text)
+        self.assertNotIn("以事实性报道为主", text)
+        self.assertIn("相关解读如下", text)
         self.assertIn("围绕会议议题的政策影响展开解读", text)
         self.assertNotIn("一是事实性报道", text)
         self.assertIn("《中国国常会部署抗洪救灾》", text)

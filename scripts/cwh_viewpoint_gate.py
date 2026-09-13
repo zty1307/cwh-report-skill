@@ -5,17 +5,13 @@ An audited exception only waives aggregate cluster density, never those gates.
 """
 from __future__ import annotations
 
-import json
 import re
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
+from cwh_writing_rules import writing_rules
 
 
-@lru_cache(maxsize=1)
 def density_policy() -> dict[str, Any]:
-    path = Path(__file__).resolve().parent.parent / "config/formal_writing_rules.v1.json"
-    return json.loads(path.read_text(encoding="utf-8"))["viewpoint"]["density_gate"]
+    return writing_rules()["viewpoint"]["density_gate"]
 
 
 def cluster_density_result(cluster: dict[str, Any]) -> dict[str, Any]:
