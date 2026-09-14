@@ -61,7 +61,7 @@ def _matches(candidate: dict[str, Any], evidence: dict[str, Any]) -> bool:
     return not any(left and right and left != right for left, right in pairs)
 
 
-def complete_analysis_structure(data: dict[str, Any]) -> dict[str, Any]:
+def complete_analysis_structure(data: dict[str, Any], corpus: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return a completed copy; ambiguous or inconsistent source fields survive.
 
     Call once on the authoring draft, before prose normalization and hashing for
@@ -76,6 +76,10 @@ def complete_analysis_structure(data: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("Frozen independently reviewed bundles cannot be structurally completed")
     result = copy.deepcopy(data)
+    raw_rows = _rows((corpus or {}).get("candidates"))
+    raw_by_id = {_string(row.get("record_id")): row for row in raw_rows}
+    if len(raw_by_id) != len(raw_rows):
+        raise ValueError("Raw corpus has ambiguous duplicate record IDs")
     research = _object(_object(result.get("research_audit")).get("domestic_media_research"))
     candidates_by_topic: dict[str, list[dict[str, Any]]] = {}
     for pool in _rows(research.get("candidate_pool_by_topic")):
@@ -83,6 +87,17 @@ def complete_analysis_structure(data: dict[str, Any]) -> dict[str, Any]:
         candidates = _rows(pool.get("candidates"))
         candidates_by_topic.setdefault(topic, []).extend(candidates)
         for candidate in candidates:
+            raw = raw_by_id.get(_string(candidate.get("raw_evidence_record_id")))
+            if raw:
+                for key in ("url", "title", "source", "published_at"):
+                    if _missing(candidate, key):
+                        candidate[key] = raw.get(key)
+                candidate.setdefault("source_snapshot", {})
+                raw_snapshot = _object(candidate.get("source_snapshot"))
+                for key, value in {"url": raw.get("url"), "title": raw.get("title"),
+                                   "published_at": raw.get("published_at"), "source_text": raw.get("content")}.items():
+                    if _missing(raw_snapshot, key):
+                        raw_snapshot[key] = value
             snapshot = _object(candidate.get("source_snapshot"))
             text = _string(snapshot.get("source_text"))
             if not text.strip():

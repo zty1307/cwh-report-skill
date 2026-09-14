@@ -20,8 +20,8 @@ def policy():
     return json.loads((ROOT / "config" / "execution_policy.v1.json").read_text(encoding="utf-8"))
 
 
-def test_40m_is_default_and_retains_independent_review_and_quality_minimums():
-    name, current = execution_profile()
+def test_40m_remains_available_and_retains_independent_review_and_quality_minimums():
+    name, current = execution_profile("bounded_40m")
     assert name == "bounded_40m"
     assert sum(current["stage_budgets_seconds"].values()) == 2040
     assert current["reserved_delivery_buffer_seconds"] == 360

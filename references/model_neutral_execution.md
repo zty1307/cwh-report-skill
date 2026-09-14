@@ -1,6 +1,6 @@
 # Model-neutral execution contract
 
-The default formal profile is `bounded_40m`. It is designed for heterogeneous model workers and a 40-minute wall-clock target when source access and worker capabilities are already available. `bounded_60m` remains an explicit one-hour option and `exhaustive` keeps uncapped research. These are engineering budgets, not evidence that every model can complete within them or permission to bypass a failed gate.
+The default formal profile is `bounded_60m`, with a 3600-second limit and a 2700-second research cutoff that preserves delivery time. `bounded_40m` remains an explicit tighter option and `exhaustive` keeps uncapped research. These are engineering budgets, not evidence that every model can complete within them or permission to bypass a failed gate.
 
 ## Division of work
 
@@ -10,13 +10,15 @@ The model receives one bounded JSON task at a time. It writes final artifacts on
 
 ## Execution budgets
 
-The executable limits live in `config/execution_policy.v1.json`. The default allocates 2040 seconds across stages plus 360 seconds of job-level overhead reserve, totaling 2400 seconds. Stage limits are not increased by the reserve. The legacy 60-minute profile retains its previous budgets. Research lanes are bounded by query, page-fetch and formal-voice limits. Monitoring-system full text is always processed first. Default 40-minute operation uses one active model worker and serial stages to avoid duplicated context. Independent review is a separate sequential run. Legacy parallel flags do not provide an asynchronous scheduler or authorize spawning agents.
+The executable limits live in `config/execution_policy.v1.json`. Both bounded profiles use one active model worker and serial stages. Stage limits are not increased by the reserve. Research lanes are bounded by query, page-fetch and formal-voice limits. Monitoring-system full text is always processed first. Independent review is a separate sequential run. See `model_worker_host.md` for permission-aware transports and honest review-only delivery. Models do not need to run shell commands or edit pipeline state.
 
 The 40-minute allocation is: preflight 30 seconds, intake 15, workbook 150, plan 30, domestic evidence 540, independent review 300, comments 330, overseas 270, hotwords 90, render 165 and final gate 120. Research retains ten query executions per topic so all source lanes, open search and a zero-new check can fit. It caps full-page fetches at 18 and named-entity expansions at two; comments allow four queries and 30 retained candidates; overseas allows one supplemental query and six page fetches. Both bounded profiles retain the same minimum independent voices, formal voice cap, source mapping and independent semantic review. A large raw workbook or limited access may exhaust these budgets and must produce an honest blocker.
 
 The controller persists the first-run clock and the first-entry clock of each stage. Waiting for manual worker output and retrying consume the same budgets; explicit resume and invalidation do not grant a new time window. Each subprocess timeout is clipped to the remaining stage and job time. In-process stages are checked at return and cannot be accepted after expiry. Expiry records `time_budget_exhausted` and retains checkpoints; start a new job directory for a new timed evaluation. The 40-minute target requires actual end-to-end model tests, including network, collection, retries and delivery. Report completion rate and elapsed time together; an early timeout is not a speed improvement or a successful report.
 
 The bounded profile stops after minimum lane coverage plus one evidenced zero-new round, or when the lane budget is exhausted. Additional relevant candidates remain in the audit as `formal_use=reserve`; they do not have to expand the formal report indefinitely. The optional `exhaustive` profile retains the older two-zero-round behavior and has no wall-clock SLA.
+
+Large raw corpora are indexed once, with per-topic reading order and separate full-article files. In bounded mode each topic requires at least `min(12, corpus size)` real full-article reviews. The remaining source IDs can be explicitly deferred only against a hash-matching complete controller index. Deferred records are never labelled reviewed, excluded or evidence of zero new viewpoints; quality gates on selected claims remain unchanged. The controller can hydrate missing snapshots by `raw_evidence_record_id`, removing repeated multi-megabyte copying by the model. Exhaustive mode still requires every record to be reviewed.
 
 ## Repair behavior
 

@@ -21,7 +21,7 @@
 - 平台登录、等待 AI、等待人工复核属于正常等待状态，不等于整个任务失败；
 - 每个节点可复现、可审计、可单独测试；
 - 能用脚本完成的流程、计算、字段检查、文件校验和状态判断不交给模型。
-- 默认以 `config/execution_policy.v1.json` 的 `bounded_40m` 档运行；各节点预算共2040秒，另留360秒任务级开销缓冲，总计2400秒。`bounded_60m` 保留为显式兼容选项；需要穷尽检索时选择 `exhaustive`。缓冲不延长节点自身时限。
+- 默认以 `config/execution_policy.v1.json` 的 `bounded_60m` 档运行，总计3600秒，第2700秒停止继续消耗研究时间并保留交付时间。`bounded_40m` 为显式提速选项；需要穷尽检索时选择 `exhaustive`。缓冲不延长节点自身时限。
 
 ## 2. 唯一入口与节点
 
@@ -140,7 +140,7 @@ python scripts/run_cwh_resumable_pipeline.py run `
   --job-dir outputs/cwh_pipeline_job `
   --agenda "7月10日国务院常务会" `
   --system-workbook "D:\path\CWH舆情情况.xlsx" `
-  --execution-profile bounded_40m
+  --execution-profile bounded_60m
 ```
 
 查看状态：

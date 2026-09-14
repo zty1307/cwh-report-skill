@@ -460,6 +460,7 @@ class CwhResumablePipelineTests(unittest.TestCase):
         runner = mock.Mock()
         runner.root = self.job
         runner.input_contract = {"ai_worker_command": ["worker", "{task}"]}
+        runner.remaining_budget_seconds.return_value = None
         runner.run_command.return_value = (0, self.job / "worker.log")
         spec = MODULE.StageSpec("domestic_comments_sentiment", "comments")
         task = self.job / "tasks/comments.json"
@@ -539,7 +540,7 @@ class CwhResumablePipelineTests(unittest.TestCase):
         self.assertIn("executions", contract["saturation_rule"]["round_fields"])
         self.assertIn("result_urls", contract["saturation_rule"]["execution_fields"])
         self.assertIsNone(plan["topics"][0]["minimum_evidence"]["fixed_result_target"])
-        self.assertEqual("bounded_40m", plan["execution_profile"])
+        self.assertEqual("bounded_60m", plan["execution_profile"])
         self.assertEqual(12, contract["max_formal_voices_per_topic"])
         self.assertEqual(
             "bounded_selected_eligible_with_audited_reserve",
@@ -551,7 +552,7 @@ class CwhResumablePipelineTests(unittest.TestCase):
         )
         self.assertEqual("all_workbook_topics", plan["global_tasks"]["public_comments"]["target_topics"])
         self.assertEqual([2, 3], plan["global_tasks"]["public_comments"]["target_quotes"])
-        self.assertEqual(4, plan["global_tasks"]["public_comments"]["max_query_executions_per_topic"])
+        self.assertEqual(6, plan["global_tasks"]["public_comments"]["max_query_executions_per_topic"])
         self.assertNotIn("reddit", plan["global_tasks"]["overseas"]["mediaspider_foreign"]["platforms"])
         self.assertIn("reddit", plan["global_tasks"]["overseas"]["mediaspider_foreign"]["paused_platforms"])
 

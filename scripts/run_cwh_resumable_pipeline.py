@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -209,6 +210,11 @@ def maybe_run_ai_worker(
     template = runner.input_contract.get("ai_worker_command") or []
     if not isinstance(template, list) or not template:
         return None
+    remaining = runner.remaining_budget_seconds(spec.stage_id)
+    if remaining is not None:
+        task_data = read_json(task)
+        task_data["remaining_budget_seconds"] = max(1, int(remaining))
+        atomic_write_json(task, task_data)
     command = [
         str(item).format(
             stage=spec.stage_id,
@@ -224,7 +230,7 @@ def maybe_run_ai_worker(
     if code != 0:
         return StageOutcome.failed(
             f"AI工作器退出码为{code}，详见{log_path}",
-            retryable=code in spec.transient_exit_codes,
+            retryable=(code in spec.transient_exit_codes and code != 124) or code == 65,
             error_code=f"ai_worker_exit_{code}",
             details={"task": str(task), "log_path": str(log_path)},
         )
@@ -237,7 +243,7 @@ def maybe_run_ai_worker(
     return None
 
 
-def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_review: bool = True) -> list[str]:
+def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_review: bool = True, allow_deferred_corpus: bool = False) -> list[str]:
     problems: list[str] = []
     try:
         data = read_json(path)
@@ -261,6 +267,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
     public_corpus_ids: set[str] = set()
     public_corpus_ids_by_topic: dict[str, set[str]] = {}
     public_corpus_retained_by_topic: dict[str, set[str]] = {}
+    public_corpus_by_id: dict[str, dict[str, Any]] = {}
     if public_corpus_path.exists():
         try:
             public_corpus = read_json(public_corpus_path)
@@ -268,6 +275,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             problems.append(f"public_article_evidence.json无法解析：{type(exc).__name__}: {exc}")
             public_corpus = {}
         corpus_rows = [row for row in public_corpus.get("candidates") or [] if isinstance(row, dict)]
+        public_corpus_by_id = {str(row.get("record_id")): row for row in corpus_rows}
         public_corpus_ids = {
             str(row.get("record_id") or "").strip() for row in corpus_rows if str(row.get("record_id") or "").strip()
         }
@@ -278,6 +286,12 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                 if topic_index in (row.get("topic_hits") or []) and str(row.get("record_id") or "").strip()
             }
         corpus_review = research.get("public_article_corpus_review") or {}
+        indexed_ids = {}
+        index_path = path.parent / "public_corpus_index.json"
+        if allow_deferred_corpus and index_path.exists():
+            index = read_json(index_path)
+            if index.get("source_sha256") == hashlib.sha256(public_corpus_path.read_bytes()).hexdigest():
+                indexed_ids = {row["topic"]: set(row["record_ids"]) for row in index.get("topics", [])}
         topic_reviews = {
             str(row.get("topic") or "").strip(): row
             for row in corpus_review.get("topic_reviews") or []
@@ -292,7 +306,13 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             excluded_rows = [row for row in review_row.get("excluded") or [] if isinstance(row, dict)]
             excluded_ids = {str(row.get("record_id") or "").strip() for row in excluded_rows}
             missing_review = sorted(expected_ids - reviewed_ids)
-            if missing_review:
+            deferred = set(review_row.get("deferred_record_ids") or [])
+            valid_deferral = (allow_deferred_corpus and indexed_ids.get(topic) == expected_ids
+                              and deferred == set(missing_review) and len(reviewed_ids) >= min(12, len(expected_ids))
+                              and bool(str(review_row.get("deferral_reason") or "").strip()))
+            if deferred and not valid_deferral:
+                problems.append(f"{topic}公众文章待审清单缺少完整索引、最低实审量或与未审记录不一致")
+            if missing_review and not valid_deferral:
                 problems.append(f"{topic}原始公众文章证据池有{len(missing_review)}条未逐条审核")
             if retained_ids | excluded_ids != reviewed_ids:
                 problems.append(f"{topic}公众文章证据池审核记录未将全部已审记录明确分为保留或排除")
@@ -424,6 +444,10 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                 if not str(candidate.get("first_seen_round") or "").strip():
                     problems.append(f"{topic}候选{candidate_id or candidate_index}缺少first_seen_round")
                 raw_record_id = str(candidate.get("raw_evidence_record_id") or "").strip()
+                raw_source = public_corpus_by_id.get(raw_record_id)
+                if raw_source and (candidate.get("url") != raw_source.get("url") or
+                                   (candidate.get("source_snapshot") or {}).get("source_text") != raw_source.get("content")):
+                    problems.append(f"{topic}监测来源候选的URL或全文与原始记录不一致：{raw_record_id}")
                 if raw_record_id and raw_record_id not in public_corpus_ids:
                     problems.append(f"{topic}候选{candidate_id or candidate_index}引用了不存在的原始公众文章记录")
                 if decision == "eligible":
@@ -845,7 +869,8 @@ def build_specs() -> list[StageSpec]:
             "workbook",
             "标准总表生成与审核",
             dependencies=("intake",),
-            artifacts=(ArtifactSpec("workbook", "artifacts/CWH舆情情况_标准总表.xlsx", minimum_bytes=1024),),
+            artifacts=(ArtifactSpec("workbook", "artifacts/CWH舆情情况_标准总表.xlsx", minimum_bytes=1024),
+                       ArtifactSpec("public_article_evidence", "artifacts/public_article_evidence.json", required=False)),
             max_attempts=2,
         ),
         StageSpec(
@@ -1016,7 +1041,7 @@ class CwhPipeline:
         atomic_write_json(target, payload)
         return StageOutcome.succeeded("输入已固化，后续节点只能消费本任务产物。")
 
-    def workbook(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
+    def workbook(self, runner: PipelineRunner, spec: StageSpec, *, review_applied: bool = False) -> StageOutcome:
         target = self.artifacts / "CWH舆情情况_标准总表.xlsx"
         source = str(self.contract.get("system_workbook") or "").strip()
         supplied_public_evidence = str(self.contract.get("public_article_evidence") or "").strip()
@@ -1073,8 +1098,10 @@ class CwhPipeline:
         if public_review.exists():
             command.extend(["--public-review", str(public_review)])
         code, log_path = runner.run_command(spec.stage_id, command, cwd=SKILL_ROOT.parent)
+        # The raw pipeline locates its run directory beside --output, not --audit.
+        packet_dir = target.parent / "run"
         if code == 0 and target.exists():
-            raw_public_evidence = raw_run / "run" / "public_article_evidence.json"
+            raw_public_evidence = packet_dir / "public_article_evidence.json"
             if raw_public_evidence.exists():
                 shutil.copy2(raw_public_evidence, public_evidence_target)
             return StageOutcome.succeeded(
@@ -1082,17 +1109,24 @@ class CwhPipeline:
                 details={"log_path": str(log_path), "audit": str(audit)},
             )
         packets = {
-            "hotword": raw_run / "run" / "hotword_review_packet.json",
-            "overseas": raw_run / "run" / "overseas_review_packet.json",
-            "public_top": raw_run / "run" / "public_top_review_packet.json",
+            "hotword": packet_dir / "hotword_review_packet.json",
+            "overseas": packet_dir / "overseas_review_packet.json",
+            "public_top": packet_dir / "public_top_review_packet.json",
         }
         if any(path.exists() for path in packets.values()):
+            if review_applied:
+                return StageOutcome.failed(
+                    f"审核结果未被原始表处理器接受，详见{log_path}",
+                    retryable=True, error_code="raw_review_rejected",
+                    details={"log_path": str(log_path)},
+                )
             task = ai_task(
                 runner,
                 spec.stage_id,
                 task_type="raw_workbook_semantic_reviews",
                 expected_output=hotword_review,
                 inputs={
+                    "validation_log": str(log_path),
                     **{key: str(value) for key, value in packets.items() if value.exists()},
                     "expected_outputs": {
                         "hotword_ai_review": str(hotword_review),
@@ -1107,11 +1141,13 @@ class CwhPipeline:
                     f"热词输出写入{hotword_review}，境外输出写入{overseas_review}，公众TOP输出写入{public_review}。",
                 ],
             )
-            worker_failure = maybe_run_ai_worker(runner, spec, task, hotword_review)
+            # Packets can be emitted incrementally. Do not require the hotword
+            # output before the corresponding packet is available.
+            worker_failure = maybe_run_ai_worker(runner, spec, task, hotword_review, allow_missing_output=True)
             if worker_failure:
                 return worker_failure
             if hotword_review.exists() and overseas_review.exists() and public_review.exists():
-                return self.workbook(runner, spec)
+                return self.workbook(runner, spec, review_applied=True)
             return StageOutcome.waiting(
                 "waiting_ai",
                 "标准总表已生成审核包，等待AI完成热词、境外和公众TOP逐条审核后从本节点续跑。",
@@ -1159,6 +1195,14 @@ class CwhPipeline:
             shutil.copy2(supplied, target)
         topics = topic_titles(self.artifacts / "CWH舆情情况_标准总表.xlsx")
 
+        corpus_path = self.artifacts / "public_article_evidence.json"
+        corpus = read_json(corpus_path) if corpus_path.exists() else {}
+        index_path = None
+        if corpus:
+            from prepare_cwh_corpus_index import prepare_corpus_index
+            index_path = prepare_corpus_index(corpus_path, corpus, topics)
+        allow_deferred = self.contract.get("execution_profile") in {"bounded_40m", "bounded_60m"}
+
         def evaluate_draft() -> list[str]:
             if not target.exists():
                 return ["尚未生成analysis_bundle.json"]
@@ -1166,12 +1210,15 @@ class CwhPipeline:
                 draft = read_json(target)
                 if not isinstance(draft, dict):
                     return ["analysis_bundle.json顶层必须是JSON对象"]
-                normalized = normalize_analysis(complete_analysis_structure(draft))
+                if allow_deferred and corpus:
+                    from prepare_cwh_corpus_index import complete_corpus_deferrals
+                    draft = complete_corpus_deferrals(draft, corpus, topics)
+                normalized = normalize_analysis(complete_analysis_structure(draft, corpus))
             except (ValueError, TypeError, AttributeError) as exc:
                 return [f"analysis_bundle.json无法解析或结构无效：{type(exc).__name__}: {exc}"]
             atomic_write_json(target, normalized)
             try:
-                return validate_analysis_bundle(target, topics, require_semantic_review=False)
+                return validate_analysis_bundle(target, topics, require_semantic_review=False, allow_deferred_corpus=allow_deferred)
             except (ValueError, TypeError, AttributeError) as exc:
                 return [f"analysis_bundle.json字段类型无效：{type(exc).__name__}: {exc}"]
 
@@ -1186,6 +1233,8 @@ class CwhPipeline:
             inputs={
                 "research_plan": str(self.artifacts / "research_plan.json"),
                 "existing_output": str(target) if target.exists() else "",
+                "public_corpus_index": str(index_path) if index_path else "",
+                "public_corpus_reading_indexes": read_json(index_path)["reading_indexes"] if index_path else [],
                 "validation_problems": problems,
                 "source_registry": str(SOURCE_REGISTRY_PATH),
                 "execution_policy": str(SKILL_ROOT / "config" / "execution_policy.v1.json"),
@@ -1199,7 +1248,9 @@ class CwhPipeline:
             },
             rules=[
                 "严格读取research_plan、execution_policy和analysis_schema；按其中议题、通道、查询/抓取上限、停止规则执行，不得自行扩大范围。",
-                "若有public_article_evidence，先逐议题审核该监测全文池；公众TOP10不是观点证据上限。",
+                "若有public_corpus_index，按各议题shortlist优先读取完整文章，需要时从全量索引补充；排序只是阅读顺序，不是语义审核。公众TOP10不是观点证据上限。",
+                "bounded档每议题至少实际审核min(12,该议题全文池数量)篇，已审明确保留或排除；控制器自动计算并记录未审清单deferred_record_ids，不必抄写上千ID，绝不能冒称已审或没有观点。exhaustive仍须全文池逐条审核。",
+                "监测来源候选写raw_evidence_record_id；缺失的原文快照和原始标题、URL、发布时间由控制器从原始全文池回填，不要重复抄写全文或计算哈希。",
                 "每个实际检索结果都进入候选池并标记eligible、duplicate或excluded及理由；保存查询ID、结果URL快照和真实阻断。",
                 "eligible候选须核验监测期内发布时间并保存完整原文快照及SHA-256；搜索摘要不能冒充原文。",
                 "一篇文章中的不同发言主体分成独立证据；同一主体同一观点的转载只保留一个正式候选。",
@@ -1254,7 +1305,7 @@ class CwhPipeline:
             atomic_write_json(verified_path, verified_data)
             mapping_audit = validate_analysis_mapping(verified_data)
             atomic_write_json(audit_path, mapping_audit)
-            return validate_analysis_bundle(verified_path, topics)
+            return validate_analysis_bundle(verified_path, topics, allow_deferred_corpus=self.contract.get("execution_profile") in {"bounded_40m", "bounded_60m"})
 
         problems = evaluate_review()
         if not problems:
@@ -1588,6 +1639,7 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "execution_profile": profile_name,
         "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
+        "research_deadline_seconds": int(profile.get("research_deadline_seconds") or 0),
         "stage_timeouts_seconds": dict(profile.get("stage_budgets_seconds") or {}),
         "agenda": str(args.agenda or "").strip(),
         "system_workbook": str(Path(args.system_workbook).resolve()) if args.system_workbook else "",
@@ -1751,7 +1803,7 @@ def cli_state_summary(state: dict[str, Any], job_dir: Path) -> dict[str, Any]:
     """Keep routine handoffs small without changing the durable full state."""
     summary = {key: state.get(key) for key in (
         "pipeline_id", "status", "current_stage", "next_action",
-        "wall_clock_elapsed_seconds", "completed_elapsed_seconds",
+        "wall_clock_elapsed_seconds", "completed_elapsed_seconds", "review_delivery",
     ) if key in state}
     summary["state_path"] = str((job_dir / "pipeline_state.json").resolve())
     summary["stage_statuses"] = {row["stage_id"]: row["status"] for row in state.get("stages") or []}
@@ -1784,11 +1836,12 @@ def parser() -> argparse.ArgumentParser:
         "--execution-profile",
         choices=["bounded_40m", "bounded_60m", "exhaustive"],
         default=execution_profile()[0],
-        help="Default bounded_40m targets 40 minutes; bounded_60m retains one hour; exhaustive removes time caps.",
+        help="Default bounded_60m targets one hour and reserves final delivery time; bounded_40m is a tighter option.",
     )
     result.add_argument("--until-stage", default="")
     result.add_argument("--invalidate-from", default="")
     result.add_argument("--no-open", action="store_true", help="Do not launch the local workbench after success.")
+    result.add_argument("--no-review-delivery", action="store_true", help="Skip the labelled review snapshot for diagnostic or worker-only invocations.")
     result.add_argument("--output-format", choices=["compact", "full"], default="compact", help="Compact stdout saves model context; full durable state is always saved in pipeline_state.json.")
     return result
 
@@ -1812,6 +1865,14 @@ def main() -> None:
         state = pipeline.runner.state
     else:
         state = pipeline.runner.run(until_stage=args.until_stage)
+        if state.get("status") != "succeeded" and not args.until_stage and not args.no_review_delivery:
+            # Separate review artifacts never change a failed gate or overwrite
+            # report/. They remain useful even if a later node is unavailable.
+            try:
+                from build_cwh_review_delivery import build_review_delivery
+                state["review_delivery"] = build_review_delivery(job_dir)
+            except Exception as exc:
+                state["review_delivery"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
         if should_launch_local_workbench(state, no_open=args.no_open):
             state["workbench"] = launch_local_workbench(job_dir.resolve())
     output = state if args.output_format == "full" else cli_state_summary(state, job_dir)

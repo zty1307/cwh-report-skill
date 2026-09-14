@@ -7,6 +7,7 @@ import os
 import random
 import re
 from collections import Counter, defaultdict, deque
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -443,6 +444,7 @@ def snippets_for_topic(text: str, aliases: list[str], radius: int = 110) -> list
     return snippets
 
 
+@lru_cache(maxsize=131072)
 def valid_candidate(term: str) -> bool:
     if not 2 <= len(term) <= 10:
         return False
@@ -2118,7 +2120,8 @@ def _july19_text_sprite(
     rotated = Image.new("RGBA", alpha.size, (red, green, blue, 255))
     rotated.putalpha(alpha)
     collision_filter = 5 if font_size >= 18 else 3 if font_size >= 12 else 1
-    collision = alpha.filter(ImageFilter.MaxFilter(collision_filter))
+    # A size-one maximum filter is an identity; avoid native crashes on Windows.
+    collision = alpha.filter(ImageFilter.MaxFilter(collision_filter)) if collision_filter > 1 else alpha
     return rotated, np.asarray(collision) > 18
 
 

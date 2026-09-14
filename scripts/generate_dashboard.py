@@ -1054,6 +1054,8 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
     peak = max(daily, key=lambda row: as_int(row.get("total_spread")), default={})
     title_date = chinese_date(meeting_date)
     title = f"{title_date}国务院常务会议舆情情况" if title_date else "国务院常务会议舆情情况"
+    if data.get("delivery_class") == "review_draft":
+        title += " 待审核稿 未通过正式交付"
     report_sections = split_formal_report(data)
     report_path = path_from((data.get("artifacts") or {}).get("formal_report"))
     blocks = build_report_blocks(data, report_path)
@@ -1156,6 +1158,9 @@ def generate_dashboard(data: dict[str, Any], out_path: Path) -> Path:
     if "__DASHBOARD_DATA__" not in template:
         raise ValueError("Dashboard template is missing __DASHBOARD_DATA__ placeholder")
     dashboard_data = prepare_dashboard_data(data, out_path.parent)
+    if data.get("delivery_class") == "review_draft" and not data.get("system_data"):
+        dashboard_data["totals"] = dict.fromkeys(dashboard_data["totals"])
+        dashboard_data["peak"]["value"] = None
     payload = json.dumps(dashboard_data, ensure_ascii=False, separators=(",", ":"))
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     out_path.write_text(template.replace("__DASHBOARD_DATA__", payload), encoding="utf-8")

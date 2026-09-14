@@ -16,7 +16,7 @@ Do not ask the user to prepare analysis JSON, comments, charts, or a third input
 
 ## Default execution contract
 
-Use the model-neutral `bounded_40m` profile in `config/execution_policy.v1.json` by default. It has a 2400-second wall-clock budget, per-stage timeouts, bounded query/page limits, and an overhead reserve. Time starts at the first `run` and includes worker waits and retries; `run` and `invalidate` do not reset it. An exhausted budget records `time_budget_exhausted`; use a new job directory for a new timed test. `bounded_60m` remains an explicit one-hour option. Use `exhaustive` only when the user explicitly prefers uncapped research. Budgets are limits, not proof of successful completion within 40 minutes.
+Use the model-neutral `bounded_60m` profile in `config/execution_policy.v1.json` by default. Its wall-clock limit is 3600 seconds; research stops taking time after 2700 seconds, preserving delivery time. Time starts at the first `run` and includes worker waits and retries; `run` and `invalidate` do not reset it. An exhausted budget records `time_budget_exhausted`; use a new job directory for a new timed test. `bounded_40m` remains a tighter explicit option. Use `exhaustive` only when the user prefers uncapped research. Budgets are limits, not proof that a model has completed a report within them.
 
 Before a full run, read [references/model_neutral_execution.md](references/model_neutral_execution.md) and [references/resumable_pipeline.md](references/resumable_pipeline.md). The machine-readable policy, generated task contract, and validators override narrative examples when they differ.
 
@@ -33,10 +33,14 @@ python scripts/run_cwh_resumable_pipeline.py run `
   --job-dir outputs/cwh_pipeline_job `
   --agenda "会议日期或完整议程" `
   --system-workbook "D:\path\CWH舆情情况.xlsx" `
-  --execution-profile bounded_40m
+  --execution-profile bounded_60m
 ```
 
 For a raw bundle, replace `--system-workbook` with `--raw-input-dir` and provide required metadata according to [references/raw_workbook_pipeline.md](references/raw_workbook_pipeline.md). Direct stage scripts are for diagnosis and isolated tests, not an alternative orchestration path.
+
+For an unattended model host, read [references/model_worker_host.md](references/model_worker_host.md). The host runs scripts; models should not need shell permission. A full-report request must not use `--until-stage` as its final invocation. Paused/workbook-only results are not report completion. Without an automatic worker, complete the current JSON task and resume; do not repeatedly resume unchanged outputs.
+
+An incomplete full invocation generates `review_delivery/` separately from formal `report/`. Its Word and fixed-template workbench are labelled 待审核稿 and never pass the formal gate. Only hash-verified accepted workbook facts and independently verified viewpoints enter the review prose; missing evidence remains explicitly missing. This may be a partial/status-only draft, not a completed report. Diagnostic calls may use `--no-review-delivery`; this does not waive final delivery requirements.
 
 ## Model boundary
 
@@ -56,6 +60,8 @@ Missing evidence is a structured blocker. A model assertion that work is complet
 - Default to one active model worker and serial stages; do not spawn agents unless the user explicitly requests them. Independent second-pass review remains a separate sequential run with fresh context, not simultaneous agents or author self-certification.
 - Read this entry and the execution contract once per run, then only the current task's required references and inputs. Reuse existing accepted artifacts and source snapshots; do not repeatedly dump all files, search the same URL or redraft complete report sections.
 - Return the current stage's structured fields, not a narrative status essay. Use existing batching scripts; repair only reported invalid fields while preserving accepted source text and identifiers.
+- For a large monitoring corpus, use the controller's per-topic reading indexes rather than repeatedly loading the whole JSON. Bounded mode requires at least `min(12, topic corpus size)` actual full-article reviews per topic; the controller records unread IDs as deferred, never reviewed or excluded. Exhaustive mode still requires all rows. Minimum independent voices, full source support and independent claim review are unchanged.
+- For raw-monitoring candidates, supply the real `raw_evidence_record_id`. The controller fills missing original source fields/full text from that immutable row; do not copy long snapshots or calculate hashes manually. Existing wrong values still fail validation.
 - The controller completes missing deterministic IDs, SHA-256 values and unique exact excerpt offsets before draft validation. Ambiguous matches remain errors; query/candidate references must still be consistent. Never manufacture IDs for absent evidence.
 - Do not manually calculate hashes, prose punctuation or numbering. Use `scripts/cwh_timing_report.py --job-dir <job>` to inspect recorded stage/command timings; it does not measure token usage or certify success.
 - CLI output defaults to a compact handoff: current status, task, errors and stage status map. Full history remains in `pipeline_state.json`; use `--output-format full` only for diagnosis or a legacy stdout consumer.

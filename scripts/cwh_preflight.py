@@ -10,6 +10,7 @@ from typing import Any
 
 
 REQUIRED_MODULES = {
+    "numpy": "numpy==2.2.6",
     "openpyxl": "openpyxl==3.1.5",
     "PIL": "Pillow==12.1.0",
     "docx": "python-docx==1.2.0",
@@ -47,6 +48,8 @@ def execution_policy_checks(policy: dict[str, Any]) -> list[dict[str, Any]]:
                     and all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in stages.values())
                     and stage_total + reserve <= wall_clock
                 )
+                deadline = profile.get("research_deadline_seconds", 0)
+                valid = valid and isinstance(deadline, int) and not isinstance(deadline, bool) and 0 <= deadline < wall_clock
             else:
                 valid = valid and reserve == 0 and not stages
             checks.append({
@@ -78,6 +81,14 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         else:
             checks.append({"id": f"python_module:{module_name}", "status": "passed", "package": package})
 
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo("Asia/Shanghai")
+        checks.append({"id": "python_module:timezone_data", "status": "passed"})
+    except Exception as exc:
+        checks.append({"id": "python_module:timezone_data", "status": "failed",
+                       "package": "tzdata", "message": f"{type(exc).__name__}: {exc}"})
+
     required_files = [
         "SKILL.md",
         "config/execution_policy.v1.json",
@@ -89,6 +100,15 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "scripts/cwh_writing_rules.py",
         "scripts/complete_cwh_evidence_structure.py",
         "scripts/cwh_timing_report.py",
+        "scripts/cwh_scoped_process.py",
+        "scripts/run_cwh_model_worker.py",
+        "scripts/run_cwh_inline_review.py",
+        "scripts/run_cwh_batched_viewpoints.py",
+        "scripts/cwh_worker_observations.py",
+        "scripts/cwh_authoring_packet.py",
+        "scripts/cwh_json_transport.py",
+        "scripts/build_cwh_review_delivery.py",
+        "scripts/prepare_cwh_corpus_index.py",
         "scripts/cwh_pipeline_runtime.py",
         "scripts/normalize_cwh_analysis.py",
         "scripts/cwh_orchestrator.py",

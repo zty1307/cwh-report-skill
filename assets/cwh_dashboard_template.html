@@ -339,7 +339,7 @@
 <script>
 const D=JSON.parse(document.getElementById('dashboard-data').textContent);
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const fmt=v=>new Intl.NumberFormat('zh-CN').format(Number(v||0));
+const fmt=v=>v==null?'—':new Intl.NumberFormat('zh-CN').format(Number(v||0));
 const DEMO_MODE=new URLSearchParams(location.search).get('demo')==='1';
 const SERVER_MODE=/^https?:$/.test(location.protocol);
 const artifactTarget=item=>SERVER_MODE?(item.href||item.protocol):(item.protocol||item.href);

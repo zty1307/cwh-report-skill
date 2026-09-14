@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from cwh_scoped_process import run_scoped_command
 
 
 TERMINAL_STAGE_STATUSES = {"succeeded", "skipped"}
@@ -382,6 +383,9 @@ class PipelineRunner:
         if budget and started is not None:
             limits.append(budget - max(0.0, now - float(started)))
         if stage_id:
+            research_deadline = float(self.input_contract.get("research_deadline_seconds") or 0)
+            if research_deadline and started is not None and stage_id not in {"render", "delivery_gate"}:
+                limits.append(research_deadline - max(0.0, now - float(started)))
             row = self.stage_state(stage_id)
             stage_budget = float((self.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id) or 0)
             stage_started = row.get("budget_started_epoch")
@@ -522,17 +526,14 @@ class PipelineRunner:
             command_started = time.monotonic()
             exit_code: int | None = None
             try:
-                process = subprocess.run(
+                exit_code = run_scoped_command(
                     command,
                     cwd=str(cwd or self.root),
                     env=env,
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    text=True,
                     timeout=timeout_seconds,
-                    check=False,
                 )
-                exit_code = process.returncode
                 return exit_code, log_path
             except subprocess.TimeoutExpired:
                 log.write(f"\nTIMEOUT after {timeout_seconds} seconds\n")

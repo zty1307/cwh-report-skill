@@ -583,6 +583,24 @@ class OverseasSemanticReviewTests(unittest.TestCase):
                 monitoring_dates=["2026-01-01", "2026-01-02"],
             )
 
+    def test_title_only_overseas_inclusion_is_rejected(self):
+        self.rows[0]["content"] = ""
+        with self.assertRaisesRegex(self.pipeline.PipelineError, "正文缺失"):
+            self.pipeline.filter_overseas(self.rows, self.config, self.metadata, review=self.review(),
+                                          monitoring_dates=["2026-01-01"])
+
+    def test_interpretive_summary_cannot_certify_its_own_source(self):
+        review = self.review()
+        review["items"][0].update(content_type="interpretive", summary_cn_simplified="自动摘要",
+                                  interpretive_verified=True, interpretive_excerpt="原文中不存在的分析")
+        with self.assertRaisesRegex(self.pipeline.PipelineError, "连续原文依据"):
+            self.pipeline.filter_overseas(self.rows, self.config, self.metadata, review=review,
+                                          monitoring_dates=["2026-01-01"])
+        review["items"][0]["interpretive_excerpt"] = self.rows[0]["content"]
+        result = self.pipeline.filter_overseas(self.rows, self.config, self.metadata, review=review,
+                                             monitoring_dates=["2026-01-01"])
+        assert result["counted"][0]["interpretive_excerpt"] == self.rows[0]["content"]
+
     def test_cross_outlet_reprints_are_counted_but_same_outlet_duplicates_are_not(self):
         shared = {
             "published_at": "2026-01-01 08:00:00",
@@ -628,6 +646,7 @@ class OverseasSemanticReviewTests(unittest.TestCase):
                 "content_type": "interpretive",
                 "summary_cn_simplified": "分析议题二的政策影响。",
                 "interpretive_verified": True,
+                "interpretive_excerpt": "文章以本次会议议题二为主要内容。",
             },
             {
                 "source": "境外媒体丁",

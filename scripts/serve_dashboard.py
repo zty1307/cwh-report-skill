@@ -30,6 +30,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from archive_store import ArchiveStore
 from cwh_hotword_pipeline import looks_like_pure_geography
+from cwh_pipeline_runtime import atomic_write_json
 
 
 SUPPORTED_DOMESTIC_PLATFORMS = ("wb", "dy", "ks", "bili", "zhihu")
@@ -767,9 +768,7 @@ class DashboardApp:
             manifest = self._read_manifest(directory)
             manifest.update(changes)
             manifest_path = directory / "manifest.json"
-            temporary = directory / f"manifest.{uuid.uuid4().hex}.tmp"
-            temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(temporary, manifest_path)
+            atomic_write_json(manifest_path, manifest)
         return manifest
 
     @classmethod

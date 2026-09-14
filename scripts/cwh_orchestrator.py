@@ -3691,6 +3691,12 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
     else:
         expansion_plan = build_expansion_plan(samples, topics, targets, generated_tasks, agent_reach_tasks)
         audit = build_audit(samples, bool(input_samples), generated_tasks, agent_reach_tasks, collection_gaps, targets, expansion_plan)
+    corpus_reviews = (((analysis_bundle.get("research_audit") or {}).get("domestic_media_research") or {}).get("public_article_corpus_review") or {}).get("topic_reviews") or []
+    audit.setdefault("quality_summary", {})["raw_corpus_review_coverage"] = [
+        {"topic": row.get("topic"), "reviewed_documents": len(set(row.get("reviewed_record_ids") or [])),
+         "deferred_documents": len(set(row.get("deferred_record_ids") or [])), "deferral_reason": row.get("deferral_reason") or ""}
+        for row in corpus_reviews if isinstance(row, dict)
+    ]
     data = {
         "version": SCHEMA_VERSION,
         "generated_at": datetime.now().isoformat(timespec="seconds"),

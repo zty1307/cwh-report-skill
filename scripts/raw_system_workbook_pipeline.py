@@ -744,6 +744,8 @@ def build_overseas_review_packet(
         "monitoring_dates": dates,
         "instructions": [
             "AI逐条阅读标题与正文，判断是否以本次国务院常务会议为主要报道对象。",
+            "正文缺失或正文仅重复标题时不能include；保留证据不足及补取正文的原因，不冒称与会议无关。",
+            "解读性报道必须明确interpretive_verified=true，并提供完整正文中的连续interpretive_excerpt；摘要不等于原文核实。",
             "decision只能为include或exclude；不得仅凭关键词命中纳入。",
             "publisher_class只能为overseas_origin_media、mainland_outward_media或not_overseas_media。",
             "每条必须填写review_reason和0至1之间的classification_confidence。",
@@ -1017,6 +1019,9 @@ def apply_overseas_ai_review(
         )
         if count_include and not report_category:
             raise PipelineError(f"境外审核缺少有效报道类型：{base.get('title')}")
+        original_body = str(base.get("content") or "").strip()
+        if count_include and (not original_body or normalize_text(original_body) == normalize_text(base.get("title"))):
+            raise PipelineError(f"境外审核正文缺失或仅有标题，不能纳入：{base.get('title')}")
         title_cn_simplified = to_simplified_review_text(
             item.get("title_cn_simplified")
             or item.get("title_cn")
@@ -1035,10 +1040,11 @@ def apply_overseas_ai_review(
             or item.get("interpretive_summary_cn")
             or ""
         )
-        interpretive_verified = bool(
-            item.get("interpretive_verified")
-            or (report_category == "解读性报道" and summary_cn_simplified)
-        )
+        interpretive_excerpt = str(item.get("interpretive_excerpt") or "").strip()
+        interpretive_verified = (item.get("interpretive_verified") is True
+                                 and bool(interpretive_excerpt) and interpretive_excerpt in original_body)
+        if count_include and report_category == "解读性报道" and not interpretive_verified:
+            raise PipelineError(f"境外审核解读性报道缺少已核实的连续原文依据interpretive_excerpt：{base.get('title')}")
         if decision == "include" and not in_window:
             reason = f"outside_monitoring_window:{reason}"
         return {
@@ -1064,6 +1070,7 @@ def apply_overseas_ai_review(
             "source_cn_simplified": source_cn_simplified,
             "summary_cn_simplified": summary_cn_simplified,
             "interpretive_verified": interpretive_verified,
+            "interpretive_excerpt": interpretive_excerpt,
             "meeting_relevance": count_include,
             "formal_include": appendix_include,
             "count_include": count_include,

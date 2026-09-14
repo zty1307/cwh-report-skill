@@ -22,6 +22,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DashboardImportTests(unittest.TestCase):
+    def test_manifest_update_uses_bounded_atomic_writer(self) -> None:
+        job = self.app.start_import({"agenda": "测试会议"})
+        directory = self.app._job_directory(job["job_id"])
+        with mock.patch.object(MODULE, "atomic_write_json", wraps=MODULE.atomic_write_json) as writer:
+            result = self.app._update_manifest(directory, status="waiting_ai")
+        self.assertEqual("waiting_ai", result["status"])
+        self.assertEqual(directory / "manifest.json", writer.call_args.args[0])
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
