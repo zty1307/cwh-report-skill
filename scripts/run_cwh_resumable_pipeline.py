@@ -1198,6 +1198,14 @@ class CwhPipeline:
         data = read_json(target)
         if not data.get("topics"):
             return StageOutcome.failed("检索计划没有子议题", error_code="empty_research_plan")
+        # The plan builder knows the profile, but not the persisted input mode.
+        # Expose the same resolved stage limits used by tasks and watchdogs.
+        allocation = runner.input_contract.get('stage_timeouts_seconds')
+        if isinstance(allocation, dict):
+            budget = data.setdefault('execution_budget', {})
+            budget['stage_budgets_seconds'] = dict(allocation)
+            budget['stage_budgets_source'] = 'persisted_input_contract'
+            atomic_write_json(target, data)
         return StageOutcome.succeeded("已按系统子议题生成独立检索任务和证据规则。")
 
     def domestic_viewpoints(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:

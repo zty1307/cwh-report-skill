@@ -25,6 +25,27 @@ def hotword_packet(*, reviewed: bool = True) -> dict:
     }
 
 
+def test_research_plan_uses_resolved_input_mode_budgets_without_resetting_clock(tmp_path, monkeypatch):
+    name, profile = pipeline_module.execution_profile('bounded_60m')
+    allocation = pipeline_module.resolved_stage_budgets(profile, 'standard_workbook')
+    contract = {'execution_profile': name, 'stage_timeouts_seconds': allocation}
+    pipeline = pipeline_module.CwhPipeline(tmp_path, contract)
+    target = pipeline.artifacts / 'research_plan.json'
+    def command(*args, **kwargs):
+        pipeline_module.atomic_write_json(target, {'topics': [{'topic': '当前议题'}],
+            'execution_budget': {'stage_budgets_seconds': profile['stage_budgets_seconds'], 'wall_clock_budget_seconds': 3600}})
+        return 0, tmp_path / 'unit.log'
+    monkeypatch.setattr(pipeline.runner, 'run_command', command)
+    before = json.dumps(pipeline.runner.input_contract, sort_keys=True)
+    result = pipeline.research_plan(pipeline.runner, pipeline.runner.spec_by_id['research_plan'])
+    data = json.loads(target.read_text('utf-8'))
+    assert result.status == 'succeeded'
+    assert data['execution_budget']['stage_budgets_seconds'] == allocation
+    assert data['execution_budget']['stage_budgets_seconds']['workbook'] == 30
+    assert data['execution_budget']['wall_clock_budget_seconds'] == 3600
+    assert json.dumps(pipeline.runner.input_contract, sort_keys=True) == before
+
+
 def test_compact_cli_preserves_current_action_and_errors_without_full_history(tmp_path):
     state = {"pipeline_id": "test", "status": "waiting_ai", "current_stage": "hotwords",
              "next_action": {"task": "tasks/hotwords.json", "problems": ["needs review"]},

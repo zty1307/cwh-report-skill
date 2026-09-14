@@ -67,7 +67,7 @@ def search_rows(text):
 def stream_metrics(log):
     """Count transport activity without exposing or interpreting private reasoning."""
     metrics = {"streamed_reasoning_characters": 0, "streamed_answer_characters": 0, "observed_tool_results": len(observed_tools(log))}
-    first, last = None, None
+    first, last, first_answer, last_answer = None, None, None, None
     for line in log.splitlines():
         try:
             event = json.loads(line)
@@ -86,9 +86,13 @@ def stream_metrics(log):
                 if stamp:
                     first = first or stamp
                     last = stamp
+                    if kind == 'text_delta':
+                        first_answer = first_answer or stamp
+                        last_answer = stamp
         if event.get("type") == "result":
             metrics["reported_usage"] = event.get("usage") or {}
-    metrics.update(first_stream_at=first, last_stream_at=last)
+    metrics.update(first_stream_at=first, last_stream_at=last,
+                   first_answer_at=first_answer, last_answer_at=last_answer)
     return metrics
 
 

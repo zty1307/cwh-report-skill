@@ -266,6 +266,7 @@ def test_stream_metrics_only_report_activity_counts():
     assert metrics["streamed_reasoning_characters"] == 13
     assert metrics["streamed_answer_characters"] == 2
     assert metrics["reported_usage"]["output_tokens"] == 20
+    assert metrics['first_answer_at'] == metrics['last_answer_at'] == 't2'
     assert "internal text" not in json.dumps(metrics)
 
 
