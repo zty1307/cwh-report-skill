@@ -74,6 +74,7 @@
       "research_deadline_seconds": 2700,
       "reserved_delivery_buffer_seconds": 675,
       "input_mode_budget_overrides": {
+        "raw_workbook": {"workbook": 1020, "domestic_viewpoints": 600},
         "standard_workbook": {"workbook": 30, "domestic_viewpoints": 1290, "domestic_evidence_verification": 600}
       },
       "stage_budgets_seconds": {

@@ -26,6 +26,40 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CwhResumablePipelineTests(unittest.TestCase):
+    def test_sentiment_validation_accepts_header_only_handoff_after_audited_zero_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            summary = root / "summary.json"
+            handoff = root / "handoff.csv"
+            topics = ["议题甲"]
+            registry = json.loads(MODULE.SOURCE_REGISTRY_PATH.read_text(encoding="utf-8"))
+            required = [row["id"] for row in registry["sources"]
+                        if row.get("must_check") and row.get("tier") == "comment_platform"]
+            topic_checks = []
+            global_checks = []
+            for source_id in required:
+                status = "no_relevant_result" if source_id == "toutiao_public_comments" else "access_failed"
+                check = {"source_id": source_id, "status": status,
+                         "execution_mode": "fixed_test", "queries_or_seed_urls": ["真实查询"],
+                         "result_count": 0, "eligible_comment_ids": []}
+                if status == "access_failed":
+                    check["blocker"] = "no authorized login"
+                topic_checks.append(check)
+                global_checks.append({"source_id": source_id, "status": status})
+            summary.write_text(json.dumps({
+                "collection_audit": {"registry_version": registry["version"],
+                                     "terminal_status": "bounded_checks_completed",
+                                     "waiting_login_terminal": False,
+                                     "checks": global_checks,
+                                     "coverage_by_topic": [{"topic": "议题甲", "checks": topic_checks}]},
+                "topics": [{"title": "议题甲", "status": "no_public_evidence", "denominator": 0}],
+            }, ensure_ascii=False), encoding="utf-8")
+            handoff.write_text(
+                "sample_id,topic,content,url,ai_formal_include,topic_comment_heading\n",
+                encoding="utf-8-sig",
+            )
+            self.assertEqual([], MODULE.validate_sentiment(summary, handoff, topics))
+
     def test_sentiment_validation_allows_audited_zero_or_insufficient_topics(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -65,8 +65,9 @@ def test_standard_input_reallocates_raw_budget_without_extending_deadlines():
     _, selected = execution_profile("bounded_60m")
     raw = resolved_stage_budgets(selected, "raw_workbook")
     standard = resolved_stage_budgets(selected, "standard_workbook")
-    assert raw["workbook"] == 900 and standard["workbook"] == 30
-    assert standard["domestic_viewpoints"] - raw["domestic_viewpoints"] == 570
+    assert raw["workbook"] == 1020 and standard["workbook"] == 30
+    assert raw["domestic_viewpoints"] == 600 and standard["domestic_viewpoints"] == 1290
+    assert standard["domestic_viewpoints"] - raw["domestic_viewpoints"] == 690
     assert standard["domestic_evidence_verification"] - raw["domestic_evidence_verification"] == 300
     assert sum(raw.values()) == sum(standard.values())
     assert selected["wall_clock_budget_seconds"] == 3600 and selected["research_deadline_seconds"] == 2700

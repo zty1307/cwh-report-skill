@@ -362,6 +362,41 @@ def main():
     command = json.loads(os.environ['CWH_SEMANTIC_COMMAND_JSON'])
     label_run = None
     collection_audit = json.loads(args.collection_audit.read_text('utf-8-sig')) if args.collection_audit else None
+    if not capture.get('rows'):
+        result_path = args.output_dir / 'sentiment_results.csv'
+        empty_result_fields = ['sample_id', 'topic', 'label', 'label_source', 'needs_review',
+                               'in_sentiment_denominator', 'exclusion_reason', 'ai_formal_include',
+                               'ai_semantic_quality', 'ai_formal_reason', 'comment_heading',
+                               'topic_comment_heading']
+        write_csv(result_path, [], empty_result_fields)
+        summary = {
+            'schema_version': '1.0',
+            'status': 'no_public_evidence',
+            'result_file': str(result_path.resolve()),
+            'minimum_topic_denominator_for_backfill': 20,
+            'topics': [{'index': index, 'title': title, 'status': 'no_public_evidence',
+                        'denominator': 0, 'positive': None, 'neutral': None, 'negative': None}
+                       for index, title in enumerate(topics, 1)],
+            'collection_audit': collection_audit or {},
+        }
+        atomic_write_json(args.output_dir / 'sentiment_workbook_summary.json', summary)
+        write_csv(args.output_dir / 'report_comment_handoff.csv', [], REPORT_HANDOFF_FIELDS)
+        write_csv(args.output_dir / 'sentiment_input.csv', [], OUTPUT_FIELDS)
+        atomic_write_json(args.output_dir / 'comment_review_audit.json', {
+            'run': None,
+            'raw_capture': str(args.capture.resolve()),
+            'raw_capture_sha256': hashlib.sha256(args.capture.read_bytes()).hexdigest(),
+            'blockers': [],
+            'capture_repair': capture_repair,
+            'handoff': {'status': 'no_public_evidence', 'eligible_rows': 0, 'excluded_rows': 0,
+                        'unresolved_rows': 0},
+            'excluded_capture_rows': len(capture.get('excluded') or []),
+            'classifier_trained': False,
+            'model_call_skipped': 'no_traceable_comments_after_bounded_collection',
+        })
+        print(json.dumps({'handoff': {'status': 'no_public_evidence'},
+                          'summary_status': summary['status'], 'seconds': 0}, ensure_ascii=False))
+        return
     if collection_audit:
         packet = compact_review_packet(capture, topics, collection_audit)
         result, run = semantic_json(packet, COMPACT_PROMPT, command, args.output_dir, 'comment-review-compact', args.timeout)

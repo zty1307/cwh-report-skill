@@ -833,14 +833,19 @@ def validate_sentiment(summary_path: Path, handoff_path: Path, topics: list[str]
             problems.append(f"子议题情感状态无效：{topic}={status or 'missing'}")
     try:
         with handoff_path.open("r", encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
+            reader = csv.DictReader(handle)
+            rows = list(reader)
+            fields = set(reader.fieldnames or [])
     except Exception as exc:
         problems.append(f"评论交接表无法读取：{type(exc).__name__}: {exc}")
         return problems
-    if not rows:
+    no_public_evidence = bool(by_topic) and all(
+        str(row.get("status") or "") in {"no_public_evidence", "pending"}
+        for row in by_topic.values()
+    ) and str(collection.get("terminal_status") or "") == "bounded_checks_completed"
+    if not rows and not no_public_evidence:
         problems.append("评论交接表为空")
     required = {"sample_id", "topic", "content", "url", "ai_formal_include", "topic_comment_heading"}
-    fields = set(rows[0]) if rows else set()
     missing = required - fields
     if missing:
         problems.append("评论交接表缺少字段：" + "、".join(sorted(missing)))

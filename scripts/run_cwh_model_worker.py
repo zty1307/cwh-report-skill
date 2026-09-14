@@ -85,7 +85,20 @@ def main():
         from cwh_hotword_semantics import run_task
         run_host_semantic_task(task_path, run_task)
         return
-    if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON') and (task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')):
+    if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON'):
+        capture = task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')
+        if not capture:
+            from cwh_fast_comment_collection import prepare_task
+            try:
+                prepare_task(task_path)
+            except Exception as exc:
+                workspace = Path(task['stage_workspace']).resolve()
+                atomic_write_json(workspace / 'blocker.json', {
+                    'blocker': True,
+                    'type': 'fast_comment_collection_failed',
+                    'message': f'{type(exc).__name__}: {exc}',
+                })
+                raise SystemExit(22) from exc
         from cwh_comment_semantics import run_task
         run_host_semantic_task(task_path, run_task)
         return
