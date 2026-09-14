@@ -111,3 +111,83 @@ def validate_combined(original, repaired, initial, combined):
             expected = {**row, 'reviewer_run_id': initial['reviewer_run_id']}
             if rows.get(row['evidence_id']) != expected:
                 raise ValueError('An unchanged verdict or its real reviewer was rewritten')
+    if provenance.get('mode') == 'reviewer_narrowing_v1':
+        repaired_rows = {ev['evidence_id']: ev for _, ev in evidence_rows(repaired)}
+        revisions = {row['evidence_id']: row for row in provenance.get('revisions') or []}
+        if set(revisions) != failed:
+            raise ValueError('Reviewer narrowing records do not cover the rejected evidence')
+        for evidence_id, revision in revisions.items():
+            if repaired_rows[evidence_id]['formal_claim'] != revision.get('formal_claim'):
+                raise ValueError('Reviewer narrowing differs from the repaired formal claim')
+            final = rows.get(evidence_id) or {}
+            if final.get('verdict') != 'fully_supported' or final.get('rationale') != revision.get('rationale'):
+                raise ValueError('Reviewer narrowing certification was changed')
+
+
+def apply_reviewer_narrowing(analysis, raw_result):
+    """Apply only reviewer-supplied claim narrowing; source identity stays frozen."""
+    reviews = raw_result.get('reviews') or []
+    rows = evidence_rows(analysis)
+    by_short = {f'e{index}': (topic, ev) for index, (topic, ev) in enumerate(rows, 1)}
+    if {row.get('id') for row in reviews} != set(by_short) or len(reviews) != len(by_short):
+        raise ValueError('Reviewer narrowing must cover each evidence exactly once')
+    repaired = copy.deepcopy(analysis)
+    repaired_rows = {ev['evidence_id']: ev for _, ev in evidence_rows(repaired)}
+    revisions = []
+    changed = set()
+    for row in reviews:
+        if row.get('verdict') == 'fully_supported':
+            continue
+        revision = row.get('revision')
+        if not isinstance(revision, dict):
+            raise ValueError('Rejected claim lacks a reviewer-supplied narrowing')
+        formal_claim = str(revision.get('formal_claim') or '').strip()
+        rationale = str(revision.get('rationale') or '').strip()
+        if revision.get('verdict') != 'fully_supported' or not formal_claim or not rationale:
+            raise ValueError('Reviewer narrowing is not explicitly fully supported')
+        _, original_ev = by_short[row['id']]
+        evidence_id = original_ev['evidence_id']
+        repaired_rows[evidence_id]['formal_claim'] = formal_claim
+        changed.add(evidence_id)
+        revisions.append({
+            'evidence_id': evidence_id,
+            'original_verdict': row.get('verdict'),
+            'original_rationale': row.get('rationale'),
+            'formal_claim': formal_claim,
+            'rationale': rationale,
+        })
+    repaired = normalize_analysis(repaired)
+    validate_identity(analysis, repaired, changed)
+    return repaired, revisions
+
+
+def reviewer_narrowing_packet(repaired, initial, raw_result, revisions, run, source_hash):
+    """Build final certifications while retaining the initial rejection audit."""
+    from run_cwh_compiled_worker import compile_review
+
+    final_rows = []
+    for row in raw_result.get('reviews') or []:
+        if row.get('verdict') == 'fully_supported':
+            final_rows.append({
+                'id': row['id'],
+                'verdict': row['verdict'],
+                'rationale': row['rationale'],
+                'revision': row.get('revision'),
+            })
+        else:
+            revision = row['revision']
+            final_rows.append({'id': row['id'], 'verdict': revision['verdict'], 'rationale': revision['rationale']})
+    final = compile_review(repaired, {'reviews': final_rows}, run, source_hash)
+    for row in final['reviews']:
+        row['reviewer_run_id'] = run['session_id']
+    final['reviewer_run_ids'] = [run['session_id']]
+    final['repair_provenance'] = {
+        'mode': 'reviewer_narrowing_v1',
+        'original_source_bundle_sha256': initial['source_bundle_sha256'],
+        'repaired_evidence_ids': sorted(row['evidence_id'] for row in revisions),
+        'earlier_review_sha256': hashlib.sha256(
+            json.dumps(initial, ensure_ascii=False, sort_keys=True).encode()
+        ).hexdigest(),
+        'revisions': copy.deepcopy(revisions),
+    }
+    return final

@@ -9,6 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_worker_observations import permission_denials
+from run_cwh_model_worker import write_transport_blocker, run_host_semantic_task
+from cwh_host_research import HostModelError
 from run_cwh_batched_viewpoints import cached_batch, merge_topic_bundles
 from run_cwh_resumable_pipeline import maybe_run_ai_worker, StageSpec
 from cwh_authoring_packet import compact_authoring_references
@@ -105,3 +107,88 @@ def test_permission_blockers_and_exhausted_requests_do_not_loop(tmp_path, exit_c
     outcome = maybe_run_ai_worker(runner, StageSpec("domestic_viewpoints", "viewpoints", transient_exit_codes=(124,)),
                                  tmp_path / "task.json", tmp_path / "output.json")
     assert outcome.retryable is False
+
+
+def test_rate_limit_becomes_resumable_wait_without_consuming_retry(tmp_path):
+    runner = mock.Mock()
+    runner.root = tmp_path
+    runner.input_contract = {"ai_worker_command": ["worker", "{task}"]}
+    runner.remaining_budget_seconds.return_value = None
+    runner.run_command.return_value = (29, tmp_path / "worker.log")
+    workspace = tmp_path / "worker" / "domestic_viewpoints"
+    workspace.mkdir(parents=True)
+    (workspace / "compiled_blocker.json").write_text(json.dumps({
+        "transport_category": "rate_limited",
+        "retry_after": "2026-09-15 00:12:59 UTC+8",
+        "exit_code": 29,
+    }), encoding="utf-8")
+    task = tmp_path / "task.json"
+    task.write_text(json.dumps({"stage_workspace": str(workspace)}), encoding="utf-8")
+    outcome = maybe_run_ai_worker(
+        runner,
+        StageSpec("domestic_viewpoints", "viewpoints"),
+        task,
+        tmp_path / "output.json",
+    )
+    assert outcome.status == "waiting_ai"
+    assert outcome.retryable is False
+    assert outcome.details["reason"] == "provider_rate_limited"
+    assert outcome.details["retry_after"] == "2026-09-15 00:12:59 UTC+8"
+
+
+def test_network_failure_becomes_resumable_wait_without_consuming_retry(tmp_path):
+    runner = mock.Mock()
+    runner.root = tmp_path
+    runner.input_contract = {"ai_worker_command": ["worker", "{task}"]}
+    runner.remaining_budget_seconds.return_value = None
+    runner.run_command.return_value = (28, tmp_path / "worker.log")
+    workspace = tmp_path / "worker" / "domestic_evidence_verification"
+    workspace.mkdir(parents=True)
+    (workspace / "compiled_blocker.json").write_text(json.dumps({
+        "transport_category": "network_unavailable",
+        "retry_after": "",
+        "exit_code": 28,
+    }), encoding="utf-8")
+    task = tmp_path / "task.json"
+    task.write_text(json.dumps({"stage_workspace": str(workspace)}), encoding="utf-8")
+    outcome = maybe_run_ai_worker(
+        runner,
+        StageSpec("domestic_evidence_verification", "review"),
+        task,
+        tmp_path / "output.json",
+    )
+    assert outcome.status == "waiting_ai"
+    assert outcome.retryable is False
+    assert outcome.details["reason"] == "provider_network_unavailable"
+    assert outcome.details["transport_category"] == "network_unavailable"
+
+
+def test_generic_worker_blocker_contains_only_sanitized_transport_fields(tmp_path):
+    write_transport_blocker(tmp_path, {
+        "category": "rate_limited",
+        "retry_after": "2026-09-15 00:12:59 UTC+8",
+        "exit_code": 29,
+        "provider_private_message": "must not persist",
+    })
+    blocker = json.loads((tmp_path / "blocker.json").read_text(encoding="utf-8"))
+    assert blocker == {
+        "blocker": True,
+        "type": "model_transport_error",
+        "transport_category": "rate_limited",
+        "retry_after": "2026-09-15 00:12:59 UTC+8",
+        "exit_code": 29,
+    }
+
+
+def test_direct_comment_or_hotword_adapter_propagates_rate_limit(tmp_path):
+    workspace = tmp_path / "worker"
+    task = tmp_path / "task.json"
+    task.write_text(json.dumps({"stage_workspace": str(workspace)}), encoding="utf-8")
+    def limited(_):
+        raise HostModelError("rate limited", 29, category="rate_limited", retry_after="soon")
+    with pytest.raises(SystemExit) as error:
+        run_host_semantic_task(task, limited)
+    assert error.value.code == 29
+    blocker = json.loads((workspace / "blocker.json").read_text(encoding="utf-8"))
+    assert blocker["transport_category"] == "rate_limited"
+    assert blocker["retry_after"] == "soon"

@@ -127,6 +127,7 @@ def test_merged_speakers_and_unsupported_number_are_blocked() -> None:
     evidence["formal_claim"] += "并将在三年内完成。"
     bundle["viewpoints"]["by_topic"][0]["clusters"][0]["details"] += "并将在三年内完成。"
     messages = mapping_problem_messages(validate_analysis_mapping(bundle))
+    assert all(message.startswith("[议题=") for message in messages)
     assert any("合并了多个发言人" in message for message in messages)
     assert any("新增了原文片段中没有的数字" in message for message in messages)
 

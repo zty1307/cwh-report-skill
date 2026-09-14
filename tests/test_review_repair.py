@@ -5,8 +5,12 @@ import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from test_host_compiler import compiled
-from cwh_review_repair import request, apply, validate_identity, combine, validate_combined, evidence_rows
+from cwh_review_repair import (
+    request, apply, validate_identity, combine, validate_combined, evidence_rows,
+    apply_reviewer_narrowing, reviewer_narrowing_packet,
+)
 from domestic_evidence_mapping import validate_semantic_review_packet
+from run_cwh_compiled_worker import compile_review
 
 
 def packets():
@@ -70,3 +74,30 @@ def test_repair_author_cannot_be_independent_reviewer():
     packet = combine(analysis, initial, later, {identity}, 'new-hash')
     packet['repair_provenance']['author_repair_run_id'] = 'author-repair'
     assert any(i['code'] == 'reviewer_not_independent' for i in validate_semantic_review_packet(analysis, packet, source_bundle_sha256='new-hash'))
+
+
+def test_one_pass_reviewer_narrowing_preserves_rejection_and_certifies_replacement():
+    analysis = compiled()
+    replacement = '公共服务建设应结合实际需求完善设施布局、运行维护和长效评估机制，稳步提升服务可及性与资源使用效率。'
+    raw = {'reviews': [{
+        'id': 'e1',
+        'verdict': 'partially_supported',
+        'rationale': '原观点含有原文未支持的程度词。',
+        'revision': {
+            'formal_claim': replacement,
+            'verdict': 'fully_supported',
+            'rationale': '收窄后的判断均可由连续原文支持。',
+        },
+    }]}
+    run = {'session_id': 'independent-reviewer', 'completed_at': 'time'}
+    initial = compile_review(analysis, raw, run, 'original-hash')
+    repaired, revisions = apply_reviewer_narrowing(analysis, raw)
+    final = reviewer_narrowing_packet(repaired, initial, raw, revisions, run, 'repaired-hash')
+    validate_combined(analysis, repaired, initial, final)
+    assert evidence_rows(repaired)[0][1]['formal_claim'] == replacement
+    assert final['reviews'][0]['verdict'] == 'fully_supported'
+    assert final['repair_provenance']['revisions'][0]['original_verdict'] == 'partially_supported'
+
+    final['repair_provenance']['revisions'][0]['formal_claim'] = '篡改'
+    with pytest.raises(ValueError, match='differs'):
+        validate_combined(analysis, repaired, initial, final)

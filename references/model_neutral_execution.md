@@ -32,6 +32,8 @@ Windows checkpoint replacement retries transient permission failures for at most
 
 The subprocess watchdog runs separately from stdin/stdout communication. A Windows child that does not consume a large prompt cannot prevent timeout enforcement. Both monotonic and wall-clock deadlines are checked; a forward clock jump or resumed host does not grant more time. Cleanup targets only the child tree created for that invocation.
 
+The host treats the final structured model event as authoritative even when a vendor CLI wrapper exits with shell code 0. A terminal rate-limit event or transient provider-network failure is normalized to a model-neutral `waiting_ai` checkpoint with any returned retry time; it does not consume semantic repair attempts or trigger immediate blind retries. Authentication, malformed output and semantic failures remain distinct hard failures. Raw review, compiled author/reviewer, comment, hotword and generic model adapters use the same transport classification.
+
 `domestic_viewpoints` validates the unreviewed draft identically in automatic and manual-worker modes. Only the next stage requests independent semantic certification. That review worker may write its review packet; the controller alone writes the verified bundle and mapping audit. These are file contracts, not an operating-system sandbox; the host must scope worker permissions accordingly.
 
 ## Writing behavior

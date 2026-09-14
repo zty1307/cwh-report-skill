@@ -120,6 +120,8 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
             "sentiment_source": "ai_reviewed",
             "sentiment_status": "classified",
             "in_sentiment_denominator": "true",
+            "comment_heading": "支持具体政策",
+            "topic_comment_heading": "公众期待政策落实",
         }
         with path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row))
@@ -133,6 +135,8 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
             samples = ORCHESTRATOR.load_comment_handoffs([str(path)], ["议题一"])
 
             self.assertEqual(len(samples), 1)
+            self.assertEqual(samples[0]["topic_comment_heading"], "公众期待政策落实")
+            self.assertEqual(ORCHESTRATOR.row_sample(samples[0])["topic_comment_heading"], "公众期待政策落实")
             self.assertTrue(ORCHESTRATOR.is_actual_platform_comment(samples[0]))
             selected = ORCHESTRATOR.select_comments(samples)
             self.assertEqual(len(selected), 1, "reviewed short stance comments must remain visible")
@@ -549,6 +553,16 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
         groups = FORMALIZE.comment_groups(rows)
         self.assertEqual(["期待优化物流网络体系"], [name for name, _ in groups])
         self.assertNotIn("好的", FORMALIZE.comment_wording(groups[0][1]))
+
+    def test_comment_policy_proposition_gets_neutral_report_verb(self) -> None:
+        row = {
+            "topic": "城市更新", "platform": "今日头条", "url": "https://example.test/a",
+            "quote_verified": True, "evidence_mode": "verbatim_public_comment", "comment_id": "c1",
+            "content": "老旧房屋改造应优先保障安全", "ai_formal_include": True,
+            "ai_semantic_quality": "substantive", "topic_comment_heading": "城市更新应优先保障居住安全",
+        }
+        groups = FORMALIZE.comment_groups([row])
+        self.assertEqual("认为城市更新应优先保障居住安全", groups[0][0])
 
     def test_comment_heading_never_falls_back_to_attention_plus_agenda(self) -> None:
         rows = [{

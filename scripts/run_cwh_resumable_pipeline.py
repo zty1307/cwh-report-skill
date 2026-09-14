@@ -229,6 +229,33 @@ def maybe_run_ai_worker(
     timeout = (runner.input_contract.get("stage_timeouts_seconds") or {}).get(spec.stage_id)
     code, log_path = runner.run_command(spec.stage_id, command, cwd=runner.root, timeout_seconds=timeout)
     if code != 0:
+        if code in {28, 29}:
+            task_data = read_json(task)
+            workspace = Path(str(task_data.get("stage_workspace") or ""))
+            blocker_paths = (workspace / "compiled_blocker.json", workspace / "blocker.json")
+            blocker_path = next((path for path in blocker_paths if path.is_file()), None)
+            blocker = read_json(blocker_path) if blocker_path else {}
+            retry_after = str(blocker.get("retry_after") or "")
+            category = str(blocker.get("transport_category") or "")
+            if code == 29:
+                message = "模型服务当前限流；本节点已保留，额度恢复后从这里继续，不消耗内容重试次数。"
+                reason = "provider_rate_limited"
+            else:
+                message = "模型服务网络暂时不可用；本节点已保留，网络恢复后从这里继续，不消耗内容重试次数。"
+                reason = "provider_network_unavailable"
+            if retry_after and code == 29:
+                message += f"服务返回的恢复时间：{retry_after}。"
+            return StageOutcome.waiting(
+                "waiting_ai",
+                message,
+                details={
+                    "task": str(task),
+                    "log_path": str(log_path),
+                    "reason": reason,
+                    "transport_category": category,
+                    "retry_after": retry_after,
+                },
+            )
         return StageOutcome.failed(
             f"AI工作器退出码为{code}，详见{log_path}",
             retryable=(code in spec.transient_exit_codes and code != 124) or code == 65,
@@ -1116,6 +1143,12 @@ class CwhPipeline:
             raw_public_evidence = packet_dir / "public_article_evidence.json"
             if raw_public_evidence.exists():
                 shutil.copy2(raw_public_evidence, public_evidence_target)
+            # Raw normalization has already completed the expensive, evidence-
+            # backed two-pass semantic review. Preserve that checkpoint instead
+            # of asking a later stage to recreate the same hotwords.
+            raw_hotword_audit = packet_dir / "hotword_audit.json"
+            if raw_hotword_audit.exists():
+                shutil.copy2(raw_hotword_audit, self.artifacts / "hotword_audit.json")
             return StageOutcome.succeeded(
                 "原始监测表已经AI审核、汇总并生成标准总表。",
                 details={"log_path": str(log_path), "audit": str(audit)},
@@ -1302,6 +1335,10 @@ class CwhPipeline:
     def domestic_evidence_verification(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
         source = self.artifacts / "analysis_bundle.json"
         review_path = self.artifacts / "domestic_evidence_semantic_review.json"
+        supplied_review = str(self.contract.get('domestic_evidence_review') or '').strip()
+        if supplied_review and not review_path.exists():
+            # Internal checkpoint input, never a waiver of the frozen-source gate.
+            shutil.copy2(supplied_review, review_path)
         verified_path = self.artifacts / "analysis_bundle_verified.json"
         audit_path = self.artifacts / "domestic_evidence_mapping_audit.json"
         repaired_path = self.artifacts / "analysis_bundle_repaired.json"
@@ -1685,6 +1722,7 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
     input_mode = "standard_workbook" if args.system_workbook else "raw_workbook"
     comment_capture = getattr(args, 'comment_capture', '') or os.environ.get('CWH_COMMENT_CAPTURE', '')
     comment_collection_audit = getattr(args, 'comment_collection_audit', '') or os.environ.get('CWH_COMMENT_COLLECTION_AUDIT', '')
+    evidence_review = getattr(args, 'domestic_evidence_review', '')
     return {
         "execution_profile": profile_name,
         "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
@@ -1696,6 +1734,7 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "raw_input_dir": str(Path(args.raw_input_dir).resolve()) if args.raw_input_dir else "",
         "metadata": str(Path(args.metadata).resolve()) if args.metadata else "",
         "analysis_bundle": str(Path(args.analysis_bundle).resolve()) if args.analysis_bundle else "",
+        'domestic_evidence_review': str(Path(evidence_review).resolve()) if evidence_review else '',
         "public_article_evidence": str(Path(args.public_article_evidence).resolve()) if args.public_article_evidence else "",
         "comment_handoff": str(Path(args.comment_handoff).resolve()) if args.comment_handoff else "",
         "comment_capture": str(Path(comment_capture).resolve()) if comment_capture else '',
@@ -1711,6 +1750,7 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
             "raw_input_dir": directory_contract(args.raw_input_dir),
             "metadata": file_contract(args.metadata),
             "analysis_bundle": file_contract(args.analysis_bundle),
+            'domestic_evidence_review': file_contract(evidence_review),
             "public_article_evidence": file_contract(args.public_article_evidence),
             "comment_handoff": file_contract(args.comment_handoff),
             "comment_capture": file_contract(comment_capture),
@@ -1878,6 +1918,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--raw-input-dir", default="")
     result.add_argument("--metadata", default="")
     result.add_argument("--analysis-bundle", default="")
+    result.add_argument('--domestic-evidence-review', default='', help='Internal reviewed checkpoint; must match the exact frozen analysis hash')
     result.add_argument("--public-article-evidence", default="")
     result.add_argument("--comment-handoff", default="")
     result.add_argument('--comment-capture', default='')

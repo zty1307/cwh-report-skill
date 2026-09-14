@@ -74,6 +74,69 @@ def test_short_attributed_claim_is_detected() -> None:
     assert claims[0]["claim_cjk_length"] < 30
 
 
+def test_structured_claim_is_not_split_on_reporting_verb_inside_claim() -> None:
+    claim = (
+        "规划强调强化企业创新主体地位，鼓励企业开展技术研发、构建服务体系、延伸产业链条，"
+        "并通过长期运营提升农业服务质量和资源配置效率。"
+    )
+    details = f"区域农牧服务平台认为，{claim}"
+    issues = domestic_viewpoint_quality_issues(
+        {
+            "viewpoints": {
+                "by_topic": [
+                    {
+                        "topic": "研究农业服务体系建设",
+                        "heading": "认为企业创新应形成长期服务能力",
+                        "clusters": [
+                            {
+                                "summary": "认为企业创新应形成长期服务能力",
+                                "details": details,
+                                "evidence": [
+                                    {
+                                        "attribution": "区域农牧服务平台",
+                                        "attribution_status": "media_voice",
+                                        "formal_claim": claim,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    )
+    assert not any(item["code"] == "attributed_claim_too_short" for item in issues)
+
+
+def test_structured_short_claim_is_still_rejected() -> None:
+    issues = domestic_viewpoint_quality_issues(
+        {
+            "viewpoints": {
+                "by_topic": [
+                    {
+                        "topic": "研究产业服务体系建设",
+                        "heading": "认为服务能力仍需提升",
+                        "clusters": [
+                            {
+                                "summary": "认为服务能力仍需提升",
+                                "details": "区域服务平台认为，应提升服务能力。",
+                                "evidence": [
+                                    {
+                                        "attribution": "区域服务平台",
+                                        "attribution_status": "media_voice",
+                                        "formal_claim": "应提升服务能力。",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    )
+    assert any(item["code"] == "attributed_claim_too_short" for item in issues)
+
+
 def test_analysis_person_noun_does_not_hide_later_short_expert_claim() -> None:
     text = (
         "中国金融信息网梳理多位宏观分析人士观点："

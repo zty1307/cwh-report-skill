@@ -410,7 +410,18 @@ def apply_semantic_review_packet(
 
 
 def mapping_problem_messages(audit: dict[str, Any]) -> list[str]:
-    return [_text(row.get("message") or row.get("code")) for row in audit.get("issues") or []]
+    messages = []
+    for row in audit.get("issues") or []:
+        context = []
+        if _text(row.get("topic")):
+            context.append("议题=" + _text(row.get("topic")))
+        if _text(row.get("candidate_id")):
+            context.append("候选=" + _text(row.get("candidate_id")))
+        if _text(row.get("evidence_id")):
+            context.append("证据=" + _text(row.get("evidence_id")))
+        prefix = "[" + "；".join(context) + "] " if context else ""
+        messages.append(prefix + _text(row.get("message") or row.get("code")))
+    return messages
 
 
 def _dashboard_data(path: Path) -> dict[str, Any]:

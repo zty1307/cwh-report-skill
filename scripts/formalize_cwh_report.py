@@ -253,6 +253,20 @@ def stance_heading(text: Any) -> str:
     return value if value.startswith(STANCE_HEADING_PREFIXES) else ""
 
 
+def comment_stance_heading(text: Any) -> str:
+    """Normalize a concrete reviewed comment claim into report heading grammar."""
+    value = clean_sentence(text)
+    value = re.sub(r"^(?:舆论|媒体|专家|机构|网民)(?:普遍)?", "", value).strip()
+    if value.startswith(STANCE_HEADING_PREFIXES):
+        return value
+    # Domestic models often return a valid policy proposition instead of an
+    # attribution verb. Preserve the proposition and add the neutral report
+    # verb deterministically; generic topic labels still fail this gate.
+    if re.search(r"(?:应当|应|需要|需|须|不能|不应|有必要|可以|可)", value):
+        return "认为" + value
+    return ""
+
+
 def topic_heading(item: dict[str, Any]) -> str:
     heading = clean_sentence(item.get("heading"))
     reviewed = stance_heading(heading)
@@ -491,7 +505,7 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         text = clean_formal_comment(item.get("content") or item.get("title"))
         if not text or not comment_is_substantive(item, text):
             continue
-        reviewed_heading = stance_heading(
+        reviewed_heading = comment_stance_heading(
             item.get("topic_comment_heading")
             or item.get("comment_heading")
             or item.get("ai_comment_heading")
@@ -524,9 +538,9 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         if not deduped:
             continue
         group_headings = [
-            stance_heading(row.get("topic_comment_heading"))
+            comment_stance_heading(row.get("topic_comment_heading"))
             for row in deduped
-            if stance_heading(row.get("topic_comment_heading"))
+            if comment_stance_heading(row.get("topic_comment_heading"))
         ]
         unique_row_headings = list(dict.fromkeys(
             row.get("_reviewed_comment_heading") for row in deduped if row.get("_reviewed_comment_heading")
@@ -2107,10 +2121,9 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
         else:
             document.add_paragraph("境外网民对本次国务院常务会议关注度较低，暂无评论性观点。")
 
-    # Keep the appendix heading and the first table rows together. Otherwise
-    # Word may leave only the repeated table header at the bottom of the
-    # overseas-analysis page and start the actual records on the next page.
-    document.add_page_break()
+    # Let Word use the remaining space after a short overseas section. A forced
+    # break here creates an almost-empty page whenever foreign comments are absent.
+    # The appendix table can split normally and repeats its header row.
     if four_override:
         write_override_section(document, data, "four", four_override, docx_charts)
     else:

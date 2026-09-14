@@ -13,7 +13,18 @@ if (!inputPath || !sheetName || !previewPath) {
 
 const bytes = await fs.readFile(inputPath);
 const workbook = await SpreadsheetFile.importXlsx(bytes);
-const preview = await workbook.render({ sheetName, autoCrop: "all", scale: 1, format: "png" });
+const drawingRanges = {
+  "总事件": "A1:N19",
+  "子事件数据汇总": "A1:K38",
+  "词云": "A1:N42",
+};
+const renderOptions = { sheetName, scale: 1, format: "png" };
+if (drawingRanges[sheetName]) {
+  renderOptions.range = drawingRanges[sheetName];
+} else {
+  renderOptions.autoCrop = "all";
+}
+const preview = await workbook.render(renderOptions);
 await fs.writeFile(previewPath, new Uint8Array(await preview.arrayBuffer()));
 console.log(JSON.stringify({ inputPath, sheetName, previewPath }));
 process.exit(0);

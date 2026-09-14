@@ -5,13 +5,13 @@ from pathlib import Path
 import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, collect_topic, HostModelError
+from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, terminal_transport_error, collect_topic, HostModelError
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_public_reader import check_public_url
 from complete_cwh_evidence_structure import complete_analysis_structure
 from normalize_cwh_analysis import normalize_analysis
 from domestic_evidence_mapping import validate_analysis_mapping
-from run_cwh_compiled_worker import compile_review, balanced_fetch_urls, semantic_packet, independent_packet
+from run_cwh_compiled_worker import compile_review, balanced_fetch_urls, cached_public_pages, semantic_packet, independent_packet
 
 
 def fixture():
@@ -167,9 +167,7 @@ def test_independent_packet_does_not_merge_different_segment_namespaces():
     packet = independent_packet(bundle)
     assert len(packet['sources']) == 2
     assert packet['claims'][0]['source_id'] != packet['claims'][1]['source_id']
-    original = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]['source_snapshot']['source_text']
-    assert packet['sources'][0]['source_text'] == original
-    assert packet['sources'][1]['source_text'] == original
+    assert all('source_text' not in source for source in packet['sources'])
     assert all('segments' not in source for source in packet['sources'])
     assert packet['claims'][1]['excerpt_segments'][0]['id'] == 'e2/1'
     assert ''.join(s['text'] for s in packet['claims'][1]['excerpt_segments']) == alternate['source_excerpt']
@@ -210,7 +208,7 @@ def test_local_excerpt_preserves_nonzero_original_position_and_context():
     ev['source_excerpt_start'] += len(prefix)
     ev['source_excerpt_end'] += len(prefix)
     packet = independent_packet(bundle)
-    assert packet['sources'][0]['source_text'] == candidate['source_snapshot']['source_text']
+    assert 'source_text' not in packet['sources'][0]
     assert ''.join(s['text'] for s in packet['claims'][0]['excerpt_segments']) == ev['source_excerpt']
     decision = {'reviews': [{'id': 'e1', 'verdict': 'uncertain', 'rationale': 'unit', 'propositions': [
         {'text': ev['formal_claim'], 'verdict': 'uncertain', 'source_range': ['e1/1', 'e1/1'], 'rationale': 'unit'}]}]}
@@ -221,6 +219,22 @@ def test_local_excerpt_preserves_nonzero_original_position_and_context():
     ev['source_excerpt'] += '不存在的原文'
     with pytest.raises(ValueError, match='exact declared excerpt'):
         independent_packet(bundle)
+
+
+def test_compact_review_is_expanded_to_auditable_full_claim_proposition():
+    bundle = compiled()
+    ev = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    decision = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': '原文完整支持主体和判断。'}]}
+    review = compile_review(bundle, decision, {'session_id': 'reviewer', 'completed_at': 'time'}, 'hash')
+    proposition = review['reviews'][0]['propositions'][0]
+    assert proposition == {
+        'text': ev['formal_claim'],
+        'verdict': 'fully_supported',
+        'rationale': '原文完整支持主体和判断。',
+        'source_quote': ev['source_excerpt'],
+        'source_quote_start': ev['source_excerpt_start'],
+        'source_quote_end': ev['source_excerpt_end'],
+    }
 
 
 def test_model_narrative_cannot_invent_tool_execution():
@@ -270,6 +284,42 @@ def test_stream_metrics_only_report_activity_counts():
     assert "internal text" not in json.dumps(metrics)
 
 
+def test_terminal_transport_error_detects_rate_limit_without_copying_provider_message():
+    log = json.dumps({
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": True,
+        "errors": "429 使用量已超出频率限制，将在 2026-09-15 00:12:59 UTC+8 重置 request-secret",
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }, ensure_ascii=False)
+    error = terminal_transport_error(log)
+    assert error == {
+        "category": "rate_limited",
+        "exit_code": 29,
+        "retry_after": "2026-09-15 00:12:59 UTC+8",
+        "subtype": "error_during_execution",
+    }
+    assert "request-secret" not in json.dumps(error)
+
+
+def test_terminal_transport_error_detects_transient_network_failure():
+    log = json.dumps({
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": True,
+        "errors": ["502 网络连接失败：无法解析服务器地址（getaddrinfo ENOTFOUND api.example.test）"],
+        "errors_info": [{"status": 502, "category": "network"}],
+    }, ensure_ascii=False)
+    error = terminal_transport_error(log)
+    assert error == {
+        "category": "network_unavailable",
+        "exit_code": 28,
+        "retry_after": "",
+        "subtype": "error_during_execution",
+    }
+    assert "api.example.test" not in json.dumps(error)
+
+
 def test_web_packet_uses_fetched_title_not_truncated_search_title():
     packet, _, observation, _ = fixture()
     url = "https://wrong.test/a"
@@ -277,6 +327,17 @@ def test_web_packet_uses_fetched_title_not_truncated_search_title():
                            [{"url": url, "source_text": "完整正文", "page_title": "完整原始标题", "status": "completed"}])
     assert prepared["items"][0]["title"] == "完整原始标题"
     assert prepared["items"][0]["discovered_title"] == "搜索结果"
+
+
+def test_public_page_snapshot_is_hash_checked_and_reused_for_repairs(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("run_cwh_compiled_worker.read_public_pages", lambda urls, timeout=8: calls.append((urls, timeout)) or [{"url": urls[0], "source_text": "原文"}])
+    first = cached_public_pages(tmp_path, ["https://example.test/a"])
+    second = cached_public_pages(tmp_path, ["https://example.test/a"])
+    assert first == second and len(calls) == 1
+    (tmp_path / "public_pages.json").write_text("[]", encoding="utf-8")
+    cached_public_pages(tmp_path, ["https://example.test/a"])
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("code", [23, 124])

@@ -32,6 +32,10 @@ Authorized collector response envelopes can be normalized with `cwh_weibo_captur
 
 For 1–300 real comments, `cwh_comment_semantics.py --capture <normalized.json> --workbook <accepted.xlsx> --output-dir <stage workspace>` uses `CWH_SEMANTIC_COMMAND_JSON` for one bounded direct review. Scripts validate original comment text against retained raw responses and compile the input, reviewed labels, summary and report handoff. Topic assignment comes from semantic review, not the discovery query or historical seed label. Parent-title-only context must remain explicitly labelled; it is not full article text. Larger corpora keep the preparation/classifier route. Platform coverage is a separate actual collector audit, not a model assertion; a standalone semantic test is not a full pipeline run.
 
+For stepwise diagnosis, `--split-review` (worker option `CWH_COMMENT_SPLIT_REVIEW=1`) separates classification from formal quotation selection. The first pass covers every real comment and saves an input-hash-bound classification checkpoint. The second pass receives only included comments and cannot change their labels or topics, introduce IDs, or select excluded rows. A classification checkpoint is not a formal handoff; all normal summary and quotation gates still apply. Actual classifier and quotation-review run IDs are recorded separately. Successful checkpoints may be reused for a repair, but reused work and diagnostic per-step budgets must not be reported as a fresh full-run result.
+
+Review instructions use only the context actually supplied. `api_parent_title_only` means a title, not an unread complete article. Standalone comments can still be reviewed; a comment whose meaning cannot be resolved without missing context must be excluded with an explicit reason, never completed by inference. Compact JSON and omission of empty nonformal headings reduce output formatting, not review coverage.
+
 Required key:
 
 - `sample_id`: exact ID from `sentiment_input.csv`.

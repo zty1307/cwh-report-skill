@@ -14,8 +14,34 @@ import sys
 import time
 import uuid
 from cwh_pipeline_runtime import atomic_write_json
+from cwh_host_research import HostModelError
+from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from cwh_worker_observations import permission_denials
+
+
+def write_transport_blocker(workspace: Path, error: dict) -> None:
+    workspace.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(workspace / "blocker.json", {
+        "blocker": True,
+        "type": "model_transport_error",
+        "transport_category": str(error.get("category") or "provider_error"),
+        "retry_after": str(error.get("retry_after") or ""),
+        "exit_code": int(error.get("exit_code") or 70),
+    })
+
+
+def run_host_semantic_task(task_path: Path, callback) -> None:
+    try:
+        callback(task_path)
+    except HostModelError as exc:
+        workspace = Path(json.loads(task_path.read_text(encoding="utf-8-sig"))["stage_workspace"]).resolve()
+        write_transport_blocker(workspace, {
+            "category": exc.category,
+            "retry_after": exc.retry_after,
+            "exit_code": exc.exit_code,
+        })
+        raise SystemExit(exc.exit_code) from exc
 
 
 def build_prompt(task_path: Path, session_id: str) -> str:
@@ -57,11 +83,15 @@ def main():
     task = json.loads(task_path.read_text(encoding="utf-8-sig"))
     if task['stage_id'] == 'hotwords' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON'):
         from cwh_hotword_semantics import run_task
-        run_task(task_path)
+        run_host_semantic_task(task_path, run_task)
         return
     if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON') and (task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')):
         from cwh_comment_semantics import run_task
-        run_task(task_path)
+        run_host_semantic_task(task_path, run_task)
+        return
+    if task['stage_id'] == 'overseas_evidence' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON') and os.environ.get('CWH_SEARCH_COMMAND_JSON'):
+        from cwh_overseas_semantics import run_task
+        run_host_semantic_task(task_path, run_task)
         return
     if os.environ.get("CWH_SEMANTIC_COMMAND_JSON") and task["stage_id"] in {"domestic_viewpoints", "domestic_evidence_verification"}:
         code = run_scoped_command([sys.executable, str(Path(__file__).with_name("run_cwh_compiled_worker.py")),
@@ -93,12 +123,19 @@ def main():
                                       input_text=build_prompt(task_path, session))
         except subprocess.TimeoutExpired:
             code = 124
-    denials = permission_denials(log_path.read_text(encoding="utf-8"))
+    log_text = log_path.read_text(encoding="utf-8")
+    denials = permission_denials(log_text)
     if denials:
         atomic_write_json(workspace / "blocker.json", {"blocker": "host_permission_denied", "denials": denials,
             "log_path": str(log_path), "automatic_permission_changes": False})
         code = 23
+    transport_error = terminal_transport_error(log_text)
+    if transport_error:
+        write_transport_blocker(workspace, transport_error)
+        code = transport_error["exit_code"]
     record.update(exit_code=code, elapsed_seconds=round(time.monotonic() - started, 3))
+    if transport_error:
+        record["transport_error"] = transport_error
     record["outputs_present"] = {name: Path(name).is_file() for name in task.get("declared_outputs", [])}
     atomic_write_json(workspace / f"{session}.run.json", record)
     print(json.dumps(record, ensure_ascii=False))

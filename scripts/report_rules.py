@@ -182,6 +182,47 @@ def attributed_claims(text: str) -> list[dict[str, Any]]:
     return claims
 
 
+def _cluster_attributed_claims(cluster: dict[str, Any]) -> list[dict[str, Any]]:
+    """Use structured evidence when it completely defines the rendered prose.
+
+    ``details`` is normally assembled from ``evidence``.  Re-parsing that prose
+    can mistake a reporting verb inside a claim (for example ``规划强调``) for
+    a second speaker and manufacture an empty preceding claim.  The structured
+    rows are both more precise and the actual audit authority.  Legacy or
+    incomplete bundles still use the prose parser so they cannot bypass the
+    existing checks.
+    """
+
+    evidence_rows = [row for row in cluster.get("evidence") or [] if isinstance(row, dict)]
+    structured: list[dict[str, Any]] = []
+    for row in evidence_rows:
+        subject = str(
+            row.get("attribution")
+            or row.get("speaker_name")
+            or row.get("source")
+            or row.get("platform")
+            or ""
+        ).strip()
+        claim = str(row.get("formal_claim") or row.get("claim") or "").strip()
+        if not subject or not claim:
+            return attributed_claims(str(cluster.get("details") or cluster.get("analysis") or ""))
+        clause = f"{subject}认为，{claim}".strip(" ，；。")
+        structured.append(
+            {
+                "clause": clause,
+                "subject": subject,
+                "claim": claim,
+                "claim_cjk_length": _cjk_length(claim),
+                "attribution_voice_count": _attribution_voice_count(subject),
+                "anonymous_expert": bool(ANONYMOUS_EXPERT_PATTERN.search(clause)),
+                "invented_interview_form": bool(re.search(r"受访(?:专家|学者|人士)", subject)),
+            }
+        )
+    if structured:
+        return structured
+    return attributed_claims(str(cluster.get("details") or cluster.get("analysis") or ""))
+
+
 def _voice_key(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
 
@@ -305,7 +346,7 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                         )
                     evidence_claim_signatures.add(claim_signature)
 
-            for claim in attributed_claims(details):
+            for claim in _cluster_attributed_claims(cluster):
                 if claim["attribution_voice_count"] > 1:
                     issues.append(
                         {

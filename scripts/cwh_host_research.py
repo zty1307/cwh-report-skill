@@ -9,15 +9,18 @@ import subprocess
 import time
 import uuid
 from cwh_pipeline_runtime import atomic_write_json, utc_now
+from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from run_cwh_inline_review import response_object
 from cwh_worker_observations import permission_denials
 
 
 class HostModelError(RuntimeError):
-    def __init__(self, message, exit_code):
+    def __init__(self, message, exit_code, *, category="", retry_after=""):
         super().__init__(message)
         self.exit_code = exit_code
+        self.category = category
+        self.retry_after = retry_after
 
 
 def block_text(value):
@@ -112,7 +115,12 @@ def invoke(command_template, prompt, workspace, label, timeout):
     log = path.read_text(encoding="utf-8")
     if permission_denials(log):
         code = 23
+    provider_error = terminal_transport_error(log)
+    if provider_error:
+        code = provider_error["exit_code"]
     record.update(exit_code=code, completed_at=utc_now(), seconds=round(time.monotonic() - start, 3), log=str(path), transport_metrics=stream_metrics(log))
+    if provider_error:
+        record["transport_error"] = provider_error
     atomic_write_json(path.with_suffix(".run.json"), record)
     return log, record
 
@@ -184,7 +192,13 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
             pass
     log, run = invoke(command, prompt + "\n" + payload, workspace, label, timeout)
     if run["exit_code"]:
-        raise HostModelError(f'Model request failed: {run["exit_code"]}; {run["log"]}', run["exit_code"])
+        error = run.get("transport_error") or {}
+        category = str(error.get("category") or "")
+        retry_after = str(error.get("retry_after") or "")
+        message = f'Model request failed: {run["exit_code"]}; {run["log"]}'
+        if category:
+            message = f'Model request failed: {category}' + (f'; retry after {retry_after}' if retry_after else '')
+        raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after)
     result = response_object(log)
     if result.get("blocker"):
         raise HostModelError(str(result["blocker"]), 23)

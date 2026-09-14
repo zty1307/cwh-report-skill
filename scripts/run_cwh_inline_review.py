@@ -13,6 +13,7 @@ import subprocess
 import time
 import uuid
 from cwh_pipeline_runtime import atomic_write_json, sha256_file
+from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from cwh_hotword_pipeline import valid_candidate
 from cwh_json_transport import load_framed_json, normalize_authoring_envelope
@@ -187,14 +188,26 @@ def main():
                                           stderr=subprocess.STDOUT, input_text=prompt, timeout=remaining)
             except subprocess.TimeoutExpired:
                 code = 124
-        records.append({"kind": kind, "session_id": session, "prompt_characters": len(prompt),
-                        "source_bytes": source.stat().st_size, "elapsed_seconds": round(time.monotonic() - started, 3),
-                        "exit_code": code})
+        log_text = log_path.read_text(encoding="utf-8")
+        transport_error = terminal_transport_error(log_text)
+        if transport_error:
+            code = transport_error["exit_code"]
+            atomic_write_json(workspace / "blocker.json", {
+                "blocker": True,
+                "type": "model_transport_error",
+                **transport_error,
+            })
+        record = {"kind": kind, "session_id": session, "prompt_characters": len(prompt),
+                  "source_bytes": source.stat().st_size, "elapsed_seconds": round(time.monotonic() - started, 3),
+                  "exit_code": code}
+        if transport_error:
+            record["transport_error"] = transport_error
+        records.append(record)
         atomic_write_json(workspace / "inline_runs.json", records)
         if code:
             raise SystemExit(code)
         try:
-            result = response_object(log_path.read_text(encoding="utf-8"))
+            result = response_object(log_text)
             if kind == "hotword" and not result.get("blocker"):
                 result = normalize_hotword_transport(result)
             if not result.get("blocker"):

@@ -541,6 +541,7 @@ def normalize_sample(row: dict[str, Any], topics: list[str], idx: int) -> dict[s
         "research_query": str(row.get("research_query") or "").strip(),
         "report_order": intish(row.get("report_order")) or None,
         "comment_heading": str(row.get("comment_heading") or "").strip(),
+        "topic_comment_heading": str(row.get("topic_comment_heading") or "").strip(),
         "ai_formal_include": (
             row.get("ai_formal_include")
             if isinstance(row.get("ai_formal_include"), bool)
@@ -1180,6 +1181,7 @@ def row_sample(sample: dict[str, Any]) -> dict[str, Any]:
         "decision_reason": sample.get("decision_reason", ""),
         "report_order": sample.get("report_order"),
         "comment_heading": sample.get("comment_heading", ""),
+        "topic_comment_heading": sample.get("topic_comment_heading", ""),
         "ai_formal_include": sample.get("ai_formal_include"),
         "ai_semantic_quality": sample.get("ai_semantic_quality", ""),
         "ai_formal_reason": sample.get("ai_formal_reason", ""),

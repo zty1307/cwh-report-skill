@@ -420,12 +420,23 @@ def build_portable_workbook(normalized_path: Path, output_path: Path, verificati
     workbook.calculation.fullCalcOnLoad = True
     workbook.calculation.forceFullCalc = True
     workbook.calculation.calcMode = "auto"
+    expected_sheet_names = [
+        "关键词",
+        "总事件",
+        *[f"子事件{child.get('index')}" for child in data.get("children") or []],
+        "子事件数据汇总",
+        "外媒报道列表",
+        "词云",
+        "公众TOP",
+    ]
+    actual_sheet_names = list(workbook.sheetnames)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
     workbook.close()
     verification = {
         "builder": "portable_openpyxl",
-        "sheet_names": ["关键词", "总事件", *[f"子事件{child.get('index')}" for child in data.get("children") or []], "子事件数据汇总", "外媒报道列表", "词云", "公众TOP"],
+        "sheet_names": actual_sheet_names,
+        "sheet_order_ok": actual_sheet_names == expected_sheet_names,
         "key_range_checks": "通过",
         "formula_error_count": 0,
         "chart_count": 2,

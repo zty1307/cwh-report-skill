@@ -188,6 +188,48 @@ def find_artifact_node_modules(skill_directory: Path) -> Path | None:
     return None
 
 
+def render_workbook_sheets(
+    output_path: Path,
+    sheet_names: list[str],
+    previews_dir: Path,
+    renderer: Path,
+    node_path: Path | None,
+    node_modules: Path | None,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Render every sheet through the bundled artifact runtime for acceptance."""
+    if node_path is None or node_modules is None or not renderer.is_file():
+        reason = "node_or_artifact_renderer_unavailable"
+        return [], [{"sheet_name": name, "error": reason} for name in sheet_names]
+    node_environment = os.environ.copy()
+    existing_node_path = node_environment.get("NODE_PATH", "")
+    node_environment["NODE_PATH"] = str(node_modules) + (
+        os.pathsep + existing_node_path if existing_node_path else ""
+    )
+    rendered_sheets: list[str] = []
+    render_errors: list[dict[str, str]] = []
+    for sheet_name in sheet_names:
+        safe_sheet_name = re.sub(r'[\\/:*?"<>|]', "_", sheet_name)
+        preview_path = previews_dir / f"{safe_sheet_name}.png"
+        render_started_at = datetime.now().timestamp()
+        render_command = [str(node_path), str(renderer), str(output_path), sheet_name, str(preview_path)]
+        render_result = subprocess.run(render_command, check=False, env=node_environment)
+        preview_is_fresh = preview_path.exists() and preview_path.stat().st_mtime >= render_started_at - 2
+        # Some Windows artifact runtimes emit the complete PNG and then exit
+        # abnormally during Node teardown. A fresh, non-empty preview is the
+        # acceptance evidence; a zero exit without a fresh file is not.
+        if preview_is_fresh and preview_path.stat().st_size > 0:
+            rendered_sheets.append(sheet_name)
+        else:
+            render_errors.append(
+                {
+                    "sheet_name": sheet_name,
+                    "exit_code": str(render_result.returncode),
+                    "fresh_preview": str(preview_is_fresh).lower(),
+                }
+            )
+    return rendered_sheets, render_errors
+
+
 def matched_sheet(workbook: Any, aliases: Iterable[str]) -> Any | None:
     normalized = {normalize_text(name): name for name in workbook.sheetnames}
     for alias in aliases:
@@ -2153,6 +2195,22 @@ def main() -> None:
 
         verification_path = run_dir / "builder_verification.json"
         verification = build_portable_workbook(normalized_path, args.output, verification_path)
+        renderer = args.builder.with_name("raw_system_workbook_renderer.mjs")
+        node_path = args.node or (Path(os.environ["CWH_NODE_PATH"]) if os.environ.get("CWH_NODE_PATH") else None)
+        if node_path is None:
+            detected_node = shutil.which("node") or shutil.which("node.exe")
+            node_path = Path(detected_node) if detected_node else None
+        node_modules = find_artifact_node_modules(SCRIPT_DIRECTORY.parent)
+        rendered_sheets, render_errors = render_workbook_sheets(
+            args.output,
+            list(verification.get("sheet_names", [])),
+            previews_dir,
+            renderer,
+            node_path,
+            node_modules,
+        )
+        verification["rendered_sheets"] = rendered_sheets
+        verification["render_errors"] = render_errors
         chart_verification = {
             "status": "portable_builder_layout",
             "total_chart": {"top_left_cell": "A14", "bottom_right_cell": "H31"},
@@ -2168,6 +2226,10 @@ def main() -> None:
         verification["chart_finalizer"] = chart_verification
         verification_path.write_text(json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8")
         write_audit(normalized, args.output, args.audit, verification_path, args.baseline)
+        if render_errors or len(rendered_sheets) != len(verification.get("sheet_names", [])):
+            raise PipelineError(
+                f"逐工作表渲染未通过：{len(rendered_sheets)}/{len(verification.get('sheet_names', []))}"
+            )
         print(
             json.dumps(
                 {
@@ -2218,19 +2280,14 @@ def main() -> None:
 
     renderer = args.builder.with_name("raw_system_workbook_renderer.mjs")
     verification = json.loads(verification_path.read_text(encoding="utf-8"))
-    rendered_sheets: list[str] = []
-    render_errors: list[dict[str, str]] = []
-    for sheet_name in verification.get("sheet_names", []):
-        safe_sheet_name = re.sub(r'[\\/:*?"<>|]', "_", sheet_name)
-        preview_path = previews_dir / f"{safe_sheet_name}.png"
-        render_started_at = datetime.now().timestamp()
-        render_command = [str(node_path), str(renderer), str(args.output), sheet_name, str(preview_path)]
-        render_result = subprocess.run(render_command, check=False, env=node_environment)
-        preview_is_fresh = preview_path.exists() and preview_path.stat().st_mtime >= render_started_at - 2
-        if render_result.returncode == 0 or preview_is_fresh:
-            rendered_sheets.append(sheet_name)
-        else:
-            render_errors.append({"sheet_name": sheet_name, "exit_code": str(render_result.returncode)})
+    rendered_sheets, render_errors = render_workbook_sheets(
+        args.output,
+        list(verification.get("sheet_names", [])),
+        previews_dir,
+        renderer,
+        node_path,
+        node_modules,
+    )
     verification["rendered_sheets"] = rendered_sheets
     verification["render_errors"] = render_errors
     chart_verification_path = run_dir / "chart_finalizer_verification.json"
@@ -2254,6 +2311,10 @@ def main() -> None:
     verification["chart_finalizer"] = load_json(chart_verification_path)
     verification_path.write_text(json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8")
     write_audit(normalized, args.output, args.audit, verification_path, args.baseline)
+    if render_errors or len(rendered_sheets) != len(verification.get("sheet_names", [])):
+        raise PipelineError(
+            f"逐工作表渲染未通过：{len(rendered_sheets)}/{len(verification.get('sheet_names', []))}"
+        )
     print(
         json.dumps(
             {

@@ -46,6 +46,36 @@ def test_research_plan_uses_resolved_input_mode_budgets_without_resetting_clock(
     assert json.dumps(pipeline.runner.input_contract, sort_keys=True) == before
 
 
+@pytest.mark.parametrize('matching_hash', [True, False])
+def test_supplied_review_still_requires_exact_frozen_source(tmp_path, monkeypatch, matching_hash):
+    from test_host_compiler import compiled
+    from run_cwh_compiled_worker import compile_review
+    source = compiled()
+    topic = source['viewpoints']['by_topic'][0]['topic']
+    evidence = source['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    supplied = tmp_path / 'supplied-review.json'
+    pipeline = pipeline_module.CwhPipeline(tmp_path / 'job', {'execution_profile': 'bounded_60m', 'domestic_evidence_review': str(supplied)})
+    author_path = pipeline.artifacts / 'analysis_bundle.json'
+    pipeline_module.atomic_write_json(author_path, source)
+    digest = pipeline_module.analysis_bundle_sha256(author_path) if matching_hash else 'different-original-input'
+    result = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': 'unit fixture', 'propositions': [
+        {'text': evidence['formal_claim'], 'verdict': 'fully_supported', 'source_quote': evidence['source_excerpt'], 'rationale': 'unit fixture'}]}]}
+    packet = compile_review(source, result, {'session_id': 'independent-unit-reviewer', 'completed_at': '2026-05-17'}, digest)
+    pipeline_module.atomic_write_json(supplied, packet)
+    monkeypatch.setattr(pipeline_module, 'topic_titles', lambda _: [topic])
+    # This is a one-voice unit fixture, not a whole-report coverage test.
+    # Real source-hash, review-independence and mapping validators remain active.
+    monkeypatch.setattr(pipeline_module, 'validate_analysis_bundle', lambda *a, **k: [])
+    calls = []
+    monkeypatch.setattr(pipeline_module, 'maybe_run_ai_worker', lambda *a, **k: calls.append(True))
+    before = supplied.read_bytes()
+    outcome = pipeline.domestic_evidence_verification(pipeline.runner, pipeline.runner.spec_by_id['domestic_evidence_verification'])
+    assert supplied.read_bytes() == before
+    assert (outcome.status == 'succeeded') is matching_hash
+    assert len(calls) == (0 if matching_hash else 1)
+    assert (pipeline.artifacts / 'analysis_bundle_verified.json').exists() is matching_hash
+
+
 def test_compact_cli_preserves_current_action_and_errors_without_full_history(tmp_path):
     state = {"pipeline_id": "test", "status": "waiting_ai", "current_stage": "hotwords",
              "next_action": {"task": "tasks/hotwords.json", "problems": ["needs review"]},
