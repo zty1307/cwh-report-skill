@@ -27,6 +27,7 @@ REQUIRED_STAGES = {
 
 def execution_policy_checks(policy: dict[str, Any]) -> list[dict[str, Any]]:
     """Check every shipped profile, including the explicitly selected legacy one."""
+    from cwh_model_contract import resolved_stage_budgets
     profiles = policy.get("profiles") or {}
     default_name = str(policy.get("default_profile") or "")
     checks = [{
@@ -59,6 +60,10 @@ def execution_policy_checks(policy: dict[str, Any]) -> list[dict[str, Any]]:
                 "stage_total_seconds": stage_total,
                 "reserve_seconds": reserve,
             })
+            for input_mode in profile.get("input_mode_budget_overrides") or {}:
+                allocation = resolved_stage_budgets(profile, input_mode)
+                checks.append({"id": f"policy:{name}:{input_mode}_allocation", "status": "passed" if sum(allocation.values()) + reserve <= wall_clock else "failed",
+                               "stage_total_seconds": sum(allocation.values()), "reserve_seconds": reserve})
         except Exception as exc:
             checks.append({"id": f"policy:{name}_budget", "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
     return checks
@@ -107,6 +112,16 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "scripts/cwh_worker_observations.py",
         "scripts/cwh_authoring_packet.py",
         "scripts/cwh_json_transport.py",
+        "scripts/cwh_host_research.py",
+        "scripts/cwh_public_reader.py",
+        "scripts/cwh_semantic_compiler.py",
+        "scripts/cwh_source_spans.py",
+        "scripts/cwh_semantic_repairs.py",
+        "scripts/cwh_review_repair.py",
+        "scripts/cwh_weibo_capture.py",
+        "scripts/cwh_toutiao_capture.py",
+        "scripts/cwh_comment_semantics.py",
+        "scripts/run_cwh_compiled_worker.py",
         "scripts/build_cwh_review_delivery.py",
         "scripts/prepare_cwh_corpus_index.py",
         "scripts/cwh_pipeline_runtime.py",

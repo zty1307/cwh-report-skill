@@ -13,6 +13,13 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentReachCommentCollectionTests(unittest.TestCase):
+    def test_error_response_is_not_a_zero_comment_page(self) -> None:
+        for payload in ({}, {"message": "error"}, {"data": [], "message": "error", "has_more": False},
+                        {"data": [], "code": 403, "has_more": 0}, {"data": []}, {"data": [], "has_more": "false"}):
+            with self.assertRaises(ValueError):
+                MODULE.validate_comment_payload(payload)
+        MODULE.validate_comment_payload({"data": [], "message": "success", "has_more": False})
+
     def test_article_id_from_url(self) -> None:
         self.assertEqual(MODULE.article_id({"url": "https://www.toutiao.com/article/7661081803561894451/"}), "7661081803561894451")
 

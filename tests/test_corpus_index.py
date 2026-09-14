@@ -23,6 +23,33 @@ def test_index_retains_all_raw_ids_and_separate_reading_order(tmp_path):
     assert all(Path(row["full_text_path"]).exists() for row in index["topics"][0]["shortlist"])
 
 
+def test_reading_order_delays_duplicate_fulltexts_without_excluding_records(tmp_path):
+    data = corpus()
+    data['candidates'][0]['content'] = '甲地区公共服务需要结合人口分布和实际需求进行统筹配置。' * 6
+    data['candidates'][1]['content'] = data['candidates'][0]['content']
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, ['议题']).read_text('utf-8'))
+    order = [r['record_id'] for r in index['topics'][0]['shortlist']]
+    assert order.index('r1') > order.index('r2')
+    assert set(order) == {r['record_id'] for r in data['candidates']}
+    assert json.loads(source.read_text('utf-8')) == data
+
+
+def test_reading_prioritizes_analysis_titles_and_delays_identical_fact_titles(tmp_path):
+    data = corpus()
+    data['candidates'][0]['title'] = '议题发布要点'
+    data['candidates'][1]['title'] = '议题发布要点'
+    data['candidates'][2]['title'] = '专家解读另一种表达'
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, ['议题']).read_text('utf-8'))
+    order = [r['record_id'] for r in index['topics'][0]['shortlist']]
+    assert order[0] == 'r2'
+    assert order.index('r1') > order.index('r14')
+    assert len(index['topics'][0]['record_ids']) == len(data['candidates'])
+
+
 def test_bounded_deferral_never_calls_unread_records_reviewed(tmp_path):
     raw = corpus()
     source = tmp_path / "public_article_evidence.json"

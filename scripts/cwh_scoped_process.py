@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import threading
+import time
 
 
 def run_scoped_command(command, *, cwd=None, env=None, stdout=None, stderr=None,
@@ -14,8 +16,36 @@ def run_scoped_command(command, *, cwd=None, env=None, stdout=None, stderr=None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         start_new_session=os.name != "nt",
     )
+    communication = None
     try:
-        process.communicate(input=input_text, timeout=timeout)
+        if timeout is None:
+            process.communicate(input=input_text)
+        else:
+            # Windows communicate() can block while writing a large stdin
+            # before it reaches its timed wait. Keep *all* communication off
+            # the watchdog thread and enforce both elapsed and UTC wall time.
+            deadline_wall = time.time() + timeout
+            deadline_mono = time.monotonic() + timeout
+            done, errors = threading.Event(), []
+            def communicate():
+                try:
+                    process.communicate(input=input_text)
+                except BaseException as exc:
+                    errors.append(exc)
+                finally:
+                    done.set()
+            communication = threading.Thread(target=communicate, daemon=True)
+            communication.start()
+            while True:
+                remaining = min(deadline_wall - time.time(), deadline_mono - time.monotonic())
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                if done.wait(min(1.0, remaining)):
+                    if time.time() > deadline_wall or time.monotonic() > deadline_mono:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    if errors:
+                        raise errors[0]
+                    break
         return process.returncode
     except BaseException:
         # Never enumerate or terminate other sessions by executable/model name.
@@ -27,4 +57,6 @@ def run_scoped_command(command, *, cwd=None, env=None, stdout=None, stderr=None,
             else:
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
+        if communication is not None:
+            communication.join(timeout=10)
         raise

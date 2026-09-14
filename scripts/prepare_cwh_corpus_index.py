@@ -6,6 +6,16 @@ import re
 from cwh_pipeline_runtime import atomic_write_json, sha256_file
 
 
+def reading_fingerprint(text: str) -> set[str]:
+    compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", text).lower()
+    return {compact[i:i+8] for i in range(max(0, len(compact)-7))}
+
+
+def near_same_reading(left: set[str], right: set[str]) -> bool:
+    # Reading-order diversity only: these rows remain in the untouched corpus.
+    return bool(left and right) and len(left & right) / min(len(left), len(right)) >= .82
+
+
 def complete_corpus_deferrals(data: dict, corpus: dict, topics: list[str]) -> dict:
     """Account for unread records without pretending they were semantically reviewed."""
     result = copy.deepcopy(data)
@@ -33,17 +43,29 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str]) -> Path:
         alias_groups = corpus.get("topic_aliases") or []
         aliases = [topic, *(alias_groups[number - 1] if number <= len(alias_groups) else [])]
         ranked = sorted(candidates, key=lambda x: (
+            -bool(re.search("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             -max((len(str(alias)) for alias in aliases if str(alias) and str(alias) in str(x.get("title", ""))), default=0),
             -len(re.findall("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             len(str(x.get("title", ""))), str(x.get("record_id", ""))))
         sources = {}
         selected = []
-        for row in ranked:
-            source_name = str(row.get("account") or row.get("source") or "")
-            if sources.get(source_name, 0) >= 2:
-                continue
-            sources[source_name] = sources.get(source_name, 0) + 1
-            selected.append(row)
+        delayed, fingerprints, titles_seen = [], [], set()
+        for diversified in (True, False):
+            for row in ranked if diversified else delayed:
+                source_name = str(row.get("account") or row.get("source") or "")
+                if sources.get(source_name, 0) >= 2:
+                    continue
+                fingerprint = reading_fingerprint(str(row.get("content") or ""))
+                title_key = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(row.get("title") or "")).lower()
+                if diversified and ((title_key and title_key in titles_seen) or any(near_same_reading(fingerprint, prior) for prior in fingerprints)):
+                    delayed.append(row)
+                    continue
+                sources[source_name] = sources.get(source_name, 0) + 1
+                selected.append(row)
+                fingerprints.append(fingerprint)
+                titles_seen.add(title_key)
+                if len(selected) == 20:
+                    break
             if len(selected) == 20:
                 break
         reading_order = []
@@ -55,6 +77,7 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str]) -> Path:
                                   "source": row.get("source"), "full_text_path": str(article)})
         topic_index = root / f"topic-{number}.json"
         atomic_write_json(topic_index, {"topic": topic, "reading_order_only_not_review": True,
+                                      "reading_diversity": "delay_high_overlap_fulltexts_without_excluding_them",
                                       "shortlist": reading_order,
                                       "all_candidates": [{k: row.get(k) for k in ("record_id", "title", "source", "published_at", "url")} for row in candidates]})
         index["reading_indexes"].append({"topic": topic, "path": str(topic_index)})

@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from cwh_pipeline_runtime import atomic_write_json
+from cwh_pipeline_runtime import atomic_write_json, utc_now
 
 
 def _string(value: Any) -> str:
@@ -89,13 +89,14 @@ def complete_analysis_structure(data: dict[str, Any], corpus: dict[str, Any] | N
         for candidate in candidates:
             raw = raw_by_id.get(_string(candidate.get("raw_evidence_record_id")))
             if raw:
-                for key in ("url", "title", "source", "published_at"):
+                for key in ("url", "title", "source", "account", "published_at"):
                     if _missing(candidate, key):
                         candidate[key] = raw.get(key)
                 candidate.setdefault("source_snapshot", {})
                 raw_snapshot = _object(candidate.get("source_snapshot"))
                 for key, value in {"url": raw.get("url"), "title": raw.get("title"),
-                                   "published_at": raw.get("published_at"), "source_text": raw.get("content")}.items():
+                                   "published_at": raw.get("published_at"), "source_text": raw.get("content"),
+                                   "captured_at": utc_now(), "capture_method": "monitoring_export"}.items():
                     if _missing(raw_snapshot, key):
                         raw_snapshot[key] = value
             snapshot = _object(candidate.get("source_snapshot"))

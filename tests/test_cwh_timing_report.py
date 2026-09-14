@@ -31,3 +31,17 @@ def test_old_job_without_timing_does_not_invent_durations(tmp_path):
     assert report["wall_clock_seconds"] is None
     assert report["wait_and_other_uninstrumented_seconds"] is None
     assert report["stages"][0]["observed_span_seconds"] is None
+
+
+def test_live_elapsed_is_separate_from_last_saved_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr('cwh_timing_report.time.time', lambda: 200)
+    state = {'status': 'running', 'budget_started_epoch': 100, 'wall_clock_elapsed_seconds': 5,
+             'input_contract': {'analysis_bundle': 'supplied.json', 'stage_timeouts_seconds': {'review': 90}},
+             'stages': [{'stage_id': 'review', 'status': 'running', 'budget_started_epoch': 120}]}
+    (tmp_path / 'pipeline_state.json').write_text(json.dumps(state), encoding='utf-8')
+    result = build_timing_report(tmp_path)
+    assert result['wall_clock_seconds'] == 5
+    assert result['live_wall_clock_seconds'] == 100
+    assert result['stages'][0]['live_elapsed_seconds'] == 80
+    assert result['stages'][0]['observed_span_seconds'] is None
+    assert result['supplied_analysis_bundle'] is True

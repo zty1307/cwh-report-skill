@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ def timestamp(value: Any) -> float | None:
 
 def build_timing_report(job_dir: Path) -> dict[str, Any]:
     state = json.loads((job_dir / "pipeline_state.json").read_text(encoding="utf-8-sig"))
+    now = time.time()
     events_path = job_dir / "pipeline_events.jsonl"
     by_stage: dict[str, list[dict[str, Any]]] = defaultdict(list)
     invalid_lines = 0
@@ -42,7 +44,9 @@ def build_timing_report(job_dir: Path) -> dict[str, Any]:
         starts = [stamp for event in events if event.get("event") == "stage_started" and (stamp := timestamp(event.get("timestamp"))) is not None]
         ends = [stamp for event in events if event.get("event") in {"stage_succeeded", "stage_failed", "stage_waiting", "pipeline_time_budget_exhausted"} and (stamp := timestamp(event.get("timestamp"))) is not None]
         stages.append({
-            "stage_id": row["stage_id"], "kind": row.get("kind"), "status": row.get("status"),
+            "stage_id": row["stage_id"], "label": row.get('label', row['stage_id']), "kind": row.get("kind"), "status": row.get("status"),
+            "budget_seconds": (state.get('input_contract', {}).get('stage_timeouts_seconds') or {}).get(row['stage_id']),
+            "live_elapsed_seconds": round(max(0.0, now-row['budget_started_epoch']), 3) if row.get('status') in {'running', 'retrying'} and row.get('budget_started_epoch') else None,
             "observed_span_seconds": round(max(0.0, max(ends) - min(starts)), 3) if starts and ends else None,
             "instrumented_command_seconds": round(sum(float(item.get("duration_seconds") or 0) for item in commands), 3),
             "instrumented_command_count": len(commands),
@@ -56,6 +60,9 @@ def build_timing_report(job_dir: Path) -> dict[str, Any]:
     return {
         "schema_version": "1.0", "pipeline_id": state.get("pipeline_id"), "status": state.get("status"),
         "observed_through": state.get("updated_at"), "wall_clock_seconds": total,
+        "live_wall_clock_seconds": round(max(0.0, now-state['budget_started_epoch']), 3) if state.get('status') == 'running' and state.get('budget_started_epoch') else None,
+        "supplied_analysis_bundle": bool(state.get('input_contract', {}).get('analysis_bundle')),
+        "supplied_comment_capture": bool(state.get('input_contract', {}).get('comment_capture')),
         "instrumented_command_seconds": round(command_seconds, 3),
         "wait_and_other_uninstrumented_seconds": round(max(0.0, float(total) - command_seconds), 3) if total is not None else None,
         "invalid_event_lines": invalid_lines,

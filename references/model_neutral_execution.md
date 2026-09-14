@@ -10,6 +10,8 @@ The model receives one bounded JSON task at a time. It writes final artifacts on
 
 ## Execution budgets
 
+For `bounded_60m`, standard-workbook input reallocates 870 unused raw-normalization seconds: workbook 900→30, domestic authoring 720→1290, and independent review 300→600. Other stages, the 675-second reserve, 2700-second research cutoff and 3600-second total stay unchanged. The input-mode allocation is resolved once into the persisted contract and propagated to worker timeouts. Overrides cannot inflate the total or reduce independent review, rendering or final-gate allocations. Raw-input budgets are unchanged.
+
 The executable limits live in `config/execution_policy.v1.json`. Both bounded profiles use one active model worker and serial stages. Stage limits are not increased by the reserve. Research lanes are bounded by query, page-fetch and formal-voice limits. Monitoring-system full text is always processed first. Independent review is a separate sequential run. See `model_worker_host.md` for permission-aware transports and honest review-only delivery. Models do not need to run shell commands or edit pipeline state.
 
 The 40-minute allocation is: preflight 30 seconds, intake 15, workbook 150, plan 30, domestic evidence 540, independent review 300, comments 330, overseas 270, hotwords 90, render 165 and final gate 120. Research retains ten query executions per topic so all source lanes, open search and a zero-new check can fit. It caps full-page fetches at 18 and named-entity expansions at two; comments allow four queries and 30 retained candidates; overseas allows one supplemental query and six page fetches. Both bounded profiles retain the same minimum independent voices, formal voice cap, source mapping and independent semantic review. A large raw workbook or limited access may exhaust these budgets and must produce an honest blocker.
@@ -28,6 +30,8 @@ The latest event log is authoritative over a restored state snapshot. A state cl
 
 Windows checkpoint replacement retries transient permission failures for at most 2.55 seconds of backoff. Persistent failures are surfaced with the old checkpoint intact. The model must never delete the target or patch its hash to clear a lock.
 
+The subprocess watchdog runs separately from stdin/stdout communication. A Windows child that does not consume a large prompt cannot prevent timeout enforcement. Both monotonic and wall-clock deadlines are checked; a forward clock jump or resumed host does not grant more time. Cleanup targets only the child tree created for that invocation.
+
 `domestic_viewpoints` validates the unreviewed draft identically in automatic and manual-worker modes. Only the next stage requests independent semantic certification. That review worker may write its review packet; the controller alone writes the verified bundle and mapping audit. These are file contracts, not an operating-system sandbox; the host must scope worker permissions accordingly.
 
 ## Writing behavior
@@ -35,6 +39,8 @@ Windows checkpoint replacement retries transient permission failures for at most
 Reusable writing structure and sentence rules live in `config/formal_writing_rules.v1.json`. They were distilled from reviewed reports across unrelated subjects. They define chapter order, paragraph roles, stance headings, attribution forms, evidence density, comment grouping, hotword prose and overseas prose. No period-specific topic, person, source, number or conclusion is stored in the rules.
 
 The model supplies atomic, evidence-backed judgments. Scripts assemble the fixed report skeleton. This keeps tone and structure stable across models while preserving the current meeting's evidence and uncertainty.
+
+The optional compiled transport presents original articles as numbered contiguous segments without deleting any characters. Models return an ordered segment-ID range; scripts extract verbatim text and exact offsets. This avoids copied or paraphrased quotations, but does not establish semantic support. Legacy free-text excerpts still require unique exact matches. A repeated voice in the same cluster keeps its first author-ordered formal claim; later statements stay auditable as reserves, without merging their meaning. Conflicting cross-cluster assignments still require model resolution.
 
 Draft structural completion fills only missing deterministic identifiers, source-text hashes and unique exact excerpt offsets. Existing nonempty values are preserved for validation, including invalid ones; ambiguous identity or repeated excerpts are not guessed. Frozen independently reviewed bundles are refused. The author must still supply consistent discovery/query references and actual source facts. No completion helper can establish semantic truth.
 

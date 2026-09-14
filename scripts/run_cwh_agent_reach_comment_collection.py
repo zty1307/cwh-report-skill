@@ -98,6 +98,20 @@ def iter_comment_objects(payload: dict[str, Any]) -> list[tuple[dict[str, Any], 
     return list(unique.values())
 
 
+def validate_comment_payload(payload: Any) -> None:
+    """A blocked/malformed HTTP-200 response is not an empty comment page."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise ValueError("Public comment response lacks an explicit data array; cannot infer zero comments")
+    for key in ("err_no", "errno", "error_code", "code"):
+        if key in payload and payload[key] not in (0, "0", None):
+            raise ValueError(f"Public comment endpoint returned {key}={payload[key]}")
+    message = str(payload.get("message") or payload.get("msg") or "").strip().lower()
+    if message and message not in {"success", "ok", "成功"}:
+        raise ValueError("Public comment endpoint returned a non-success message")
+    if type(payload.get("has_more")) not in (bool, int) or payload["has_more"] not in (0, 1):
+        raise ValueError("Public comment response lacks an explicit valid pagination state")
+
+
 def published_at(value: Any) -> str:
     try:
         return datetime.fromtimestamp(int(value), tz=CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S%z")
@@ -169,6 +183,9 @@ def collect_seed(
     for page_no in range(1, max_pages + 1):
         payload = fetch_json(toutiao_endpoint(gid, offset, page_size), referer)
         pages.append(payload)
+        # Retain actual responses even when the next validation fails.
+        (raw_dir / f"toutiao_{gid}.json").write_text(json.dumps(pages, ensure_ascii=False, indent=2), encoding="utf-8")
+        validate_comment_payload(payload)
         comments.extend(iter_comment_objects(payload))
         if not payload.get("has_more"):
             break

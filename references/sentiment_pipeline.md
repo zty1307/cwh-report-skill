@@ -26,6 +26,12 @@ The current domestic collection profile supports `wb,dy,ks,bili,zhihu` and expli
 
 ## Result Contract
 
+### Bounded capture and direct-review adapters
+
+Authorized collector response envelopes can be normalized with `cwh_weibo_capture.py` or `cwh_toutiao_capture.py`. These scripts do not log in, export cookies or fetch private data. Weibo login must be explicitly authorized in an isolated host profile; public comment IDs/counts never authorize account actions. Retain raw response files, hashes, parent context, dates and exclusion reasons. Explicitly disclosed automated accounts, emoji-only rows and out-of-window rows do not enter the human-comment denominator. Duplicate captures of an ID are not additional public opinion.
+
+For 1–300 real comments, `cwh_comment_semantics.py --capture <normalized.json> --workbook <accepted.xlsx> --output-dir <stage workspace>` uses `CWH_SEMANTIC_COMMAND_JSON` for one bounded direct review. Scripts validate original comment text against retained raw responses and compile the input, reviewed labels, summary and report handoff. Topic assignment comes from semantic review, not the discovery query or historical seed label. Parent-title-only context must remain explicitly labelled; it is not full article text. Larger corpora keep the preparation/classifier route. Platform coverage is a separate actual collector audit, not a model assertion; a standalone semantic test is not a full pipeline run.
+
 Required key:
 
 - `sample_id`: exact ID from `sentiment_input.csv`.

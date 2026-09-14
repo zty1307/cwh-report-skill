@@ -26,6 +26,15 @@ def clean_sentence(value: Any) -> str:
     return text.rstrip("。；;，,")
 
 
+def judgment_heading(value: Any) -> str:
+    """Use a neutral reported-judgment frame, never invent approval or criticism."""
+    heading = str(value or "").strip().rstrip("。；;")
+    stances = tuple(writing_rules()["viewpoint"]["heading_stance_verbs"])
+    if not heading or heading.startswith(stances) or any(marker in heading for marker in ("尚未形成评论性观点", "以事实性报道为主")):
+        return heading
+    return writing_rules()["viewpoint"]["default_attribution_verb"] + heading
+
+
 def evidence_sentence(row: dict[str, Any]) -> str:
     claim = clean_sentence(row.get("formal_claim"))
     if not claim:
@@ -38,6 +47,11 @@ def evidence_sentence(row: dict[str, Any]) -> str:
     )
     if not subject or claim.startswith(subject):
         return claim
+    name = clean_sentence(row.get("speaker_name"))
+    # Expand an existing exact name-only attribution; preserve the atomic claim
+    # and its attribution verb, rather than introducing a second attribution.
+    if name and subject.endswith(name) and claim.startswith(name) and STANCE_RE.match(claim[len(name):]):
+        return subject + claim[len(name):]
     if STANCE_RE.match(claim):
         return f"{subject}{claim}"
     verb = writing_rules()["viewpoint"]["default_attribution_verb"]
@@ -63,9 +77,11 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
     for topic in ((data.get("viewpoints") or {}).get("by_topic") or []):
         if not isinstance(topic, dict):
             continue
+        topic["heading"] = judgment_heading(topic.get("heading"))
         for cluster in topic.get("clusters") or []:
             if not isinstance(cluster, dict):
                 continue
+            cluster["summary"] = judgment_heading(cluster.get("summary"))
             # Python's stable sort preserves source order within the same
             # priority class. Only explicit source metadata changes priority.
             cluster["evidence"] = sorted(cluster.get("evidence") or [], key=lambda row: source_rank(row) if isinstance(row, dict) else 999)

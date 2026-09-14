@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from build_research_plan import build_plan  # noqa: E402
-from cwh_model_contract import execution_profile  # noqa: E402
+from cwh_model_contract import execution_profile, resolved_stage_budgets  # noqa: E402
 from cwh_preflight import execution_policy_checks  # noqa: E402
 
 
@@ -59,6 +59,27 @@ def test_preflight_checks_all_shipped_profiles():
     assert {row["id"] for row in checks} >= {
         "policy:bounded_40m_budget", "policy:bounded_60m_budget", "policy:exhaustive_budget",
     }
+
+
+def test_standard_input_reallocates_raw_budget_without_extending_deadlines():
+    _, selected = execution_profile("bounded_60m")
+    raw = resolved_stage_budgets(selected, "raw_workbook")
+    standard = resolved_stage_budgets(selected, "standard_workbook")
+    assert raw["workbook"] == 900 and standard["workbook"] == 30
+    assert standard["domestic_viewpoints"] - raw["domestic_viewpoints"] == 570
+    assert standard["domestic_evidence_verification"] - raw["domestic_evidence_verification"] == 300
+    assert sum(raw.values()) == sum(standard.values())
+    assert selected["wall_clock_budget_seconds"] == 3600 and selected["research_deadline_seconds"] == 2700
+    for stage in ("domestic_evidence_verification", "render", "delivery_gate"):
+        assert raw[stage] <= standard[stage]
+
+
+@pytest.mark.parametrize("override", [{"workbook": -1}, {"domestic_viewpoints": 10000}, {"render": 1}, {"unknown": 1}])
+def test_input_allocations_cannot_inflate_budget_or_steal_delivery(override):
+    _, selected = execution_profile("bounded_60m")
+    selected["input_mode_budget_overrides"] = {"standard_workbook": override}
+    with pytest.raises(ValueError):
+        resolved_stage_budgets(selected, "standard_workbook")
 
 
 def research_plan(name):

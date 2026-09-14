@@ -20,6 +20,8 @@ Use the model-neutral `bounded_60m` profile in `config/execution_policy.v1.json`
 
 Before a full run, read [references/model_neutral_execution.md](references/model_neutral_execution.md) and [references/resumable_pipeline.md](references/resumable_pipeline.md). The machine-readable policy, generated task contract, and validators override narrative examples when they differ.
 
+The controller resolves stage budgets from the input mode at intake. A standard workbook does not reserve the raw-normalization allocation: `bounded_60m` gives workbook validation 30 seconds, domestic authoring 1290 seconds and independent review 600 seconds, without increasing the total or reducing rendering time. Raw inputs keep their original allocation. Never change a running job's clocks to apply a new policy.
+
 Run the preflight before expensive model work:
 
 ```powershell

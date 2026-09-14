@@ -225,7 +225,10 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
                             context=context,
                         )
                     )
-                    if speaker_name and speaker_name not in excerpt:
+                    publisher_attribution = attribution_status in {"media_voice", "self_media"} and speaker_name in {
+                        _text(candidate.get("source")), _text(candidate.get("account"))
+                    }
+                    if speaker_name and speaker_name not in excerpt and not publisher_attribution:
                         issues.append(_issue("speaker_not_in_excerpt", "发言主体未出现在该观点对应的连续原文片段中。", **context))
                     if attribution_status == "named_person" and speaker_role and _semantic_key(speaker_role) not in _semantic_key(excerpt):
                         issues.append(_issue("speaker_role_not_in_excerpt", "具名专家的机构或职务未出现在对应原文片段中。", **context))
@@ -369,6 +372,12 @@ def validate_semantic_review_packet(
     for evidence_id, review in actual.items():
         if evidence_id not in expected:
             continue
+        actual_reviewer = _text(review.get('reviewer_run_id')) or reviewer_run_id
+        forbidden = {authoring_run_id, _text((packet.get('repair_provenance') or {}).get('author_repair_run_id'))} - {''}
+        if actual_reviewer in forbidden:
+            issues.append(_issue('reviewer_not_independent', '局部修复的作者不能审核自己的观点。', evidence_id=evidence_id))
+        if review.get('reviewer_run_id') and actual_reviewer not in (packet.get('reviewer_run_ids') or [reviewer_run_id]):
+            issues.append(_issue('reviewer_run_id_unlisted', '逐条复核run_id未在独立运行清单中留痕。', evidence_id=evidence_id))
         if _text(review.get("verdict")) not in VALID_REVIEW_VERDICTS:
             issues.append(_issue("review_not_fully_supported", "独立复核未判定该观点为fully_supported。", evidence_id=evidence_id))
         for field in ("reviewed_by", "reviewed_at", "rationale", "propositions"):
@@ -392,7 +401,7 @@ def apply_semantic_review_packet(
         review = dict(reviews[evidence_id])
         review.pop("evidence_id", None)
         review["review_pass"] = "independent_second_pass"
-        review["reviewer_run_id"] = _text(packet.get("reviewer_run_id"))
+        review["reviewer_run_id"] = _text(review.get('reviewer_run_id')) or _text(packet.get("reviewer_run_id"))
         evidence["semantic_review"] = review
     (verified.setdefault("metadata", {}))["semantic_review_packet_sha256"] = hashlib.sha256(
         json.dumps(packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

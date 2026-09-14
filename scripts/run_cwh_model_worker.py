@@ -55,6 +55,14 @@ def main():
     args = parser.parse_args()
     task_path = Path(args.task).resolve()
     task = json.loads(task_path.read_text(encoding="utf-8-sig"))
+    if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON') and (task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')):
+        from cwh_comment_semantics import run_task
+        run_task(task_path)
+        return
+    if os.environ.get("CWH_SEMANTIC_COMMAND_JSON") and task["stage_id"] in {"domestic_viewpoints", "domestic_evidence_verification"}:
+        code = run_scoped_command([sys.executable, str(Path(__file__).with_name("run_cwh_compiled_worker.py")),
+                                   "--task", str(task_path)], cwd=task_path.parent.parent, env=os.environ.copy())
+        raise SystemExit(code)
     batch_command = os.environ.get("CWH_VIEWPOINT_COMMAND_JSON", "")
     if task["stage_id"] == "domestic_viewpoints" and batch_command:
         env = dict(os.environ, CWH_MODEL_COMMAND_JSON=batch_command)

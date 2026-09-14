@@ -21,6 +21,21 @@ def test_timeout_stops_owned_child_before_it_writes(tmp_path):
     assert not marker.exists()
 
 
+def test_large_stdin_is_timed_even_when_child_never_reads_it(tmp_path):
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_scoped_command([sys.executable, '-c', 'import time; time.sleep(30)'], cwd=tmp_path,
+                           input_text='x' * 2_000_000, timeout=0.3)
+    assert time.monotonic() - started < 5
+
+
+def test_forward_wall_clock_jump_does_not_grant_extra_runtime(tmp_path, monkeypatch):
+    ticks = iter([100.0, 100.0, 1000.0, 1000.0])
+    monkeypatch.setattr('cwh_scoped_process.time.time', lambda: next(ticks, 1000.0))
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_scoped_command([sys.executable, '-c', 'import time; time.sleep(30)'], cwd=tmp_path, timeout=0.2)
+
+
 def test_research_deadline_preserves_delivery_time(tmp_path, monkeypatch):
     runner = PipelineRunner(tmp_path, [StageSpec("research", "Research"), StageSpec("render", "Render")],
                             {"research": lambda *_: None, "render": lambda *_: None},

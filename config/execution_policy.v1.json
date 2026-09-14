@@ -73,6 +73,9 @@
       "wall_clock_budget_seconds": 3600,
       "research_deadline_seconds": 2700,
       "reserved_delivery_buffer_seconds": 675,
+      "input_mode_budget_overrides": {
+        "standard_workbook": {"workbook": 30, "domestic_viewpoints": 1290, "domestic_evidence_verification": 600}
+      },
       "stage_budgets_seconds": {
         "preflight": 30,
         "intake": 15,

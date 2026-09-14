@@ -24,7 +24,7 @@ from domestic_evidence_mapping import (
     validate_analysis_mapping,
     validate_release_mapping,
 )
-from cwh_model_contract import build_task_payload, execution_profile, stage_budget_seconds
+from cwh_model_contract import build_task_payload, execution_profile, stage_budget_seconds, resolved_stage_budgets
 from normalize_cwh_analysis import normalize_analysis
 from complete_cwh_evidence_structure import complete_analysis_structure
 from cwh_viewpoint_gate import cluster_density_result
@@ -195,6 +195,7 @@ def ai_task(
         stage_workspace=runner.root / "worker" / stage_id,
     )
     Path(payload["stage_workspace"]).mkdir(parents=True, exist_ok=True)
+    payload["time_budget_seconds"] = (runner.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id, payload["time_budget_seconds"])
     atomic_write_json(path, payload)
     return path
 
@@ -225,7 +226,7 @@ def maybe_run_ai_worker(
         )
         for item in template
     ]
-    timeout = stage_budget_seconds(spec.stage_id, str(runner.input_contract.get("execution_profile") or ""))
+    timeout = (runner.input_contract.get("stage_timeouts_seconds") or {}).get(spec.stage_id)
     code, log_path = runner.run_command(spec.stage_id, command, cwd=runner.root, timeout_seconds=timeout)
     if code != 0:
         return StageOutcome.failed(
@@ -448,6 +449,12 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                 if raw_source and (candidate.get("url") != raw_source.get("url") or
                                    (candidate.get("source_snapshot") or {}).get("source_text") != raw_source.get("content")):
                     problems.append(f"{topic}监测来源候选的URL或全文与原始记录不一致：{raw_record_id}")
+                if raw_source:
+                    for identity_field in ("source", "title", "published_at"):
+                        if candidate.get(identity_field) != raw_source.get(identity_field):
+                            problems.append(f"{topic}监测来源候选的{identity_field}与原始记录不一致：{raw_record_id}")
+                    if candidate.get("account") and candidate.get("account") != raw_source.get("account"):
+                        problems.append(f"{topic}监测来源候选的account与原始记录不一致：{raw_record_id}")
                 if raw_record_id and raw_record_id not in public_corpus_ids:
                     problems.append(f"{topic}候选{candidate_id or candidate_index}引用了不存在的原始公众文章记录")
                 if decision == "eligible":
@@ -536,8 +543,10 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                         query_executions[query_id] = execution
                     if len(query) < 8 or query in {"stable_registry", "general_open_search", "toutiao_site_search", "wechat_site_search"}:
                         problems.append(f"{topic}第{round_index}轮第{execution_index}个查询不是可复核的具体查询串")
-                    if not backend or route not in {"stable_registry", "open_web", "public_platform"} or not executed_at:
+                    if not backend or route not in {"monitoring_corpus", "stable_registry", "open_web", "public_platform"} or not executed_at:
                         problems.append(f"{topic}查询{query_id or execution_index}缺少backend、有效route或executed_at")
+                    if route == "monitoring_corpus" and backend != "monitoring_export_fulltext":
+                        problems.append(f"{topic}查询{query_id or execution_index}监测池读取不能冒充网页检索")
                     if status not in {"completed", "access_failed", "waiting_login"}:
                         problems.append(f"{topic}查询{query_id or execution_index}状态无效：{status or 'missing'}")
                     if status in {"access_failed", "waiting_login"}:
@@ -563,6 +572,9 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                     problems.append(f"{topic}候选{candidate_id}引用了不存在的查询执行：{query_id}")
                     continue
                 candidate_url = str(candidate.get("url") or "").strip()
+                if execution and execution.get("route") == "monitoring_corpus":
+                    if candidate.get("discovery_origin") != "raw_monitoring" or candidate.get("raw_evidence_record_id") not in public_corpus_by_id:
+                        problems.append(f"{topic}查询{query_id}监测池候选没有可核验的原始记录：{candidate_id}")
                 if candidate_url and execution and execution.get("status") == "completed":
                     result_urls = [str(value) for value in execution.get("result_urls") or []]
                     if candidate_url not in result_urls:
@@ -663,7 +675,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                     person_match = re.search(r"([\u4e00-\u9fff]{2,4})$", attribution)
                     if person_match:
                         mention_keys.insert(0, person_match.group(1))
-                if details_text and not any(key and key in details_text for key in mention_keys):
+                if details_text and not any(key and re.sub(r"\s+", "", key) in re.sub(r"\s+", "", details_text) for key in mention_keys):
                     problems.append(
                         f"{topic}第{index}个观点簇的成文说明未写入候选{candidate_id or evidence_index}的具体人物、媒体或账号主体"
                     )
@@ -1284,6 +1296,7 @@ class CwhPipeline:
         review_path = self.artifacts / "domestic_evidence_semantic_review.json"
         verified_path = self.artifacts / "analysis_bundle_verified.json"
         audit_path = self.artifacts / "domestic_evidence_mapping_audit.json"
+        repaired_path = self.artifacts / "analysis_bundle_repaired.json"
         topics = topic_titles(self.artifacts / "CWH舆情情况_标准总表.xlsx")
         source_hash = analysis_bundle_sha256(source)
 
@@ -1295,10 +1308,28 @@ class CwhPipeline:
             except Exception as exc:
                 return [f"独立境内观点语义复核文件无法解析：{exc}"]
             source_data = read_json(source)
+            reviewed_hash = source_hash
+            provenance = packet.get('repair_provenance') or {}
+            if provenance:
+                try:
+                    if provenance.get('original_source_bundle_sha256') != source_hash:
+                        raise ValueError('Repair does not refer to this frozen source')
+                    from cwh_review_repair import validate_combined
+                    repaired = read_json(repaired_path)
+                    initial = read_json(runner.root / 'worker' / spec.stage_id / 'initial_independent_review.json')
+                    validate_combined(source_data, repaired, initial, packet)
+                    draft_problems = validate_analysis_bundle(repaired_path, topics, require_semantic_review=False,
+                        allow_deferred_corpus=self.contract.get('execution_profile') in {'bounded_40m', 'bounded_60m'})
+                    if draft_problems:
+                        return draft_problems
+                    source_data = repaired
+                    reviewed_hash = analysis_bundle_sha256(repaired_path)
+                except (ValueError, KeyError, OSError) as exc:
+                    return ['局部修复改变了冻结证据或缺少来源：' + str(exc)]
             verified_data, review_issues = apply_semantic_review_packet(
                 source_data,
                 packet,
-                source_bundle_sha256=source_hash,
+                source_bundle_sha256=reviewed_hash,
             )
             if review_issues:
                 return mapping_problem_messages({"issues": review_issues})
@@ -1321,6 +1352,8 @@ class CwhPipeline:
                 "validation_problems": problems,
                 "expected_verified_bundle": str(verified_path),
                 "expected_mapping_audit": str(audit_path),
+                "expected_repaired_bundle": str(repaired_path),
+                "expected_outputs": {"repaired_bundle": str(repaired_path)},
             },
             rules=[
                 "这是与观点撰写分离的独立第二遍核验，不得改写观点或补造原文；使用新的reviewer_run_id，且不得等于analysis_bundle.metadata.authoring_run_id。",
@@ -1389,6 +1422,11 @@ class CwhPipeline:
                 "文章检索命中不能代替评论采集成功；无评论结论必须来自实际原帖评论接口或平台定向检索的零结果证据。",
             ],
         )
+        if self.contract.get('comment_capture'):
+            captured_task = read_json(task)
+            captured_task['inputs']['comment_capture'] = self.contract['comment_capture']
+            captured_task['inputs']['comment_collection_audit'] = self.contract.get('comment_collection_audit', '')
+            atomic_write_json(task, captured_task)
         worker_failure = maybe_run_ai_worker(
             runner,
             spec,
@@ -1636,11 +1674,15 @@ class CwhPipeline:
 
 def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
     profile_name, profile = execution_profile(str(args.execution_profile or ""))
+    input_mode = "standard_workbook" if args.system_workbook else "raw_workbook"
+    comment_capture = getattr(args, 'comment_capture', '') or os.environ.get('CWH_COMMENT_CAPTURE', '')
+    comment_collection_audit = getattr(args, 'comment_collection_audit', '') or os.environ.get('CWH_COMMENT_COLLECTION_AUDIT', '')
     return {
         "execution_profile": profile_name,
         "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
         "research_deadline_seconds": int(profile.get("research_deadline_seconds") or 0),
-        "stage_timeouts_seconds": dict(profile.get("stage_budgets_seconds") or {}),
+        "stage_timeouts_seconds": resolved_stage_budgets(profile, input_mode),
+        "budget_input_mode": input_mode,
         "agenda": str(args.agenda or "").strip(),
         "system_workbook": str(Path(args.system_workbook).resolve()) if args.system_workbook else "",
         "raw_input_dir": str(Path(args.raw_input_dir).resolve()) if args.raw_input_dir else "",
@@ -1648,6 +1690,8 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "analysis_bundle": str(Path(args.analysis_bundle).resolve()) if args.analysis_bundle else "",
         "public_article_evidence": str(Path(args.public_article_evidence).resolve()) if args.public_article_evidence else "",
         "comment_handoff": str(Path(args.comment_handoff).resolve()) if args.comment_handoff else "",
+        "comment_capture": str(Path(comment_capture).resolve()) if comment_capture else '',
+        "comment_collection_audit": str(Path(comment_collection_audit).resolve()) if comment_collection_audit else '',
         "sentiment_results": str(Path(args.sentiment_results).resolve()) if args.sentiment_results else "",
         "sentiment_summary": str(Path(args.sentiment_summary).resolve()) if args.sentiment_summary else "",
         "overseas_supplements": str(Path(args.overseas_supplements).resolve()) if args.overseas_supplements else "",
@@ -1661,6 +1705,8 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
             "analysis_bundle": file_contract(args.analysis_bundle),
             "public_article_evidence": file_contract(args.public_article_evidence),
             "comment_handoff": file_contract(args.comment_handoff),
+            "comment_capture": file_contract(comment_capture),
+            "comment_collection_audit": file_contract(comment_collection_audit),
             "sentiment_results": file_contract(args.sentiment_results),
             "sentiment_summary": file_contract(args.sentiment_summary),
             "overseas_supplements": file_contract(args.overseas_supplements),
@@ -1826,6 +1872,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--analysis-bundle", default="")
     result.add_argument("--public-article-evidence", default="")
     result.add_argument("--comment-handoff", default="")
+    result.add_argument('--comment-capture', default='')
+    result.add_argument('--comment-collection-audit', default='')
     result.add_argument("--sentiment-results", default="")
     result.add_argument("--sentiment-summary", default="")
     result.add_argument("--overseas-supplements", default="")

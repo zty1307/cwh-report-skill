@@ -106,6 +106,20 @@ def test_missing_original_is_not_invented():
     assert "candidate_id" not in completed_evidence[0]
 
 
+def test_raw_hydration_preserves_identity_and_records_host_capture():
+    original = draft()
+    candidates, evidence = rows(original)
+    candidates[0] = {"raw_evidence_record_id": "raw-1"}
+    raw = {"record_id": "raw-1", "url": "https://example.test/article", "title": "测试原文", "source": "测试来源",
+           "account": "真实账号", "published_at": "2026-05-16", "content": "前文。保留全部限定条件的原文。后文。"}
+    completed = complete_analysis_structure(original, {"candidates": [raw]})
+    candidate = rows(completed)[0][0]
+    assert candidate["account"] == "真实账号"
+    assert candidate["source_snapshot"]["capture_method"] == "monitoring_export"
+    assert candidate["source_snapshot"]["captured_at"]
+    assert complete_analysis_structure(completed, {"candidates": [raw]}) == completed
+
+
 @pytest.mark.parametrize("marker", ["metadata", "evidence"])
 def test_frozen_reviewed_bundles_are_refused(marker):
     original = draft()

@@ -57,6 +57,23 @@ def is_bounded_profile(profile: str | dict[str, Any] = "") -> bool:
     return int(settings.get("wall_clock_budget_seconds") or 0) > 0
 
 
+def resolved_stage_budgets(profile: dict[str, Any], input_mode: str) -> dict[str, int]:
+    """Reallocate unnecessary raw normalization time, not the delivery reserve."""
+    stages = dict(profile.get("stage_budgets_seconds") or {})
+    overrides = (profile.get("input_mode_budget_overrides") or {}).get(input_mode) or {}
+    if not set(overrides).issubset(stages):
+        raise ValueError("Input-mode override references an unknown stage")
+    resolved = {**stages, **overrides}
+    if resolved and any(not isinstance(v, int) or isinstance(v, bool) or v <= 0 for v in resolved.values()):
+        raise ValueError("Stage budgets must be positive integers")
+    if sum(resolved.values()) > sum(stages.values()):
+        raise ValueError("Input-mode allocation cannot increase the total stage budget")
+    for stage in ("domestic_evidence_verification", "render", "delivery_gate"):
+        if resolved.get(stage, 0) < stages.get(stage, 0):
+            raise ValueError("Input-mode allocation cannot borrow from review or delivery")
+    return resolved
+
+
 def stage_budget_seconds(stage_id: str, profile_name: str = "") -> int | None:
     _, profile = execution_profile(profile_name)
     value = (profile.get("stage_budgets_seconds") or {}).get(stage_id)
