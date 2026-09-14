@@ -55,6 +55,10 @@ def main():
     args = parser.parse_args()
     task_path = Path(args.task).resolve()
     task = json.loads(task_path.read_text(encoding="utf-8-sig"))
+    if task['stage_id'] == 'hotwords' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON'):
+        from cwh_hotword_semantics import run_task
+        run_task(task_path)
+        return
     if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON') and (task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')):
         from cwh_comment_semantics import run_task
         run_task(task_path)

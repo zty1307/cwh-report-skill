@@ -121,6 +121,7 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "scripts/cwh_weibo_capture.py",
         "scripts/cwh_toutiao_capture.py",
         "scripts/cwh_comment_semantics.py",
+        "scripts/cwh_hotword_semantics.py",
         "scripts/run_cwh_compiled_worker.py",
         "scripts/build_cwh_review_delivery.py",
         "scripts/prepare_cwh_corpus_index.py",

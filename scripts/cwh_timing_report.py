@@ -62,7 +62,7 @@ def build_timing_report(job_dir: Path) -> dict[str, Any]:
         "observed_through": state.get("updated_at"), "wall_clock_seconds": total,
         "live_wall_clock_seconds": round(max(0.0, now-state['budget_started_epoch']), 3) if state.get('status') == 'running' and state.get('budget_started_epoch') else None,
         "supplied_analysis_bundle": bool(state.get('input_contract', {}).get('analysis_bundle')),
-        "supplied_comment_capture": bool(state.get('input_contract', {}).get('comment_capture')),
+        "supplied_comment_capture": bool(state['input_contract']['comment_capture']) if 'comment_capture' in state.get('input_contract', {}) else None,
         "instrumented_command_seconds": round(command_seconds, 3),
         "wait_and_other_uninstrumented_seconds": round(max(0.0, float(total) - command_seconds), 3) if total is not None else None,
         "invalid_event_lines": invalid_lines,

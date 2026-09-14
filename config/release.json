@@ -1,5 +1,5 @@
 {
-  "release_id": "2026.09.14-v47-rc2",
+  "release_id": "2026.09.14-v47-rc3",
   "rules_updated": "2026-09-14",
   "required_charts": ["trend_distribution", "topic_distribution", "hotword_distribution"]
 }

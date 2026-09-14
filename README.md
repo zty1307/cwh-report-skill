@@ -4,11 +4,11 @@ An auditable, resumable workflow for generating public-opinion reports for State
 
 The default `bounded_60m` profile is model-neutral and uses one active model worker: it exposes bounded JSON tasks and keeps deterministic writing, validation, state, hashing, rendering, and delivery outside the model. Research has a 45-minute cutoff inside the one-hour total budget. `bounded_40m` remains a tighter explicit option; `exhaustive` preserves uncapped research. Independent evidence review remains a separate sequential run, not author self-certification.
 
-Current evaluation version: **2026.09.14-v47-rc2** (`config/release.json`). This candidate adds host-compiled semantic decisions, source-scoped complete-sentence quotation ranges, bounded selected-field repairs and a watchdog that also covers blocked large-stdin delivery on Windows. Standard-workbook budgets reuse the raw-normalization allowance for authoring and independent review. Successful end-to-end completion within one hour on ordinary domestic models remains a forward-test target, not a claimed result.
+Current evaluation version: **2026.09.14-v47-rc3** (`config/release.json`). This candidate adds host-compiled semantic decisions, claim-local verified quotation ranges, script-owned hotword evidence/scoring handoffs, bounded selected-field repairs and a watchdog that also covers blocked large-stdin delivery on Windows. Standard-workbook budgets reuse the raw-normalization allowance for authoring and independent review. Successful end-to-end completion within one hour on ordinary domestic models remains a forward-test target, not a claimed result.
 
 Validation details and remaining limitations are recorded in [the candidate validation report](references/v47_validation.md). Real hy4 tests distinguish fresh raw review, recovery using earlier decisions, and report-stage continuation; none may be relabelled as a fresh full-report success. No API token reduction percentage or full-report speedup is claimed. Review-only snapshots do not count as formal report delivery.
 
-See [rc2 observed results and unresolved gates](references/v47_rc2_validation.md) for the current iteration. The compiled adapter remains opt-in through `CWH_SEMANTIC_COMMAND_JSON` and an approved `CWH_SEARCH_COMMAND_JSON`; generic fallback hosts still need their capability-specific adapters. Shared installed Skills and other model windows are not changed by a repository update.
+See [rc3 observed results and unresolved gates](references/v47_rc3_validation.md) and [earlier rc2 observations](references/v47_rc2_validation.md). The compiled adapter remains opt-in through `CWH_SEMANTIC_COMMAND_JSON` and an approved `CWH_SEARCH_COMMAND_JSON`; generic fallback hosts still need their capability-specific adapters. Shared installed Skills and other model windows are not changed by a repository update.
 
 ## 固定流程与低 token 分工
 
@@ -25,7 +25,7 @@ See [rc2 observed results and unresolved gates](references/v47_rc2_validation.md
 
 ## 国产模型复测
 
-更新完整 Skill 目录并确认 `config/release.json` 为 `2026.09.14-v47-rc2`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。旧测试中修改过哈希、回退过状态或使用旧节点结构的任务留作审计，不能继续用它证明新版本成功。
+更新完整 Skill 目录并确认 `config/release.json` 为 `2026.09.14-v47-rc3`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。旧测试中修改过哈希、回退过状态或使用旧节点结构的任务留作审计，不能继续用它证明新版本成功。
 
 先确认可用的 Python（建议 3.12），运行 `python scripts/cwh_preflight.py --skill-root .`；按预检提示补齐依赖。Windows 若 `python` 命中商店别名，改用实际 Python 可执行文件的完整路径。
 

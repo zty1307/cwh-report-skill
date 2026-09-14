@@ -167,9 +167,12 @@ def test_independent_packet_does_not_merge_different_segment_namespaces():
     packet = independent_packet(bundle)
     assert len(packet['sources']) == 2
     assert packet['claims'][0]['source_id'] != packet['claims'][1]['source_id']
-    assert packet['sources'][0]['segments'][0]['id'] == 1
-    assert packet['sources'][1]['segments'][0]['id'] == 'p123/1'
-    assert packet['claims'][1]['excerpt_segment_range'] == ['p123/1', 'p123/1']
+    original = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]['source_snapshot']['source_text']
+    assert packet['sources'][0]['source_text'] == original
+    assert packet['sources'][1]['source_text'] == original
+    assert all('segments' not in source for source in packet['sources'])
+    assert packet['claims'][1]['excerpt_segments'][0]['id'] == 'e2/1'
+    assert ''.join(s['text'] for s in packet['claims'][1]['excerpt_segments']) == alternate['source_excerpt']
 
 
 def test_review_range_extracts_frozen_text_without_certifying_support():
@@ -184,6 +187,40 @@ def test_review_range_extracts_frozen_text_without_certifying_support():
     ev['source_excerpt_start'] = 1
     with pytest.raises(ValueError, match='within the frozen excerpt'):
         compile_review(bundle, result, {'session_id': 'reviewer', 'completed_at': 'time'}, 'hash')
+
+
+def test_claim_local_ranges_extract_only_the_verified_excerpt():
+    bundle = compiled()
+    ev = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    result = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': 'unit', 'propositions': [
+        {'text': ev['formal_claim'], 'verdict': 'fully_supported', 'source_range': ['e1/1', 'e1/1'], 'rationale': 'unit'}]}]}
+    review = compile_review(bundle, result, {'session_id': 'reviewer', 'completed_at': 'time'}, 'hash')
+    assert review['reviews'][0]['propositions'][0]['source_quote'] == ev['source_excerpt']
+    result['reviews'][0]['propositions'][0]['source_range'] = ['e2/1', 'e2/1']
+    with pytest.raises(ValueError):
+        compile_review(bundle, result, {'session_id': 'reviewer', 'completed_at': 'time'}, 'hash')
+
+
+def test_local_excerpt_preserves_nonzero_original_position_and_context():
+    bundle = compiled()
+    ev = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    candidate = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]
+    prefix, suffix = '开头上下文，不属于允许引用片段。\n', '\n结尾限定条件也必须保留。'
+    candidate['source_snapshot']['source_text'] = prefix + ev['source_excerpt'] + suffix
+    ev['source_excerpt_start'] += len(prefix)
+    ev['source_excerpt_end'] += len(prefix)
+    packet = independent_packet(bundle)
+    assert packet['sources'][0]['source_text'] == candidate['source_snapshot']['source_text']
+    assert ''.join(s['text'] for s in packet['claims'][0]['excerpt_segments']) == ev['source_excerpt']
+    decision = {'reviews': [{'id': 'e1', 'verdict': 'uncertain', 'rationale': 'unit', 'propositions': [
+        {'text': ev['formal_claim'], 'verdict': 'uncertain', 'source_range': ['e1/1', 'e1/1'], 'rationale': 'unit'}]}]}
+    result = compile_review(bundle, decision, {'session_id': 'reviewer', 'completed_at': 'time'}, 'hash')
+    proposition = result['reviews'][0]['propositions'][0]
+    assert proposition['source_quote_start'] == len(prefix)
+    assert proposition['source_quote_end'] == len(prefix) + len(ev['source_excerpt'])
+    ev['source_excerpt'] += '不存在的原文'
+    with pytest.raises(ValueError, match='exact declared excerpt'):
+        independent_packet(bundle)
 
 
 def test_model_narrative_cannot_invent_tool_execution():
