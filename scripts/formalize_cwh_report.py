@@ -1246,12 +1246,12 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
             source = formal_overseas_source(row)
             title = str(row.get("_formal_title_cn") or "").strip()
             summary = clean_sentence(row.get("_formal_summary_cn"))
-            summary = re.sub(r"^(?:文章|报道)?(?:认为|指出|称)[，,:：\s]*", "", summary)
-            if row.get("_formal_category") == "借题炒作/风险解读":
-                descriptions.append(f"{source}文章《{title}》称，{summary}")
-            else:
-                descriptions.append(f"{source}文章《{title}》认为，{summary}")
-        paragraphs.append(frames["interpretive_lead"] + "；".join(descriptions) + "。")
+            summary = re.sub(r"^(?:文章|报道|原(?:文)?分析)?(?:认为|指出|称)[，,:：\s]*", "", summary)
+            # Reported analysis may belong to a quoted speaker, not the outlet.
+            descriptions.append(f"{source}文章《{title}》称，{summary}")
+        # The factual paragraph has already introduced the interpretations.
+        lead = "" if factual_rows else frames["interpretive_lead"]
+        paragraphs.append(lead + "；".join(descriptions) + "。")
 
     if not paragraphs:
         return ["数据周期内，暂未取得通过报道类型和简体中文门禁的境外报道样本。"]

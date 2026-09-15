@@ -43,7 +43,7 @@ def has_multiple_named_speakers(value: Any) -> bool:
 def has_ambiguous_meeting_reference(value: Any) -> bool:
     text = re.sub(r'\s+', '', str(value or ''))
     return bool(re.search(r'(?:本次|这次|此次|该|(?:\d{4}年)?[0-9一二三四五六七八九十]{1,2}月(?:[0-9一二三四五六七八九十]{1,2}日)?)会议', text)
-                or re.search(r'(?:按照|根据|落实)会议部署|(?:^|[，；。：:])会议(?:既)?(?:部署|提出|要求|指出|强调|决定)', text))
+                or re.search(r'(?:按照|根据|落实)会议部署|(?:^|[，；。：:])会议(?:既)?(?:部署|提出|要求|指出|强调|决定|审议|释放|把|将)', text))
 
 
 def _normalized(value: Any) -> str:

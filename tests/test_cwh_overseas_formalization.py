@@ -286,7 +286,8 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         self.assertEqual(2, len(paragraphs))
         self.assertIn("相关解读如下", paragraphs[0])
         self.assertNotIn("以事实性报道为主", paragraphs[0])
-        self.assertIn("围绕会议议题的政策影响展开解读", paragraphs[1])
+        self.assertNotIn("围绕会议议题的政策影响展开解读", paragraphs[1])
+        self.assertTrue(paragraphs[1].startswith('媒体乙文章《政策解读》称，'))
         self.assertNotIn("一是事实性报道", text)
         self.assertNotIn("二是解读性报道", text)
 
@@ -298,12 +299,28 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             'overseas_category': '解读性报道', 'formal_include': True, 'meeting_relevance': True}]}}
         frozen = copy.deepcopy(data)
         text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
-        self.assertNotIn('认为，报道认为', text)
-        self.assertIn('认为，政策有望改善公共服务覆盖', text)
+        self.assertNotIn('称，报道认为', text)
+        self.assertIn('称，政策有望改善公共服务覆盖', text)
         self.assertEqual(frozen, data)
         data['appendices']['overseas_reports'][0]['summary_cn'] = '报道引述研究机构认为，政策效果仍取决于资金安排。'
         text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
         self.assertIn('引述研究机构认为', text)
+
+    def test_generic_analysis_intro_is_removed_without_rewriting_frozen_summary(self) -> None:
+        import copy
+        data = {'appendices': {'overseas_reports': [{
+            'source': '媒体乙', 'title_cn': '政策解读', 'url': 'https://example.test/interpretive',
+            'summary_cn': '原分析认为，政策效果可能取决于资金安排。',
+            'overseas_category': '解读性报道', 'formal_include': True, 'meeting_relevance': True}]}}
+        frozen = copy.deepcopy(data)
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
+        self.assertIn('围绕会议议题的政策影响展开解读', text)
+        self.assertIn('称，政策效果可能取决于资金安排', text)
+        self.assertNotIn('原分析认为', text)
+        self.assertEqual(frozen, data)
+        data['appendices']['overseas_reports'][0]['summary_cn'] = '分析师认为，政策效果可能取决于资金安排。'
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
+        self.assertIn('称，分析师认为', text)
 
     def test_missing_workbook_category_never_silently_defaults_to_factual(self) -> None:
         with self.assertRaisesRegex(ValueError, "不能静默默认为事实性报道"):

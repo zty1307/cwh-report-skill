@@ -152,8 +152,15 @@ def test_generic_deployment_and_sentence_initial_meeting_references_need_expansi
     assert has_ambiguous_meeting_reference('按照会议部署解决供需错配。')
     assert has_ambiguous_meeting_reference('统筹新旧动能，会议既提出技术突破，又强调产业升级。')
     assert has_ambiguous_meeting_reference('会议提出完善公共服务机制。')
+    assert has_ambiguous_meeting_reference('会议把安全要求置于重要位置。')
+    assert has_ambiguous_meeting_reference('风险变化，会议将产业安全列为重点。')
+    assert has_ambiguous_meeting_reference('会议审议相关实施方案。')
+    assert has_ambiguous_meeting_reference('会议释放政策调整信号。')
     assert not has_ambiguous_meeting_reference('按照中央政治局会议部署解决供需错配。')
     assert not has_ambiguous_meeting_reference('国务院常务会议提出完善公共服务机制。')
+    assert not has_ambiguous_meeting_reference('国务院常务会议把安全要求置于重要位置。')
+    assert not has_ambiguous_meeting_reference('中央政治局会议将产业安全列为重点。')
+    assert not has_ambiguous_meeting_reference('完善会议制度和会议记录管理。')
 
 
 def test_packet_sends_complete_source_once_and_ranges_compile_exactly():
