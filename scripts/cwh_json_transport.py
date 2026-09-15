@@ -2,6 +2,53 @@
 import copy
 import json
 import hashlib
+import re
+
+
+def unique_members(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON object key')
+        result[key] = value
+    return result
+
+
+def normalize_single_smart_quoted_member_key(text):
+    """Fix one decoder-confirmed smart-quoted ASCII member key, not values.
+
+    An intact simple key and colon must follow the decoder's error position.
+    The whole object must parse after replacing just its two delimiters.
+    Multiple defects, duplicates, escapes and incomplete output stay invalid.
+    """
+    try:
+        json.loads(text, object_pairs_hook=unique_members)
+        return None
+    except json.JSONDecodeError as error:
+        if error.msg != 'Expecting property name enclosed in double quotes':
+            return None
+        position = error.pos
+    except ValueError:
+        return None
+    match = re.match(r'“([A-Za-z_][A-Za-z0-9_]*)”\s*:', text[position:])
+    if not match:
+        return None
+    closing = position + len(match.group(1)) + 1
+    repaired = text[:position] + '"' + text[position+1:closing] + '"' + text[closing+1:]
+    try:
+        result = json.loads(repaired, object_pairs_hook=unique_members)
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    repairs = result.get('transport_repairs')
+    if repairs is not None and not isinstance(repairs, list):
+        return None
+    result.setdefault('transport_repairs', []).append({
+        'kind': 'normalized_single_smart_quoted_member_key',
+        'positions': [position, closing],
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
+    return result
 
 
 def insert_single_missing_member_comma(text):
@@ -11,13 +58,6 @@ def insert_single_missing_member_comma(text):
     The entire result must parse after exactly one insertion; duplicate keys,
     multiple defects and incomplete strings remain failures.
     """
-    def unique_members(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError('Duplicate JSON object key')
-            result[key] = value
-        return result
     try:
         json.loads(text, object_pairs_hook=unique_members)
         return None  # Valid JSON is not a repair request.

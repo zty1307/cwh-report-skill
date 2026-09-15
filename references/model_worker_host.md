@@ -42,6 +42,8 @@ JSON transport may append missing container closers at end-of-output (never comp
 
 The shared response parser can also insert exactly one missing object-member comma when the JSON decoder explicitly expects that delimiter before an intact string key and colon. The entire object must then parse without duplicate keys. It changes no value, key, string or container, records the original response-text hash and insertion position, and does not combine multiple repairs. Missing values, multiple missing commas and ambiguous shape stay invalid. Original stream logs remain immutable; parsed formatting is not semantic approval.
 
+One smart-quoted simple ASCII member key can likewise have only its two quote delimiters normalized when the decoder explicitly expects a quoted property name at that position, the key and colon are intact, and the whole object then parses without duplicate keys. Smart quotes inside values are never changed. Other malformed keys, multiple smart-quoted keys, truncated output or another concurrent defect remain failures; this repair is not composed with the other repairs. The two positions and original response-text hash are audited, and all evidence gates still apply.
+
 ## Delivery and success
 
 ### Experimental host-compiled semantic transport
