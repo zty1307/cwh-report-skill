@@ -24,6 +24,7 @@ from cwh_semantic_repairs import normalize_excluded_claims
 from cwh_semantic_repairs import repair_missing_reasons
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
+from cwh_writing_rules import writing_rules
 
 
 def read(path):
@@ -170,6 +171,22 @@ def domestic_reading_limits(plan):
     return raw_limit, min(fetch_limit, ceiling) if ceiling > 0 else fetch_limit
 
 
+def single_topic_author_contract(packet):
+    """Shared production/diagnostic shape, without semantic answers or fixtures."""
+    ids = [row['id'] for row in packet['items']]
+    return ('\n本次只审核一个议题，顶层直接返回items、heading、clusters（不是topics数组）。'
+            'heading和clusters必须与items同级，不放进某一篇items对象内部。'
+            '所有输入ID恰好一次，排除项也保留reason和claims:[]；不得串用其他议题。'
+            '输入议题：' + packet['topic'] + '；ID清单：' + json.dumps(ids, ensure_ascii=False))
+
+
+def author_contract_sha256(prompt, command):
+    """A repair checkpoint belongs to its author rules and model transport."""
+    contract = {'prompt': prompt, 'command': command, 'repair_prompt': REPAIR_PROMPT,
+                'shape': single_topic_author_contract({'topic': '', 'items': []})}
+    return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
 def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=(),
                            maximum_request_seconds=180, future_topic_reserve_seconds=45):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
@@ -183,9 +200,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         if deadline - time.monotonic() < 15:
             raise TimeoutError("No remaining single-topic semantic budget")
         ids = [row['id'] for row in packet['items']]
-        contract = ('\n本次只审核一个议题，顶层直接返回items、heading、clusters（不是topics数组）。'
-                    '所有输入ID恰好一次，排除项也保留reason和claims:[]；不得串用其他议题。'
-                    '输入议题：' + packet['topic'] + '；ID清单：' + json.dumps(ids, ensure_ascii=False))
+        contract = single_topic_author_contract(packet)
         model_packet = semantic_packet(packet)
         digest = hashlib.sha256(json.dumps(model_packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         retained = prior_feedback.get(packet['topic']) or {}
@@ -266,7 +281,9 @@ def author(task, deadline):
     actual_feedback = [p for p in feedback if "尚未生成analysis_bundle.json" not in str(p)]
     request = None
     decisions_hash = hashlib.sha256(json.dumps(prior.get("decisions"), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    contract_hash = author_contract_sha256(prompt, command)
     if (actual_feedback and prior.get("source_packet_sha256") == packet_hash
+        and prior.get("author_contract_sha256") == contract_hash
         and prior.get("decisions_sha256") == decisions_hash and complete_decisions(packets, prior.get("decisions"))):
         request = repair_packet(packets, prior["decisions"], actual_feedback, semantic_packet)
     if request and request["topics"]:
@@ -286,6 +303,7 @@ def author(task, deadline):
     decisions = [exclude_certain_period_misses(next(p for p in packets if p["topic"] == d["topic"]),
                  normalize_web_publication_dates(next(p for p in packets if p["topic"] == d["topic"]), d)) for d in decisions]
     atomic_write_json(checkpoint, {"source_packet_sha256": packet_hash, "decisions": decisions, "run": run,
+        "author_contract_sha256": contract_hash,
         "decisions_sha256": hashlib.sha256(json.dumps(decisions, ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
     compilation_errors = []
     for position, (packet, topic_plan, observations) in enumerate(zip(packets, topic_plans, observed)):
@@ -325,6 +343,7 @@ REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的refer
 REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
 REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
+REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']
 
 
 def compile_review(analysis, result, run, digest):

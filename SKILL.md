@@ -119,6 +119,8 @@ Read [references/formal_report_rules.md](references/formal_report_rules.md) befo
 
 The formal report uses the fixed chapters `一、舆情传播情况`、`二、境内舆论情况`、`三、境外舆论情况` and `附录`. Lead with data, then interpretation. Use evidence-supported stance headings and concrete attribution. Do not write vague aggregations such as `媒体普遍认为`, source lists, engineering notes, or placeholder prose.
 
+Use the shared claim-composition and cluster-structure rules in the current author task: concrete judgment plus its actual reasoning or conditions, not article introductions. Cluster count follows substantive evidence (usually 2-4, up to 5-6 distinct judgments when supported), never a mandatory topic checklist. Baseline style is useful; its dates, sentiment ratios, people, slogans and unsupported attention claims are not current facts.
+
 Scripts share one rule configuration for Word and Markdown: opening, chapter names, propagation sentences, source ordering, attribution, numbering, comment lead, hotword frames and overseas transitions. Topic counts and numbering are dynamic; never discard the ninth group or shorten a qualification to fit a template. A chair is named only when `meeting.chair_name` and `meeting.chair_source` are provided; otherwise use the neutral opening. Never assume a particular person, publisher, peak date, prominent placement or factual-report majority from historical examples.
 
 Raw overseas reviews and supplemental research use the same configured analysis-summary rule. Formal summaries state actual judgments and source-supported reasoning, not article introductions, stock-movement roundups or audit explanations. Keep review reasons separate and retain all qualifications; renderers must not truncate a reviewed summary at an arbitrary length.

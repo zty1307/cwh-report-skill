@@ -137,6 +137,8 @@ def build_task_payload(
             "interpretation_eligibility_rule": writing_rules()["viewpoint"]["interpretation_eligibility_rule"],
             "meeting_reference_rule": writing_rules()["viewpoint"]["meeting_reference_rule"],
             "selection_rule": writing_rules()["viewpoint"]["selection_rule"],
+            "claim_composition_rule": writing_rules()["viewpoint"]["claim_composition_rule"],
+            "cluster_structure_rule": writing_rules()["viewpoint"]["cluster_structure_rule"],
             "heading_support_rule": writing_rules()["viewpoint"]["heading_support_rule"],
             "comment_heading_summary_rule": writing_rules()["comments"]["heading_summary_rule"],
             "prohibited_padding": writing_rules()["viewpoint"]["prohibited_padding"],

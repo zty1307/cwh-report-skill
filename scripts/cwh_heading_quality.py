@@ -12,6 +12,7 @@ HEADING_REVIEW_PROMPT = '''同时返回heading_reviews数组，每个headings输
 HEADING_REVIEW_PROMPT += '\n替代一级标题12—26个汉字，分簇标题10—24个汉字；只保留一个中心判断，不带专家强调、媒体认为等套头，不堆砌并列论点。只有客观细则而没有评价依据时用中性标题，不凭空补肯定或认可。'
 HEADING_REVIEW_PROMPT += '\n专家对机制或影响的实质判断可准确概括为认为、强调，不要求原文逐字出现同一个标题动词；但政策发布事实不能改成舆论赞扬、已经实现的效果或额外主张。'
 HEADING_REVIEW_PROMPT += '\n标题语义受支持但带“机构解读”“专家强调”“媒体认为”“审慎提示”等来源标签或审核动作套头，也应needs_revision：直接写具体判断，不把审核过程当观点。不要改变真实批评、风险或建议的强度，不因有部分审慎建议就将同簇明确批评一律软化为提示。'
+HEADING_REVIEW_PROMPT += '\n单独的“认为/建议/认可/期待”等是合法判断动词，不是来源标签；不能仅因标题以“认为”开头就判needs_revision或删去它。“专家认为/机构解读”等额外来源套头才须去掉；保留原判断立场，标题是否改写取决于语义、具体程度和单一中心，而不是要求所有标题无态度动词。'
 HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['heading_support_rule']
 
 
@@ -76,10 +77,11 @@ def repair_overlong_headings(packet, result, command, workspace, timeout):
             faults.append('标题过长')
         if re.search(r'(?:转向|转为)[^，。]{0,8}转变', text):
             faults.append('转向转变表达重复')
-        if re.match(r'^(?:认为|强调|建议|认可|肯定)?(?:机构解读|专家强调|媒体认为|审慎提示)', text):
+        verbs = '|'.join(re.escape(v) for v in writing_rules()['viewpoint']['attribution_verbs'])
+        if re.match(r'^(?:认为|强调|建议|认可|肯定)?(?:机构解读|审慎提示|(?:专家|媒体|机构|舆论)(?:' + verbs + r'))', text):
             faults.append('来源标签或审核动作代替具体判断')
-        if any(c in text for c in '，,；;') and any(c in text for c in ('且', '同时', '并且')):
-            faults.append('疑似拼接多个中心判断，须按原文收窄而非只删除连接词')
+        if any(c in text for c in '，,；;'):
+            faults.append('核查是否拼接多个中心判断；必要条件与一个判断不算双中心，不能只删除连接词掩盖拼接')
         if faults:
             wanted.append({**row, 'prior_review': review, 'target_max_cjk': hi, 'style_faults': faults})
     if not wanted or timeout < 15:

@@ -40,6 +40,8 @@ The raw adapter reviews public TOP candidates, overseas articles and hotwords se
 
 JSON transport may append missing container closers at end-of-output (never complete unfinished strings/values) or move a unique misplaced `research_audit.viewpoints` to its declared top-level slot. Each repair is audited. It never fills missing evidence rows or waives source/semantic gates; truncated arrays still fail record coverage checks.
 
+The shared response parser can also insert exactly one missing object-member comma when the JSON decoder explicitly expects that delimiter before an intact string key and colon. The entire object must then parse without duplicate keys. It changes no value, key, string or container, records the original response-text hash and insertion position, and does not combine multiple repairs. Missing values, multiple missing commas and ambiguous shape stay invalid. Original stream logs remain immutable; parsed formatting is not semantic approval.
+
 ## Delivery and success
 
 ### Experimental host-compiled semantic transport

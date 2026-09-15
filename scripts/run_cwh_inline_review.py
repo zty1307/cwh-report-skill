@@ -115,6 +115,7 @@ def compact_hotword_packet(packet: dict) -> dict:
 
 
 def response_object(log: str) -> dict:
+    from cwh_json_transport import insert_single_missing_member_comma
     def parse(value):
         if isinstance(value, dict):
             if value.get("is_error"):
@@ -134,6 +135,8 @@ def response_object(log: str) -> dict:
                 return parse(load_framed_json(text))
             except ValueError:
                 repaired = escape_cjk_internal_quotes(text)
+                if repaired is None:
+                    repaired = insert_single_missing_member_comma(text)
                 return parse(repaired) if repaired is not None else None
         return None
     try:

@@ -1,9 +1,6 @@
 # CWH formal report rules
 
-These rules are distilled from the mentor-provided formal reports:
-
-- `0701-6月29日国务院CWH舆情情况.doc`
-- `0713-7月10日国务院CWH舆情情况.doc`
+These rules combine earlier mentor-report measurements with a comparative review of three unrelated periods (May, early July and late July). Baselines are evaluation material, not production inputs or a source of current facts.
 
 The formal report must follow this stable structure. Do not invent a new chapter layout unless the user explicitly asks for a non-formal analysis draft.
 
@@ -11,7 +8,7 @@ The machine-readable source of truth is `config/formal_writing_rules.v1.json`. I
 
 An exact statement in a source does not automatically belong to that source's publisher as an independent viewpoint. Pure retelling of meeting requirements remains meeting facts, even if “要” is paraphrased as “需”; use only the identified speaker's additional reasoning. Preserve distinctions between a proposal, a draft passed at the meeting, a published regulation, a local pilot and nationwide implementation. Overseas raw-review and supplemental-search summaries share the configured interpretation rule: policy judgment plus source-supported reasoning, not an article synopsis or review-process explanation. Keep qualifications in full; renderers must not cut a reviewed summary at an arbitrary character boundary.
 
-## Typography measured from both mentor reports
+## Typography retained from the earlier measured mentor reports
 
 - Title: `华文中宋`, 22 pt, bold, centered, no first-line indent.
 - Level 1 headings such as `一、舆情传播情况`: `黑体`, 16 pt, not additionally bolded, first-line indent 2 characters.
@@ -115,13 +112,15 @@ Organize by subtopic or stable viewpoint group. Use numbered top-level items:
 
 Before writing, build an audited candidate pool from the priority source registry and open-web discovery. The registry is not an allowlist. Follow the selected profile in `research_plan.json`: both bounded profiles use grouped lanes and at most 10 queries per topic; full-page limits are 18 for `bounded_40m` and 24 for `bounded_60m`. Stop after lane coverage plus one zero-new round or budget exhaustion; `exhaustive` searches individual required sources and requires two zero-new rounds. Keep a decision for every result actually reviewed within scope. Caps are limits, not mandatory work quotas.
 
-In bounded mode, select the strongest 6-12 independent voices per topic across 2-4 clusters and cap formal prose at 12 voices. Keep additional valid candidates as `formal_use=reserve` with `reserve_reason`; they stay auditable but do not lengthen the report. In exhaustive mode, map every eligible independent voice into prose. Exact mirrors remain duplicate audit records.
+In bounded mode, select the strongest 6-12 independent voices per topic and cap formal prose at 12 voices. Usually use 2-4 clusters; genuinely distinct supported judgments may justify 5-6, without increasing the voice cap or inventing categories. Keep additional valid candidates as `formal_use=reserve` with `reserve_reason`; they stay auditable but do not lengthen the report. In exhaustive mode, map every eligible independent voice into prose. Exact mirrors remain duplicate audit records.
 
 Every top-level item must begin with an evidence-supported stance or action verb such as `建议、认可、肯定、认为、期待、希望、支持、呼吁、质疑、担忧`. Remove empty wrappers such as `舆论关注` and do not copy a cluster summary as the heading when it lacks a stance. If a topic genuinely has only factual reporting after research, use the explicit exception `监测期内尚未形成评论性观点` and do not present the factual digest as a viewpoint.
 
 The attitude verb is a conclusion from evidence, not a positivity template. Use `肯定/认可/支持` only when the source itself expresses approval, `建议/期待/呼吁` for proposals, `认为/指出` for analytical judgment, and `质疑/担忧` for criticism or risk. Do not rewrite neutral analysis as praise merely to imitate a historical report.
 
 Use the configured `viewpoint.selection_rule` before freezing claims: retain different substantive judgments actually present in the read sources, rather than letting several broad-meaning statements crowd out distinct mechanisms, conditions, risk boundaries or proposals. These are comparison dimensions, not mandatory topic columns. One article can provide multiple independently attributed voices. A cluster must have a genuinely shared judgment; different mechanisms cannot acquire the first speaker's causal chain merely by sharing a policy topic. `viewpoint.heading_support_rule` applies in the author and independent heading review, without an extra whole-report rewriting pass.
+
+The common writing unit across baselines is a concrete judgment with its source-supported reason, mechanism, condition or suggestion, not a report introduction. Use `viewpoint.claim_composition_rule` and `viewpoint.cluster_structure_rule` in both author transports. Retain specific policy objects, implementation actors and effect boundaries; do not compress actual methods into abstract phrases such as “improve mechanisms”. Suggestions remain suggestions; pending drafts remain pending. Order clusters for understanding, not by outlet class. Do not inherit baseline dates, ratios, prominent-placement assertions, fixed expert names, positive sentiment, or weaknesses such as rhetorical slogans. Different comment reactions may coexist within a topic; the current grouping contract is not inferred from one baseline's numbered count.
 
 Inside a viewpoint group, use dynamically generated `一是、二是……` when there are multiple viewpoint clusters; there is no fixed five- or eight-group truncation. The text after every ordinal must pass the same stance-verb gate as the top-level heading; do not write bare conclusions such as `一是宏观政策重在……` or `二是项目建设……`. A purely factual cluster may only use the explicit exceptions `尚未形成评论性观点` or `以事实性报道为主`.
 
@@ -140,7 +139,7 @@ Write every independent voice as `完整机构/职务/姓名+认为/指出/建�
 For self-media, the formal display name includes the platform type. Derive it from the evidence URL when possible: `微信公众号“账号”称`、`头条号“账号”称`、`百家号“账号”称`、`微博账号“账号”称`; if the platform cannot be determined, use `自媒体账号“账号”称`. Keep the raw account name unchanged in evidence data. The model may provide a source-supported attribution verb, while the deterministic fallback uses `认为` for named people and `称` for media/self-media, avoiding a mechanical wall of `认为` without inventing stronger approval or criticism.
 
 Headings are editorial conclusions, not stitched summaries. A top-level viewpoint heading should normally contain 12-26 Chinese characters and a cluster heading 10-24. Each heading expresses one central judgment; do not join different clusters with `并/与/及`. Choose `认可、肯定、建议、期待、希望、支持、质疑、担忧、强调、认为` according to the evidence. Variation is desirable only when the source stance supports it; never turn neutral analysis into approval merely to vary the verb.
-For a mature multi-source cluster, normally use 2-4 selected independent voices. Each voice receives one complete 45-120-character attributed claim. A substantive agenda normally yields 2-4 clusters; one-cluster and thin-cluster cases need traceable exceptions. Do not compress several sources into an anonymous summary or inflate page count with repeated wording.
+For a mature multi-source cluster, normally use 2-4 selected independent voices. Each voice receives one complete 45-120-character attributed claim. Cluster count follows the configured structure rule, not a fixed four-angle ceiling; one-cluster and thin-cluster cases need traceable exceptions. Do not compress several sources into an anonymous summary or inflate page count with repeated wording.
 The shared executable density gate requires two distinct speaking subjects and at least 120 Chinese characters, or a `thin_cluster_exception` containing non-empty `reason`, `search_evidence` and `reviewed_by`. Both draft validation and final auditing use this rule. The exception is retained in the audit and does not waive the minimum quality of each claim, original-source mapping or independent semantic review. Repeated URLs, repeated speakers and repeated attribution verbs do not increase independent-voice count.
 Bold each `一是/二是……` conclusion and the named source plus attribution verb (`某专家认为`、`某媒体报道称`、`微信公众号“某某”称`).
 
@@ -152,6 +151,7 @@ Apply the following source and wording rules to every meeting:
 - Check each speaking subject separately, including several experts quoted by the same article. A single attributed proposition should normally contain about 45-120 Chinese characters of substantive content. A proposition with fewer than 30 Chinese characters fails the formal gate: return to the original passage to include its reasoning, mechanism, condition or example, combine a related passage from the same source, or omit that voice. Do not pad a weak sentence with generic policy language. Do not count noun phrases such as `宏观分析人士` or `政策解读文章` as attribution verbs, and do not merge several short expert statements into one long evidence row to pass the threshold.
 - Public-article TOP ranking is not a writing-evidence filter. Use the complete controller corpus index to choose bounded full-text reads regardless of appendix read rank; retain unread IDs as deferred, not reviewed or excluded. Exhaustive mode reads the entire corpus. When one article quotes several named speakers, extract and assess each voice separately. This rule is reusable across meetings and must not be relaxed or narrowed to imitate one benchmark.
 - Prefer named experts, professional institutions and media judgments that explain a policy mechanism, condition, effect boundary or concrete suggestion. Self-media remains eligible, but exclude commercial self-promotion for its own company/product, tangential promotion of an activity or service, and text whose substance is only a slogan, pun, metaphor or generic growth forecast. These are editorial-use exclusions, not deletions from the evidence pool.
+- Tangential promotion, market-only pitches and slogan-only reasoning require semantic assessment of actual substance. Historical catchphrases are not general-purpose exclusion regexes. Financial or consumption analysis with a specific policy mechanism remains eligible; a slogan embedded in genuine reasoning does not by itself invalidate the entire claim.
 - Period prose may cite a public-web page only when its source-page timestamp has been preserved and verified inside the monitoring window. Exclude later pages even when their wording closely matches the desired report; do not backdate them from search snippets or article subject matter.
 - If a top-level subtopic has only one mature cluster, write the top-level heading and its evidence paragraph directly. Do not create a lone `一是` without a `二是`.
 
@@ -189,7 +189,7 @@ Write one explanatory paragraph, not only a word list:
 
 Hotwords must be connected back to public attention points and subtopics.
 Use the neutral configured word-group frame by default. `位居前列/热度较高` requires actual term-frequency comparison, and `持续热传` requires actual temporal term evidence; neither follows from topic propagation order or cloud layout. Historical report phrasing is not that evidence. Link only reviewed judgments using `相关观点`, without implying population-wide consensus. If the workbook contains a word-cloud picture, use it unchanged.
-When the reviewed focus already starts with a stance verb, write `舆论认为/建议/期待……`; do not produce malformed combinations such as `主要聚焦认为……`.
+When the reviewed focus already starts with a stance verb, write `相关观点认为/建议/期待……`; do not produce malformed combinations such as `主要聚焦认为……` or infer population-wide consensus.
 
 ## 三、境外舆论情况
 

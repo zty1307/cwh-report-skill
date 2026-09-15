@@ -1,6 +1,48 @@
 """Narrow, audited JSON framing repairs; never invent values or source text."""
 import copy
 import json
+import hashlib
+
+
+def insert_single_missing_member_comma(text):
+    """Only a decoder-confirmed missing comma before an intact object key.
+
+    No values, keys, containers or string content are supplied or changed.
+    The entire result must parse after exactly one insertion; duplicate keys,
+    multiple defects and incomplete strings remain failures.
+    """
+    def unique_members(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate JSON object key')
+            result[key] = value
+        return result
+    try:
+        json.loads(text, object_pairs_hook=unique_members)
+        return None  # Valid JSON is not a repair request.
+    except json.JSONDecodeError as error:
+        if error.msg != "Expecting ',' delimiter":
+            return None
+        position = error.pos
+    except ValueError:
+        return None
+    try:
+        key, length = json.JSONDecoder().raw_decode(text[position:])
+        if not isinstance(key, str) or not text[position+length:].lstrip().startswith(':'):
+            return None
+        result = json.loads(text[:position] + ',' + text[position:], object_pairs_hook=unique_members)
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    repairs = result.get('transport_repairs')
+    if repairs is not None and not isinstance(repairs, list):
+        return None
+    result.setdefault('transport_repairs', []).append({
+        'kind': 'inserted_single_missing_member_comma', 'position': position,
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
+    return result
 
 
 def escape_cjk_internal_quotes(text):

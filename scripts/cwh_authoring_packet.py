@@ -1,6 +1,7 @@
 """Extract the current authoring shape; omit unrelated later-stage templates."""
 import json
 import re
+from cwh_writing_rules import writing_rules
 
 
 def compact_authoring_references(schema_text: str, registry_text: str, topic_plan: dict) -> dict:
@@ -46,4 +47,5 @@ def compact_authoring_references(schema_text: str, registry_text: str, topic_pla
         "同一主体同一实质观点的转载去重，不当作多个独立声音。新增eligible候选可formal_use=reserve并给理由，不能删除审计证据。",
         "只提交原子观点、归因、引文、简洁态度标题。宿主生成details、编号、句式和哈希；不要写报告、工作台或独立审核结论。",
         "预算为上限，不是搜索配额；按研究计划的停止条件保留实际过程，未完成不得冒称饱和。最终仍由原有完整门禁决定是否接受。"
-    ]}
+    ] + [writing_rules()['viewpoint'][key] for key in
+         ('selection_rule', 'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')]}

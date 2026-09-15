@@ -14,7 +14,7 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 返回JSON：{"items":[{"id":"输入ID","decision":"eligible|duplicate|excluded","reason":"简短具体理由","relevant":true,"claims":[{"speaker":"单个真实主体","role":"原文机构职务或空","speaker_type":"named_person|media_voice|self_media","verb":"认为|指出|表示|建议|强调|称|提出等原文支持的归因动词，可省略","quote_range":["本篇起始片段ID","本篇结束片段ID"],"claim":"忠实原子观点","cluster":"k1"}]}],"heading":"有态度的单一中心判断","clusters":[{"key":"k1","heading":"有态度的单一中心判断"}]}
 具名人物的quote_range必须连续包含其姓名、原文职务/机构以及观点；不要只选观点一句而把职务留在摘录外。claim中的数字和量词必须有原文依据，不得自行概括为“两项”等新增数字。公众号等只是渠道名称，speaker须为原文账号全名。
 每个输入ID恰好审核一次。仅有摘要的网页不可eligible，不可作为正式引文；relevant只表示与本议题直接相关，不等于完整取证。
-每篇完整原文逐篇审核，筛选有实质判断的声音，纯会议事实通稿、跑题或重复声音排除。尽可能6—12个不同主体，通常组成2—4个观点簇，每簇2—4人；证据不足就少选，不能凑数。
+每篇完整原文逐篇审核，筛选有实质判断的声音，纯会议事实通稿、跑题或重复声音排除。尽可能6—12个不同主体；按实际不同判断分簇，证据不足就少选，不能凑数。
 每条claim另填claim_kind：policy_reasoning表示原文有独立的政策机制、条件、影响、建议或评价；meeting_action_fact表示仅复述会议通过某草案、修改/废止若干部法规、核准若干项目等会议动作事实。后者不作独立解读，应excluded且claims为空，不能因法规名称或数字很具体、来自法院或政府账号、凑满字数就改称实质观点。详实的实施机制和适用条件可属于policy_reasoning，但必须确实超出会议动作清单。文章来源完整、原话正确或独立核验支持，都不能替代解读资格。
 仅选对输入topic这一具体决策的实质判断。agenda_topics列出本期全部议题用于消歧：全文包含会议多个决定，不表示其中每个评论都属于当前议题；别的条例修订、项目核准或民生议题的判断不能仅因也涉及法规、制度、投资等泛词挪到当前议题。先确定被评论的具体政策对象，再按当前议题选材，reason说明直接关系；不为补齐薄弱议题搬用其他议题的成熟解读，不把当前议题改名。
 纯转述“会议指出、强调、要求”的部署，同样归meeting_action_fact并排除；把“要健全、要推动”等要求改写为“需健全、需推动”，不产生媒体或专家自身观点。原文同时有独立分析时只取实际发言主体提出的新增机制、条件、建议或评价，不能把相邻会议要求移到其名下。区分会议方向、征求意见稿、审议通过草案、已公布条文和地方试点；没有本期明确依据不写成全国已经实施。
@@ -30,6 +30,8 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["meeting_reference_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["selection_rule"]
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["claim_composition_rule"]
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["cluster_structure_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["heading_support_rule"]
 AUTHOR_PROMPT += '\n网页date_quote须是原文连续的完整年、月、日，且对应发布日期；只有月日和时分不足，不能从URL、会议年份或正文事件年份补齐。找不到完整发布日期就excluded并保留具体原因，不反复改写日期凑校验。'
 AUTHOR_PROMPT += '\n没有segments完整正文的网页，只能排除为未读取或访问失败；不能据搜索摘要断言整篇没有独立解读，也不能将全部发现链接数说成已读全文数。缺口理由须区分发现、读取和合格声音三个范围。'

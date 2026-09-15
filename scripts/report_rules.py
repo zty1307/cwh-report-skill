@@ -316,6 +316,8 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                 if str(evidence.get("attribution_status") or "").lower() == "self_media":
                     claim_text = str(evidence.get("formal_claim") or evidence.get("claim") or "")
                     for exclusion in viewpoint_rules.get("editorial_exclusions") or []:
+                        if exclusion.get("review_mode") == "semantic_only":
+                            continue
                         if any(re.search(pattern, claim_text) for pattern in exclusion.get("patterns") or []):
                             issues.append({
                                 "code": str(exclusion.get("code") or "weak_self_media_evidence"),

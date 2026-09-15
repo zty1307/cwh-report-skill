@@ -10,11 +10,15 @@ from cwh_writing_rules import writing_rules
 from cwh_comment_semantics import merge_quote_decisions
 from cwh_heading_quality import build_heading_audit, reviewed_display_headings
 from report_rules import enrich_viewpoint_titles
+from report_rules import domestic_viewpoint_quality_issues
+from cwh_authoring_packet import compact_authoring_references
+import json
 
 
 def test_task_handoff_uses_configured_rules_instead_of_a_second_rule_copy(tmp_path):
     rules = copy.deepcopy(writing_rules())
-    rules['viewpoint'].update(selection_rule='configured-selection', heading_support_rule='configured-heading')
+    rules['viewpoint'].update(selection_rule='configured-selection', heading_support_rule='configured-heading',
+        claim_composition_rule='configured-claim', cluster_structure_rule='configured-structure')
     rules['comments']['heading_summary_rule'] = 'configured-comment'
     with patch('cwh_model_contract.writing_rules', return_value=rules):
         task = build_task_payload(stage_id='domestic_viewpoints', task_type='analysis_bundle',
@@ -22,6 +26,8 @@ def test_task_handoff_uses_configured_rules_instead_of_a_second_rule_copy(tmp_pa
     assert task['writing_handoff']['selection_rule'] == 'configured-selection'
     assert task['writing_handoff']['heading_support_rule'] == 'configured-heading'
     assert task['writing_handoff']['comment_heading_summary_rule'] == 'configured-comment'
+    assert task['writing_handoff']['claim_composition_rule'] == 'configured-claim'
+    assert task['writing_handoff']['cluster_structure_rule'] == 'configured-structure'
     assert task['declared_outputs'] == [str(tmp_path / 'author.json')]
 
 
@@ -56,3 +62,53 @@ def test_reviewed_effect_strength_changes_only_display_and_stales_after_claim_ch
     assert len(reviewed_display_headings(data)) == 2
     evidence['formal_claim'] = '新的不同论断'
     assert reviewed_display_headings(data) == {}
+
+
+def test_semantic_editorial_categories_cannot_become_a_keyword_veto():
+    rules = copy.deepcopy(writing_rules())
+    for rule in rules['viewpoint']['editorial_exclusions']:
+        if rule.get('review_mode') == 'semantic_only':
+            rule['patterns'] = ['产业链', '金融']  # Even an erroneous future pattern is advisory.
+    claim = '政策利好产业链发展，长期金融支持可覆盖研发阶段资金缺口，但效果取决于项目筛选和持续投入，不能只依靠短期市场热度。'
+    evidence = {'attribution_status': 'self_media', 'formal_claim': claim, 'source_excerpt': claim}
+    data = {'viewpoints': {'by_topic': [{'topic': '产业培育', 'heading': '认为长期资金支持须匹配研发周期',
+        'clusters': [{'summary': '认为长期资金支持须匹配研发周期', 'details': claim, 'evidence': [evidence]}]}]}}
+    frozen = copy.deepcopy(data)
+    with patch('report_rules.writing_rules', return_value=rules):
+        codes = {r['code'] for r in domestic_viewpoint_quality_issues(data)}
+    assert not codes.intersection({'beneficiary_market_pitch', 'tangential_promotion', 'slogan_or_wordplay_only'})
+    assert data == frozen
+
+
+def test_legacy_author_transport_routes_the_same_cross_period_claim_and_cluster_rules():
+    root = Path(__file__).resolve().parents[1]
+    rules = copy.deepcopy(writing_rules())
+    keys = ('selection_rule', 'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')
+    for key in keys:
+        rules['viewpoint'][key] = 'configured-' + key
+    registry = (root / 'config/source_registry.v1.json').read_text('utf-8')
+    schema = (root / 'references/analysis_bundle_schema.md').read_text('utf-8')
+    with patch('cwh_authoring_packet.writing_rules', return_value=rules):
+        result = compact_authoring_references(schema, registry, {'topic': '公共服务', 'stable_source_tasks': []})
+    assert all('configured-' + key in result['semantic_requirements'] for key in keys)
+    assert result['output_shape']['metadata']['meeting_date'].startswith('Only a verified')
+
+
+def test_single_topic_contract_enumerates_real_ids_without_changing_source_material():
+    from run_cwh_compiled_worker import single_topic_author_contract
+    packet = {'topic': '公共服务供给', 'items': [{'id': 'original-7', 'content': '真实原文'}, {'id': 'original-9'}]}
+    frozen = copy.deepcopy(packet)
+    contract = single_topic_author_contract(packet)
+    assert contract.endswith(json.dumps(['original-7', 'original-9'], ensure_ascii=False))
+    assert '真实原文' not in contract
+    assert packet == frozen
+
+
+def test_checkpoint_identity_changes_with_model_rules_and_output_shape():
+    from run_cwh_compiled_worker import author_contract_sha256
+    first = author_contract_sha256('original-rules', ['host', '--model', 'first-model'])
+    assert first == author_contract_sha256('original-rules', ['host', '--model', 'first-model'])
+    assert first != author_contract_sha256('changed-rules', ['host', '--model', 'first-model'])
+    assert first != author_contract_sha256('original-rules', ['host', '--model', 'second-model'])
+    with patch('run_cwh_compiled_worker.single_topic_author_contract', return_value='changed-output-shape'):
+        assert first != author_contract_sha256('original-rules', ['host', '--model', 'first-model'])
