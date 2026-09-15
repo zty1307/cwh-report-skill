@@ -326,7 +326,9 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
             payload = {'kind': kind, 'reviewer_run_id': session, 'output_shape': shape,
                        'packet': overseas_span_packet(batch) if kind == 'overseas' else batch}
             prompt = prompt_rules + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
-            prompt += '\n只处理本批items，每个ID恰好一次；事实性报道summary_cn_simplified留空，不重复项目清单或会议部署。不要中途重新开始JSON，不返回额外补充报道。'
+            prompt += '\n只处理本批items，每个ID恰好一次。不要中途重新开始JSON，不返回额外补充报道。'
+            if kind == 'overseas':
+                prompt += '\n事实性报道summary_cn_simplified留空；解读摘要先写原文主体的实质判断，再留直接支持它的必要依据与条件，不重复项目清单或会议部署。'
             if feedback:
                 prompt += '\n仅按当前真实校验反馈重审本批：' + feedback
             remaining = deadline - time.monotonic()

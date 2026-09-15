@@ -84,6 +84,25 @@ def test_no_budget_never_calls_vendor(tmp_path, monkeypatch):
     assert error.value.code == 124 and not calls
 
 
+@pytest.mark.parametrize('kind', ['public_top', 'overseas'])
+def test_batch_tail_never_gives_public_top_foreign_summary_instructions(tmp_path, monkeypatch, kind):
+    calls, prompts = [], []
+    install_transport(monkeypatch, calls)
+    transport = worker.run_scoped_command
+
+    def capture(command, **kwargs):
+        prompts.append(kwargs['input_text'])
+        return transport(command, **kwargs)
+
+    monkeypatch.setattr(worker, 'run_scoped_command', capture)
+    worker.review_overseas_batches(packet(), {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, kind=kind)
+    assert len(prompts) == 1
+    assert ('summary_cn_simplified' in prompts[0]) is (kind == 'overseas')
+    if kind == 'overseas':
+        assert '实质判断' in prompts[0] and '必要依据与条件' in prompts[0]
+
+
 def test_public_top_expansion_reuses_unchanged_complete_batches(tmp_path, monkeypatch):
     calls = []
     install_transport(monkeypatch, calls)

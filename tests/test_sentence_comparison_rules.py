@@ -44,6 +44,15 @@ def test_not_selecting_a_quote_does_not_reclassify_the_comment_or_empty_the_deno
     assert labels == frozen
 
 
+def test_overseas_summary_handoff_reads_shared_config_not_a_separate_prompt_copy():
+    from raw_system_workbook_pipeline import build_overseas_review_packet
+    rules = copy.deepcopy(writing_rules())
+    rules['overseas']['interpretive_summary_rule'] = 'configured-summary-judgment-and-conditions'
+    with patch('raw_system_workbook_pipeline.writing_rules', return_value=rules):
+        packet = build_overseas_review_packet([], {}, {'topic_titles': ['公共政策']}, [])
+    assert 'configured-summary-judgment-and-conditions' in packet['instructions']
+
+
 def test_reviewed_effect_strength_changes_only_display_and_stales_after_claim_change():
     evidence = {'evidence_id': 'actual-evidence', 'speaker_name': '机构甲',
                 'formal_claim': '完善基础设施有助于降低流通成本。',
