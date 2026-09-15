@@ -469,6 +469,27 @@ def _mapping_rows(data: dict[str, Any]) -> Iterable[tuple[str, str]]:
                     yield _text(evidence.get("evidence_id")), details
 
 
+def _atomic_mapping_rows(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {_text(row.get('evidence_id')): row for topic in _topic_rows(data)
+            for cluster in topic.get('clusters') or [] if isinstance(cluster, dict)
+            for row in cluster.get('evidence') or [] if isinstance(row, dict)}
+
+
+def _word_mapping_rows(data: dict[str, Any]) -> Iterable[tuple[str, str]]:
+    from normalize_cwh_analysis import assemble_cluster_details
+    for topic in _topic_rows(data):
+        for cluster in topic.get('clusters') or []:
+            if not isinstance(cluster, dict):
+                continue
+            rows = cluster.get('evidence') or []
+            details = (assemble_cluster_details(cluster) if any(
+                isinstance(row, dict) and row.get('formal_claim') for row in rows)
+                else _text(cluster.get('details') or cluster.get('analysis')))
+            for row in rows:
+                if isinstance(row, dict):
+                    yield _text(row.get('evidence_id')), details
+
+
 def validate_release_mapping(report_dir: Path, *, upstream_analysis: dict[str, Any] | None = None) -> dict[str, Any]:
     report_data = json.loads((report_dir / "report_data.json").read_text(encoding="utf-8-sig"))
     analysis = report_data.get("analysis_bundle") or {}
@@ -476,22 +497,29 @@ def validate_release_mapping(report_dir: Path, *, upstream_analysis: dict[str, A
     issues = list(audit.get("issues") or [])
     upstream_rows = dict(_mapping_rows(upstream_analysis or analysis))
     report_rows = dict(_mapping_rows(analysis))
-    if upstream_analysis is not None and upstream_rows != report_rows:
+    if upstream_analysis is not None and (upstream_rows != report_rows or
+            _atomic_mapping_rows(upstream_analysis) != _atomic_mapping_rows(analysis)):
         issues.append(_issue("report_mapping_changed", "渲染后的report_data与上游证据映射不一致。"))
     dashboard = _dashboard_data(report_dir / "cwh_dashboard.html")
     dashboard_analysis = dashboard.get("analysis_bundle") or {}
-    if dict(_mapping_rows(dashboard_analysis)) != report_rows:
+    if (dict(_mapping_rows(dashboard_analysis)) != report_rows or
+            _atomic_mapping_rows(dashboard_analysis) != _atomic_mapping_rows(analysis)):
         issues.append(_issue("dashboard_mapping_missing", "工作台未完整保留上游evidence_id与观点映射。"))
     docx_text = _normalized(_docx_text(report_dir / "cwh_formal_report.docx"))
-    for evidence_id, details in report_rows.items():
-        if evidence_id and _normalized(details) not in docx_text:
+    rendered_rows = dict(_word_mapping_rows(analysis))
+    atomic_rows = _atomic_mapping_rows(analysis)
+    for evidence_id, details in rendered_rows.items():
+        claim = _normalized(_text(atomic_rows[evidence_id].get('formal_claim')))
+        if evidence_id and (_normalized(details) not in docx_text or (claim and claim not in docx_text)):
             issues.append(_issue("word_claim_missing", "Word正文未保留该证据对应的完整观点簇正文。", evidence_id=evidence_id))
     audit.update({
         "status": "passed" if not issues else "blocked",
         "issues": issues,
         "report_mapping_count": len(report_rows),
         "dashboard_mapping_count": len(dict(_mapping_rows(dashboard_analysis))),
-        "word_backcheck_count": sum(1 for _, details in report_rows.items() if _normalized(details) in docx_text),
+        "word_backcheck_count": sum(1 for identity, details in rendered_rows.items()
+            if _normalized(details) in docx_text and
+            _normalized(_text(atomic_rows[identity].get('formal_claim'))) in docx_text),
     })
     return audit
 

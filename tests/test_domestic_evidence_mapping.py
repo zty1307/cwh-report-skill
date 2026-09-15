@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 from pathlib import Path
 import sys
@@ -210,6 +211,49 @@ def test_independent_review_packet_is_merged_by_evidence_id() -> None:
     assert merged["review_pass"] == "independent_second_pass"
     assert merged["reviewer_run_id"] == "review-run-2"
     assert validate_analysis_mapping(verified)["status"] == "passed"
+
+
+def write_release_fixture(folder, bundle, word_text):
+    payload = {'analysis_bundle': bundle}
+    (folder / 'report_data.json').write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    (folder / 'cwh_dashboard.html').write_text('<script id="dashboard-data">' +
+        json.dumps(payload, ensure_ascii=False) + '</script>', encoding='utf-8')
+    with zipfile.ZipFile(folder / 'cwh_formal_report.docx', 'w') as archive:
+        archive.writestr('word/document.xml', '<w:document><w:body><w:p><w:r><w:t>' +
+            word_text + '</w:t></w:r></w:p></w:body></w:document>')
+
+
+def test_word_backcheck_uses_current_assembly_but_requires_the_entire_frozen_claim(tmp_path):
+    from normalize_cwh_analysis import assemble_cluster_details
+    bundle = valid_bundle()
+    cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+    row = cluster['evidence'][0]
+    row['formal_claim'] = row['source_excerpt']
+    row['semantic_review']['propositions'][0]['text'] = row['formal_claim']
+    cluster['details'] = row['attribution'] + '认为，' + row['formal_claim']
+    frozen = copy.deepcopy(bundle)
+    canonical = assemble_cluster_details(cluster)
+    assert canonical != cluster['details']
+    write_release_fixture(tmp_path, bundle, canonical)
+    assert validate_release_mapping(tmp_path, upstream_analysis=bundle)['status'] == 'passed'
+    assert bundle == frozen
+    write_release_fixture(tmp_path, bundle, canonical[:len(canonical) // 2])
+    assert any(issue['code'] == 'word_claim_missing' for issue in validate_release_mapping(tmp_path)['issues'])
+
+
+def test_frozen_atomic_mapping_changes_cannot_hide_behind_identical_cluster_details(tmp_path):
+    from normalize_cwh_analysis import assemble_cluster_details
+    upstream = valid_bundle()
+    changed = copy.deepcopy(upstream)
+    changed['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]['semantic_review']['reviewer_run_id'] = 'different-review'
+    write_release_fixture(tmp_path, changed, assemble_cluster_details(changed['viewpoints']['by_topic'][0]['clusters'][0]))
+    assert any(issue['code'] == 'report_mapping_changed' for issue in
+               validate_release_mapping(tmp_path, upstream_analysis=upstream)['issues'])
+    # The dashboard must preserve the atomic records too, not just IDs/details.
+    write_release_fixture(tmp_path, upstream, assemble_cluster_details(upstream['viewpoints']['by_topic'][0]['clusters'][0]))
+    (tmp_path / 'cwh_dashboard.html').write_text('<script id="dashboard-data">' +
+        json.dumps({'analysis_bundle': changed}, ensure_ascii=False) + '</script>', encoding='utf-8')
+    assert any(issue['code'] == 'dashboard_mapping_missing' for issue in validate_release_mapping(tmp_path)['issues'])
 
 
 def test_review_run_must_differ_from_authoring_run() -> None:
