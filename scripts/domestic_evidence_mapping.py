@@ -29,6 +29,17 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def has_multiple_named_speakers(value: Any) -> bool:
+    """Reject explicit lists, not connective characters inside short names."""
+    name = _text(value)
+    if re.search(r'[、,，]', name):
+        return True
+    if re.fullmatch(r'[\u4e00-\u9fff]{2,4}', name):
+        return False
+    parts = [part.strip() for part in re.split(r'(?:和|及)', name)]
+    return len(parts) > 1 and all(re.fullmatch(r'[\u4e00-\u9fff]{2,4}', part) for part in parts)
+
+
 def has_ambiguous_meeting_reference(value: Any) -> bool:
     text = re.sub(r'\s+', '', str(value or ''))
     return bool(re.search(r'(?:本次|这次|此次|该|(?:\d{4}年)?[0-9一二三四五六七八九十]{1,2}月(?:[0-9一二三四五六七八九十]{1,2}日)?)会议', text)
@@ -212,7 +223,7 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
                 elif speaker_name not in attribution:
                     issues.append(_issue("speaker_attribution_mismatch", "speaker_name未包含在正式归因中。", **context))
                 if attribution_status == "named_person":
-                    if re.search(r"[、,，]|(?:和|及)", speaker_name):
+                    if has_multiple_named_speakers(speaker_name):
                         issues.append(_issue("multiple_speakers_in_evidence", "一条成文证据合并了多个发言人，必须逐人拆分。", **context))
                     if not speaker_role:
                         issues.append(_issue("speaker_role_missing", "具名专家缺少原文提供的机构或职务。", **context))

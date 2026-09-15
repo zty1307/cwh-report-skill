@@ -15,7 +15,15 @@ from domestic_evidence_mapping import (  # noqa: E402
     mapping_problem_messages,
     validate_analysis_mapping,
     validate_release_mapping,
+    has_multiple_named_speakers,
 )
+
+
+def test_connective_characters_inside_single_names_are_not_speaker_lists():
+    for name in ('盘和林', '陈及第', '欧阳和清'):
+        assert not has_multiple_named_speakers(name)
+    for names in ('张三和李四', '吴建钦及刘澄', '吴建钦、刘澄', '张三，李四'):
+        assert has_multiple_named_speakers(names)
 
 
 def valid_bundle() -> dict:
