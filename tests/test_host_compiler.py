@@ -56,9 +56,11 @@ def test_web_metadata_precheck_reports_all_fields_and_records():
     decision = {"items": [{"id": "w1", "decision": "eligible"},
                            {"id": "w2", "decision": "eligible", "source": "日报",
                             "published_at": "2026-01-02", "date_quote": "2026-01-02"}]}
-    assert web_metadata_errors(packet, decision) == [
-        "Web publisher not anchored in original text: w1",
-        "Web publication date not anchored in original text: w1"]
+    errors = web_metadata_errors(packet, decision)
+    assert len(errors) == 2
+    assert errors[0] == "Web publisher not anchored in original text: w1"
+    assert errors[1].startswith("Web publication date not anchored in original text: w1 ")
+    assert "year-month-day" in errors[1]
 from cwh_public_reader import check_public_url
 from complete_cwh_evidence_structure import complete_analysis_structure
 from normalize_cwh_analysis import normalize_analysis

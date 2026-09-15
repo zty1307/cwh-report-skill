@@ -28,6 +28,7 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 上述date_quote只要求origin=web。origin=raw_monitoring的日期由监测导出published_at提供，不要因正文未重复日期而排除；也不能自行改动监测日期。
 只输出必要JSON，不输出分析过程、长篇逐条说明或原文全文。'''
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility_rule"]
+AUTHOR_PROMPT += '\n网页date_quote须是原文连续的完整年、月、日，且对应发布日期；只有月日和时分不足，不能从URL、会议年份或正文事件年份补齐。找不到完整发布日期就excluded并保留具体原因，不反复改写日期凑校验。'
 
 
 def query_domains(query):

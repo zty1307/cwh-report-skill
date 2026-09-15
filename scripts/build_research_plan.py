@@ -182,6 +182,8 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
             "max_query_executions_per_topic": int(research_policy.get("max_query_executions_per_topic") or 0),
             "max_results_per_query": int(research_policy.get("max_results_per_query") or 0),
             "max_full_page_fetches_per_topic": int(research_policy.get("max_full_page_fetches_per_topic") or 0),
+            "max_monitoring_full_article_reviews_per_topic": int(research_policy.get("max_monitoring_full_article_reviews_per_topic") or 12),
+            "initial_public_page_fetches_per_topic": int(research_policy.get("initial_public_page_fetches_per_topic") or 4),
             "max_named_entity_expansions_per_topic": int(research_policy.get("max_named_entity_expansions_per_topic") or 0),
             "required_lanes": list(research_policy.get("required_lanes") or []),
             "stage_budgets_seconds": dict(profile.get("stage_budgets_seconds") or {}),
@@ -199,6 +201,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
             {
                 "topic": topic,
                 "queries": research_queries(topic, meeting_date),
+                "query_execution_limit": int(research_policy.get("max_query_executions_per_topic") or 0),
                 "stable_source_tasks": stable_source_tasks(
                     topic,
                     meeting_date,

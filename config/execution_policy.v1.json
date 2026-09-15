@@ -40,6 +40,8 @@
         "parallel_lanes": false,
         "required_lanes": ["monitoring_corpus", "official_mainstream", "industry_expert", "public_platform"],
         "max_query_executions_per_topic": 10,
+        "max_monitoring_full_article_reviews_per_topic": 16,
+        "initial_public_page_fetches_per_topic": 8,
         "max_results_per_query": 8,
         "max_full_page_fetches_per_topic": 18,
         "max_named_entity_expansions_per_topic": 2,
@@ -119,6 +121,8 @@
           "public_platform"
         ],
         "max_query_executions_per_topic": 10,
+        "max_monitoring_full_article_reviews_per_topic": 20,
+        "initial_public_page_fetches_per_topic": 10,
         "max_results_per_query": 8,
         "max_full_page_fetches_per_topic": 24,
         "max_named_entity_expansions_per_topic": 4,

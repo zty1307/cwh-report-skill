@@ -125,12 +125,28 @@ def invoke(command_template, prompt, workspace, label, timeout):
     return log, record
 
 
-def collect_topic(plan, period, command_template, workspace, timeout):
+def topic_search_tasks(plan, period):
     tasks = [{"source_id": row["source_id"], "query": row["query"],
               "route": "public_platform" if row.get("tier") == "public_platform" else "stable_registry"}
              for row in plan["stable_source_tasks"] if row.get("must_check")]
     tasks.append({"source_id": "open_web", "query": f'{period["start"]} 国务院常务会议 {plan["topic"]} 专家 解读', "route": "open_web"})
     tasks.append({"source_id": "open_web", "query": f'{period["start"]} {plan["topic"]} 国常会 建议 评论 分析', "route": "open_web"})
+    # Planned discovery lanes must reach the real observed search transport.
+    academic = (plan.get("queries") or {}).get("academic_and_think_tank_viewpoints") or []
+    if academic:
+        tasks.append({"source_id": "academic_think_tank", "query": academic[1] if len(academic) > 1 else academic[0],
+                      "route": "open_web"})
+    if plan.get("queries"):
+        tasks.append({"source_id": "public_platform_supplement", "route": "public_platform",
+                      "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {plan["topic"]} 国常会 解读 分析 建议'})
+    limit = int(plan.get("query_execution_limit") or 0)
+    if limit > 0:
+        tasks = tasks[:limit]
+    return tasks
+
+
+def collect_topic(plan, period, command_template, workspace, timeout):
+    tasks = topic_search_tasks(plan, period)
     digest = hashlib.sha256(json.dumps(tasks, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cached = workspace / "research_observations.json"
     if cached.is_file():

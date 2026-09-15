@@ -104,6 +104,15 @@ def single_topic_request_budget(remaining, future_topics, maximum=180, future_re
     return min(maximum, remaining - reserve)
 
 
+def domestic_reading_limits(plan):
+    """Policy-sized full-text pool; legacy plans keep their existing limits."""
+    limits = plan.get('execution_budget') or {}
+    raw_limit = max(1, int(limits.get('max_monitoring_full_article_reviews_per_topic') or 12))
+    fetch_limit = max(1, int(limits.get('initial_public_page_fetches_per_topic') or 4))
+    ceiling = int(limits.get('max_full_page_fetches_per_topic') or 0)
+    return raw_limit, min(fetch_limit, ceiling) if ceiling > 0 else fetch_limit
+
+
 def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=(),
                            maximum_request_seconds=180, future_topic_reserve_seconds=45):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
@@ -166,16 +175,17 @@ def author(task, deadline):
     search_command = json.loads(os.environ["CWH_SEARCH_COMMAND_JSON"])
     parts, packets, topic_plans, observed = [], [], [], []
     author_id = str(uuid.uuid4())
+    raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
     for position, indexed in enumerate(index["topics"]):
         workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
         workspace.mkdir(parents=True, exist_ok=True)
         if deadline - time.monotonic() < 60:
             raise TimeoutError("No remaining topic budget")
         topic_plan = next(row for row in plan["topics"] if row["topic"] == indexed["topic"])
-        source_rows = [read(row["full_text_path"]) for row in indexed["shortlist"][:12]]
+        source_rows = [read(row["full_text_path"]) for row in indexed["shortlist"][:raw_read_limit]]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      min(65, (deadline - time.monotonic()) * .12))
-        urls = balanced_fetch_urls(observations)
+        urls = balanced_fetch_urls(observations, page_fetch_limit)
         pages = cached_public_pages(workspace, urls, timeout=8)
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]

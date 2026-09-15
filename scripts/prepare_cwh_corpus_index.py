@@ -40,7 +40,7 @@ def professional_quote_hint(text: str, aliases: list[str]) -> int:
                          for alias in aliases) for m in re.finditer(pattern, text)))
 
 
-def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared_aliases=None) -> Path:
+def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared_aliases=None, *, shortlist_limit=40) -> Path:
     root = source.parent / "corpus_index"
     root.mkdir(exist_ok=True)
     rows = corpus.get("candidates") or []
@@ -77,9 +77,9 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared
                 selected.append(row)
                 fingerprints.append(fingerprint)
                 titles_seen.add(title_key)
-                if len(selected) == 20:
+                if len(selected) >= shortlist_limit:
                     break
-            if len(selected) == 20:
+            if len(selected) >= shortlist_limit:
                 break
         reading_order = []
         for row in selected:
