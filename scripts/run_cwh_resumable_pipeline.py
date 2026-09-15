@@ -1261,7 +1261,11 @@ class CwhPipeline:
         index_path = None
         if corpus:
             from prepare_cwh_corpus_index import prepare_corpus_index
-            index_path = prepare_corpus_index(corpus_path, corpus, topics)
+            reading_metadata = Path(str(self.contract.get('metadata') or ''))
+            reading_metadata = read_json(reading_metadata) if reading_metadata.is_file() else {}
+            reading_aliases = dict(zip(reading_metadata.get('topic_titles') or [],
+                                       reading_metadata.get('topic_aliases') or []))
+            index_path = prepare_corpus_index(corpus_path, corpus, topics, reading_aliases)
         allow_deferred = self.contract.get("execution_profile") in {"bounded_40m", "bounded_60m"}
 
         def evaluate_draft() -> list[str]:

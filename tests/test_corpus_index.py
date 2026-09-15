@@ -73,6 +73,23 @@ def test_bounded_deferral_never_calls_unread_records_reviewed(tmp_path):
     assert any("未逐条审核" in x for x in validate_analysis_bundle(target, ["议题"], require_semantic_review=False, allow_deferred_corpus=True))
 
 
+def test_professional_body_hint_beats_generic_analysis_title_without_excluding_rows(tmp_path):
+    data = corpus()
+    data['candidates'][0].update(title='某政策最新部署', content='某研究院副院长张明表示，制度覆盖须保留实际就业群体的适用条件。')
+    data['candidates'][1].update(title='专家解读另一新闻', content='另一个事件的简短报道。')
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, ['议题'], {'议题': ['制度覆盖']}).read_text('utf-8'))
+    assert index['topics'][0]['shortlist'][0]['record_id'] == 'r0'
+    assert len(index['topics'][0]['record_ids']) == len(data['candidates'])
+    assert json.loads(source.read_text('utf-8')) == data
+
+
+def test_professional_hint_without_current_policy_context_is_not_priority():
+    from prepare_cwh_corpus_index import professional_quote_hint
+    assert professional_quote_hint('某研究院副院长张明认为应改善另一政策。', ['制度覆盖']) == 0
+
+
 def test_raw_source_hydration_only_fills_missing_exact_fields():
     candidate = {"raw_evidence_record_id": "r0", "speaker_name": "发言者"}
     draft = {"research_audit": {"domestic_media_research": {"candidate_pool_by_topic": [{"topic": "议题", "candidates": [candidate]}]}}}

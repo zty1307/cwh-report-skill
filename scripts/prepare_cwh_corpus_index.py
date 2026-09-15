@@ -33,7 +33,14 @@ def complete_corpus_deferrals(data: dict, corpus: dict, topics: list[str]) -> di
     return result
 
 
-def prepare_corpus_index(source: Path, corpus: dict, topics: list[str]) -> Path:
+def professional_quote_hint(text: str, aliases: list[str]) -> int:
+    """Reading hint only: named professional attribution near a policy object."""
+    pattern = r'(?:教授|研究员|研究总监|研究中心主任|研究院院长|研究院副院长|首席经济学家|首席分析师|专委会副主任|联合会会长)[\u4e00-\u9fff]{2,4}(?:认为|表示|指出|强调|称|建议)'
+    return min(3, sum(any(alias and alias in text[max(0, m.start()-500):m.end()+500]
+                         for alias in aliases) for m in re.finditer(pattern, text)))
+
+
+def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared_aliases=None) -> Path:
     root = source.parent / "corpus_index"
     root.mkdir(exist_ok=True)
     rows = corpus.get("candidates") or []
@@ -42,7 +49,13 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str]) -> Path:
         candidates = [x for x in rows if number in x.get("topic_hits", [])]
         alias_groups = corpus.get("topic_aliases") or []
         aliases = [topic, *(alias_groups[number - 1] if number <= len(alias_groups) else [])]
+        aliases.extend((declared_aliases or {}).get(topic) or [])
+        aliases.append(re.sub(r'(?:修订|修改|建设|实施|有关工作)$', '', topic))
+        aliases = list(dict.fromkeys(a for a in aliases if isinstance(a, str) and len(a) >= 3))
+        hints = {str(x['record_id']): professional_quote_hint(str(x.get('content') or ''), aliases)
+                 for x in candidates}
         ranked = sorted(candidates, key=lambda x: (
+            -hints[str(x['record_id'])],
             -bool(re.search("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             -max((len(str(alias)) for alias in aliases if str(alias) and str(alias) in str(x.get("title", ""))), default=0),
             -len(re.findall("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
@@ -74,10 +87,12 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str]) -> Path:
             article = root / f"article-{key}.json"
             atomic_write_json(article, row)
             reading_order.append({"record_id": row["record_id"], "title": row.get("title"),
+                                  "professional_attribution_hint_count": hints[str(row['record_id'])],
                                   "source": row.get("source"), "full_text_path": str(article)})
         topic_index = root / f"topic-{number}.json"
         atomic_write_json(topic_index, {"topic": topic, "reading_order_only_not_review": True,
                                       "reading_diversity": "delay_high_overlap_fulltexts_without_excluding_them",
+                                      "priority_hint": "professional_attribution_near_current_policy_not_semantic_eligibility",
                                       "shortlist": reading_order,
                                       "all_candidates": [{k: row.get(k) for k in ("record_id", "title", "source", "published_at", "url")} for row in candidates]})
         index["reading_indexes"].append({"topic": topic, "path": str(topic_index)})
