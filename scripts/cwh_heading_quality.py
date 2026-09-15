@@ -39,6 +39,46 @@ def cross_topic_exact_duplicate_groups(analysis):
             for rows in groups.values() if len({r['topic'] for r in rows}) > 1]
 
 
+def cross_topic_shared_source_spans(analysis):
+    """Reading hints only: exact source coordinates, never semantic deletion."""
+    pools = ((analysis.get('research_audit') or {}).get('domestic_media_research') or {}).get('candidate_pool_by_topic') or []
+    candidates = {(pool['topic'], row['candidate_id']): row for pool in pools
+                  for row in pool.get('candidates') or []}
+    groups, ordinal = {}, 0
+    for topic in analysis['viewpoints']['by_topic']:
+        for cluster in topic.get('clusters') or []:
+            for evidence in cluster.get('evidence') or []:
+                ordinal += 1
+                candidate = candidates.get((topic['topic'], evidence.get('candidate_id')), {})
+                snapshot = candidate.get('source_snapshot') or {}
+                text, sha = snapshot.get('source_text'), snapshot.get('source_text_sha256')
+                start, end = evidence.get('source_excerpt_start'), evidence.get('source_excerpt_end')
+                if (not isinstance(text, str) or not sha or hashlib.sha256(text.encode()).hexdigest() != sha
+                        or type(start) is not int or type(end) is not int or not 0 <= start < end <= len(text)
+                        or text[start:end] != evidence.get('source_excerpt')
+                        or not evidence.get('speaker_name') or not evidence.get('url')):
+                    continue
+                key = (evidence['speaker_name'], evidence.get('speaker_role') or '', evidence['url'], sha)
+                groups.setdefault(key, []).append({'claim_id': f'e{ordinal}',
+                    'topic': topic['topic'], 'evidence_id': evidence.get('evidence_id'),
+                    'start': start, 'end': end, 'text': text, 'claim': evidence.get('formal_claim')})
+    hints = []
+    for key, rows in groups.items():
+        for index, left in enumerate(rows):
+            for right in rows[index + 1:]:
+                start, end = max(left['start'], right['start']), min(left['end'], right['end'])
+                if (left['topic'] == right['topic'] or left['claim'] == right['claim']
+                        or start >= end or not left['text'][start:end].strip()):
+                    continue
+                hints.append({'claim_ids': [left['claim_id'], right['claim_id']],
+                    'topics': [left['topic'], right['topic']],
+                    'evidence_ids': [left['evidence_id'], right['evidence_id']],
+                    'speaker_name': key[0], 'speaker_role': key[1],
+                    'source_text_sha256': key[3], 'shared_original_span': [start, end],
+                    'scope': 'shared_original_span_hint_not_duplicate_verdict'})
+    return hints
+
+
 def repair_runs(packet):
     """Read host-retained run records defensively; malformed metadata is inert."""
     rows = packet.get('heading_repair_runs')

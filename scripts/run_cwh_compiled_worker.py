@@ -26,6 +26,7 @@ from cwh_semantic_repairs import normalize_excluded_claims
 from cwh_semantic_repairs import repair_missing_reasons
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
 from cwh_heading_quality import cross_topic_exact_duplicate_groups
+from cwh_heading_quality import cross_topic_shared_source_spans
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
 from cwh_writing_rules import writing_rules
 
@@ -456,6 +457,7 @@ REVIEW_PROMPT += '\nreport_agenda是用户声明的报告会议，仅用于对�
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']
 REVIEW_PROMPT += '\ncross_topic_exact_duplicates是脚本发现的同一声明主体、职务及原始URL的完全相同判断跨题重用，不预设去向。结合全部agenda_topics和实际对象保留在最直接对应的一个议题；其他重复条按本题正式选材资格判unsupported或uncertain并解释，文字原文支持不自动证明本题归属。不要把同一判断稍改措辞后重复保留，也不合并同名但职务不同的人或同主体的不同判断。'
+REVIEW_PROMPT += '\ncross_topic_shared_source_spans仅标记同一声明主体、职务、URL和已核验原文哈希的跨题选材共享连续原文片段，不是重复结论。逐对核对实际论断：同一判断的长短版本或略改措辞只保留在最直接的具体议题，其他条按本题资格判unsupported或uncertain并解释；仅共享背景、却分别提出不同独立判断时可以分别保留，不能仅按重叠自动删除，也不能借另一条额外句子补成当前主体的新结论。'
 
 
 def compile_review(analysis, result, run, digest):
@@ -543,6 +545,7 @@ def independent_packet(analysis):
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
             "report_agenda": (analysis.get('metadata') or {}).get('report_agenda') or '',
             "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']],
+            "cross_topic_shared_source_spans": cross_topic_shared_source_spans(analysis),
             "cross_topic_exact_duplicates": cross_topic_exact_duplicate_groups(analysis)}
 
 
