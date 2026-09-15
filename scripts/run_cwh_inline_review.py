@@ -188,6 +188,24 @@ def hotword_shortfall_packet(packet: dict, result: dict, limit: int = 72) -> dic
     }
 
 
+def merge_hotword_supplement(result: dict, supplement: dict, allowed: set[str], target: int) -> dict:
+    """Merge ranked model additions up to the fixed target and audit overflow."""
+    result = copy.deepcopy(result)
+    known = {str(row.get("term") or "").strip() for row in result.get("selected", [])}
+    additions = [row for row in supplement.get("selected", [])
+                 if str(row.get("term") or "").strip() in allowed
+                 and str(row.get("term") or "").strip() not in known]
+    capacity = max(0, target - len(result.get("selected", [])))
+    accepted, overflow = additions[:capacity], additions[capacity:]
+    result.setdefault("selected", []).extend(accepted)
+    if overflow:
+        result.setdefault("transport_exclusions", []).extend(
+            {"term": row.get("term"), "reason": "fixed_target_cap", "original_review": row}
+            for row in overflow
+        )
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
@@ -320,13 +338,10 @@ def main():
                     else:
                         supplement = normalize_topic_hit_transport(packet, supplement, "hotword")
                         supplement = normalize_hotword_transport(supplement)
-                        known = {str(row.get("term") or "").strip() for row in result.get("selected", [])}
                         allowed = {str(row.get("term") or "").strip()
                                    for row in supplement_packet["remaining_candidates"]}
-                        additions = [row for row in supplement.get("selected", [])
-                                     if str(row.get("term") or "").strip() in allowed
-                                     and str(row.get("term") or "").strip() not in known]
-                        result["selected"].extend(additions)
+                        target = int(packet.get("target_term_count") or minimum)
+                        result = merge_hotword_supplement(result, supplement, allowed, target)
             if not result.get("blocker"):
                 validate_transport_result(kind, packet, result)
         except (ValueError, TypeError, KeyError) as exc:

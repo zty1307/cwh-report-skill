@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build_cwh_review_delivery import accepted_path, build_review_delivery
 from cwh_pipeline_runtime import sha256_file
-from run_cwh_inline_review import compact_hotword_packet, hotword_shortfall_packet, response_object, normalize_hotword_transport, normalize_topic_hit_transport, validate_transport_result
+from run_cwh_inline_review import compact_hotword_packet, hotword_shortfall_packet, merge_hotword_supplement, response_object, normalize_hotword_transport, normalize_topic_hit_transport, validate_transport_result
 from docx import Document
 
 
@@ -101,3 +101,13 @@ def test_hotword_shortfall_packet_only_sends_unselected_valid_evidence_candidate
     result = hotword_shortfall_packet(packet, {"selected": [{"term": "城市更新"}]})
     assert [row["term"] for row in result["remaining_candidates"]] == ["政策工具"]
     assert result["already_selected_terms"] == ["城市更新"]
+
+
+def test_hotword_supplement_is_capped_and_overflow_is_audited():
+    original = {"selected": [{"term": "原词"}]}
+    supplement = {"selected": [{"term": "补词一"}, {"term": "补词二"}, {"term": "越界词"}]}
+    result = merge_hotword_supplement(original, supplement, {"补词一", "补词二", "越界词"}, 3)
+    assert [row["term"] for row in result["selected"]] == ["原词", "补词一", "补词二"]
+    assert result["transport_exclusions"][0]["term"] == "越界词"
+    assert result["transport_exclusions"][0]["reason"] == "fixed_target_cap"
+    assert len(original["selected"]) == 1
