@@ -226,6 +226,8 @@ def review_packet(capture, topics):
 
 def collection_topic_routes(capture, topics, collection_audit):
     """Freeze topic routing from the collector's exact parent-post seed URLs."""
+    if collection_audit.get('multi_topic_parents'):
+        raise ValueError('Multi-topic parent requires semantic topic routing, not a frozen first-match label')
     topic_ids = {topic: n for n, topic in enumerate(topics, 1)}
     url_topics = {}
     for topic_audit in collection_audit.get('coverage_by_topic') or []:
@@ -397,7 +399,7 @@ def main():
         print(json.dumps({'handoff': {'status': 'no_public_evidence'},
                           'summary_status': summary['status'], 'seconds': 0}, ensure_ascii=False))
         return
-    if collection_audit:
+    if collection_audit and not collection_audit.get('multi_topic_parents'):
         packet = compact_review_packet(capture, topics, collection_audit)
         result, run = semantic_json(packet, COMPACT_PROMPT, command, args.output_dir, 'comment-review-compact', args.timeout)
         result = expand_compact_comment_result(packet, result)

@@ -31,13 +31,18 @@ from discover_toutiao_comment_seeds import (
 MEETING_MARKERS = ("国务院常务会议", "国常会")
 
 
-def topic_fragments(topic: str) -> list[str]:
+def topic_fragments(topic: str, aliases=()) -> list[str]:
     """Return conservative topic aliases without period-specific vocabulary."""
     cleaned = re.sub(r"\s+", "", str(topic or ""))
     values = [cleaned]
     for part in re.split(r"[、，及与和]", cleaned):
         if len(part) >= 4:
             values.append(part)
+    for value in list(values):
+        root = re.sub(r'(?:建设|修改|修订|实施|有关工作)$', '', value)
+        if len(root) >= 3 and root != value:
+            values.append(root)
+    values.extend(re.sub(r'\s+', '', alias) for alias in aliases if isinstance(alias, str) and len(alias.strip()) >= 3)
     return list(dict.fromkeys(value for value in values if value))
 
 
@@ -55,10 +60,10 @@ def query_variants(topic: str) -> list[str]:
     return list(dict.fromkeys(queries))
 
 
-def relevant_parent_title(title: str, topic: str) -> bool:
+def relevant_parent_title(title: str, topic: str, aliases=()) -> bool:
     compact = re.sub(r"\s+", "", str(title or ""))
     return any(marker in compact for marker in MEETING_MARKERS) and any(
-        fragment in compact for fragment in topic_fragments(topic)
+        fragment in compact for fragment in topic_fragments(topic, aliases)
     )
 
 
@@ -81,6 +86,7 @@ def discover_topic(
     max_candidates_per_query: int = 80,
     max_articles: int = 3,
     timeout: int = 15,
+    aliases=(),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     left = parse_bound(start)
     right = parse_bound(end, end=True)
@@ -109,7 +115,7 @@ def discover_topic(
                                  left <= parse_time(row.get("create_time")) <= right)]
                     outcome = {"gid": item["gid"], "title": item["title"],
                                "in_window_comments": len(in_window),
-                               "title_relevant": relevant_parent_title(item["title"], topic)}
+                               "title_relevant": relevant_parent_title(item["title"], topic, aliases)}
                     search_record["candidate_outcomes"].append(outcome)
                     if not in_window or not outcome["title_relevant"]:
                         continue
@@ -127,6 +133,7 @@ def discover_topic(
                         "url": item["url"],
                         "raw_file": str(raw_path.resolve()),
                         "comment_count": len(in_window),
+                        "title": item['title'],
                     })
                 except Exception as exc:
                     search_record["candidate_outcomes"].append({
@@ -197,6 +204,25 @@ def apply_review_cap(
     return capture, len(omitted)
 
 
+def metadata_topic_aliases(task_path: Path) -> tuple[dict, dict]:
+    state_path = Path(task_path).resolve().parent.parent / 'pipeline_state.json'
+    if not state_path.is_file():
+        return {}, {}
+    contract = json.loads(state_path.read_text('utf-8-sig')).get('input_contract') or {}
+    raw = contract.get('metadata')
+    if not raw:
+        return {}, {}
+    path = Path(raw)
+    metadata = json.loads(path.read_text('utf-8-sig'))
+    titles, aliases = metadata.get('topic_titles') or [], metadata.get('topic_aliases') or []
+    if not aliases:
+        return {}, {}
+    if len(titles) != len(aliases) or any(not isinstance(row, list) for row in aliases):
+        raise ValueError('Current input metadata aliases do not align with topic_titles')
+    return dict(zip(titles, aliases)), {'metadata_file': str(path.resolve()),
+        'metadata_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'basis': 'current_input_declared_aliases_not_historical_seed'}
+
+
 def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     task = json.loads(Path(task_path).read_text(encoding="utf-8-sig"))
     workspace = Path(task["stage_workspace"]).resolve()
@@ -208,6 +234,7 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     start = str(plan["monitoring_period"]["start"])
     end = str(plan["monitoring_period"]["end"])
     topics = [str(row["topic"]) for row in plan.get("topics") or []]
+    alias_map, alias_provenance = metadata_topic_aliases(task_path)
     if not topics:
         raise ValueError("Research plan has no workbook topics")
 
@@ -216,7 +243,7 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     claimed_urls: set[str] = set()
     observations = {"checks": []}
     for topic in topics:
-        accepted, searches = discover_topic(topic, start, end, raw_dir)
+        accepted, searches = discover_topic(topic, start, end, raw_dir, aliases=alias_map.get(topic, []))
         # One parent URL may not be routed to multiple topics.
         accepted = [row for row in accepted if row["url"] not in claimed_urls]
         claimed_urls.update(row["url"] for row in accepted)
@@ -234,6 +261,10 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     discovered_comments = len(capture.get("rows") or [])
     url_topics = {row["url"]: topic for topic, rows in accepted_by_topic.items() for row in rows}
     capture, omitted_comments = apply_review_cap(capture, url_topics)
+    multi_topic_parents = [{'parent_post_id': post['id'], 'topic_candidates': matched}
+        for post in capture.get('posts') or []
+        if len(matched := [topic for topic in topics
+            if relevant_parent_title(post.get('text', ''), topic, alias_map.get(topic, []))]) > 1]
     capture_path = workspace / "comment_capture.json"
     atomic_write_json(capture_path, capture)
     atomic_write_json(workspace / "fast_comment_search_audit.json", {
@@ -297,6 +328,8 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
         "waiting_login_terminal": False,
         "fresh_discovery": True,
         "collector": "fixed_no_login_fast_path_v1",
+        "topic_alias_provenance": alias_provenance,
+        "multi_topic_parents": multi_topic_parents,
     }
     audit_path = workspace / "comment_collection_audit.json"
     atomic_write_json(audit_path, audit)

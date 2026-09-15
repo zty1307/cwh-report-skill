@@ -26,6 +26,39 @@ def test_parent_title_requires_meeting_and_topic_evidence():
     assert not relevant_parent_title("国务院常务会议研究其他事项", "绿色低碳转型")
 
 
+def test_shared_action_suffix_does_not_hide_current_topic():
+    assert relevant_parent_title('国务院常务会议部署绿色交通网、综合物流网建设', '绿色交通网建设')
+    assert relevant_parent_title('国常会研究生态环境条例', '生态环境条例修改')
+    assert not relevant_parent_title('某企业介绍绿色交通网建设', '绿色交通网建设')
+
+
+def test_explicit_current_aliases_are_used_without_historical_topic_dictionary():
+    assert relevant_parent_title('国常会核准甲地、乙地四个清洁能源项目', '核准四个清洁能源项目', ['清洁能源项目'])
+    assert not relevant_parent_title('国常会研究其他事项', '核准四个清洁能源项目', ['清洁能源项目'])
+
+
+def test_metadata_aliases_come_only_from_current_owned_pipeline_input(tmp_path):
+    import json
+    from cwh_fast_comment_collection import metadata_topic_aliases
+    tasks = tmp_path / 'tasks'
+    tasks.mkdir()
+    metadata = tmp_path / 'metadata.json'
+    metadata.write_text(json.dumps({'topic_titles': ['动态议题'], 'topic_aliases': [['当期别名']]}), encoding='utf-8')
+    (tmp_path / 'pipeline_state.json').write_text(json.dumps({'input_contract': {'metadata': str(metadata)}}), encoding='utf-8')
+    aliases, provenance = metadata_topic_aliases(tasks / 'comments.json')
+    assert aliases == {'动态议题': ['当期别名']}
+    assert provenance['metadata_file'] == str(metadata.resolve())
+    assert provenance['metadata_sha256']
+
+
+def test_multi_topic_parent_cannot_be_frozen_to_first_matching_topic():
+    import pytest
+    from cwh_comment_semantics import collection_topic_routes
+    with pytest.raises(ValueError, match='semantic topic routing'):
+        collection_topic_routes({'rows': [], 'posts': []}, ['动态甲', '动态乙'],
+            {'multi_topic_parents': [{'parent_post_id': 'p1', 'topic_candidates': ['动态甲', '动态乙']}]})
+
+
 def test_review_cap_balances_topics_and_retains_omitted_rows():
     posts = [
         {"id": "p1", "url": "https://example.test/1"},
