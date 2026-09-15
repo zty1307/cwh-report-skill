@@ -19,6 +19,7 @@ from run_cwh_batched_viewpoints import merge_topic_bundles
 from cwh_source_spans import source_segments, selected_quote
 from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_repairs, complete_decisions
 from cwh_semantic_repairs import normalize_excluded_claims
+from cwh_semantic_repairs import repair_missing_reasons
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
 
 
@@ -131,6 +132,13 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         returned = [row.get('id') for row in result.get('items') or []]
         if len(returned) != len(set(returned)) or set(returned) != set(ids):
             raise ValueError(f"[{packet['topic']}] Single-topic response must review every item exactly once")
+        try:
+            result, completion_run = repair_missing_reasons(packet, result, command, workspace,
+                                                            deadline - time.monotonic() - 15)
+        except ValueError as exc:
+            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+        if completion_run:
+            run = {**run, 'missing_reason_completion_run': completion_run}
         decisions.append({**result, 'topic': packet['topic']})
         runs.append(run)
     return decisions, {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
@@ -203,6 +211,8 @@ def author(task, deadline):
             continue
         try:
             part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
+            if decision.get('transport_repairs'):
+                part['transport_repairs'] = decision['transport_repairs']
         except (ValueError, KeyError, TypeError) as exc:
             compilation_errors.append(f'[{packet["topic"]}] {exc}')
             continue

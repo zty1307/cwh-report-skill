@@ -33,7 +33,7 @@ def test_scoped_feedback_keeps_other_topic_requests_and_prior_repairs_cacheable(
         key = (str(packet), prompt, label)
         if not reuse_cache or key not in cache:
             actual.append(packet['topic'])
-            cache[key] = ({'items': [{'id': 'r1', 'decision': 'excluded', 'claims': []}],
+            cache[key] = ({'items': [{'id': 'r1', 'decision': 'excluded', 'reason': '仅会议事实', 'claims': []}],
                            'heading': packet['topic'], 'clusters': []}, {'session_id': label})
         return cache[key]
     monkeypatch.setattr(worker, 'semantic_json', model)
