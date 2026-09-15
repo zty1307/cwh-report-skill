@@ -12,7 +12,17 @@ The model receives one bounded JSON task at a time. It writes final artifacts on
 
 ## Execution budgets
 
-For `bounded_60m`, standard-workbook input reallocates 870 unused raw-normalization seconds: workbook 900→30, domestic authoring 720→1290, and independent review 300→600. Other stages, the 675-second reserve, 2700-second research cutoff and 3600-second total stay unchanged. The input-mode allocation is resolved once into the persisted contract and propagated to worker timeouts. Overrides cannot inflate the total or reduce independent review, rendering or final-gate allocations. Raw-input budgets are unchanged.
+For `bounded_60m`, allocate time where each input mode actually performs the work. Raw normalization already includes public-article ranking review, overseas source/category review and hotword semantic selection; its later overseas and hotword stages still perform their required handoffs and bounded collection, without treating missing evidence as zero. Their shorter allocations do not waive source gates or authorize unreviewed material. Standard input retains the longer downstream research allocations.
+
+| Stage seconds | Raw workbook | Standard workbook |
+| --- | ---: | ---: |
+| Workbook and raw semantic reviews | 1260 | 30 |
+| Domestic authoring | 600 | 1290 |
+| Independent claim verification | 300 | 600 |
+| Overseas evidence handoff/collection | 60 | 240 |
+| Hotword preparation | 30 | 90 |
+
+Both modes keep domestic comments at 300, rendering at 180, final delivery checks at 120, and all other stage allocations identical. Each mode totals 2925 stage seconds plus the same 675-second reserve. The 2700-second research cutoff and 3600-second total stay unchanged; material shortages remain audited gaps, not invented evidence. The input-mode allocation is resolved once into the persisted contract and propagated to worker timeouts. Overrides cannot inflate the total or reduce independent review, rendering or final-gate allocations. This is an allocation, not a measured completion guarantee; reconfiguration of an existing diagnostic run must be disclosed, including its original wall-clock start.
 
 The executable limits live in `config/execution_policy.v1.json`. Both bounded profiles use one active model worker and serial stages. Stage limits are not increased by the reserve. Research lanes are bounded by query, page-fetch and formal-voice limits. Monitoring-system full text is always processed first. Independent review is a separate sequential run. See `model_worker_host.md` for permission-aware transports and honest review-only delivery. Models do not need to run shell commands or edit pipeline state.
 

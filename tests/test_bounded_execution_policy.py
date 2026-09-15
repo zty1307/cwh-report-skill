@@ -65,14 +65,27 @@ def test_standard_input_reallocates_raw_budget_without_extending_deadlines():
     _, selected = execution_profile("bounded_60m")
     raw = resolved_stage_budgets(selected, "raw_workbook")
     standard = resolved_stage_budgets(selected, "standard_workbook")
-    assert raw["workbook"] == 1020 and standard["workbook"] == 30
+    assert raw["workbook"] == 1260 and standard["workbook"] == 30
     assert raw["domestic_viewpoints"] == 600 and standard["domestic_viewpoints"] == 1290
     assert standard["domestic_viewpoints"] - raw["domestic_viewpoints"] == 690
     assert standard["domestic_evidence_verification"] - raw["domestic_evidence_verification"] == 300
+    assert standard["overseas_evidence"] - raw["overseas_evidence"] == 180
+    assert standard["hotwords"] - raw["hotwords"] == 60
     assert sum(raw.values()) == sum(standard.values())
     assert selected["wall_clock_budget_seconds"] == 3600 and selected["research_deadline_seconds"] == 2700
     for stage in ("domestic_evidence_verification", "render", "delivery_gate"):
         assert raw[stage] <= standard[stage]
+
+
+def test_raw_review_time_moves_from_already_reviewed_handoffs_not_writing_or_delivery():
+    _, selected = execution_profile("bounded_60m")
+    raw = resolved_stage_budgets(selected, "raw_workbook")
+    assert raw["overseas_evidence"] == 60 and raw["hotwords"] == 30
+    assert raw["domestic_viewpoints"] == 600 and raw["domestic_evidence_verification"] == 300
+    assert raw["domestic_comments_sentiment"] == 300
+    assert raw["render"] == 180 and raw["delivery_gate"] == 120
+    assert sum(raw.values()) + selected["reserved_delivery_buffer_seconds"] == 3600
+    assert sum(v for k, v in raw.items() if k not in {"render", "delivery_gate"}) <= selected["research_deadline_seconds"]
 
 
 @pytest.mark.parametrize("override", [{"workbook": -1}, {"domestic_viewpoints": 10000}, {"render": 1}, {"unknown": 1}])
