@@ -787,7 +787,7 @@ def build_overseas_review_packet(
         "instructions": [
             "AI逐条阅读标题与正文，判断是否以本次国务院常务会议为主要报道对象。",
             "正文缺失或正文仅重复标题时不能include；保留证据不足及补取正文的原因，不冒称与会议无关。",
-            "解读性报道必须明确interpretive_verified=true，并提供完整正文中的连续interpretive_excerpt；摘要不等于原文核实。",
+            "解读性报道必须明确interpretive_verified=true，并从原始content逐字复制连续interpretive_excerpt，保留繁简、标点、空格和异常字符；不得改写、纠错或简繁转换，摘要不等于原文核实。",
             "decision只能为include或exclude；不得仅凭关键词命中纳入。",
             "publisher_class只能为overseas_origin_media、mainland_outward_media或not_overseas_media。",
             "每条必须填写review_reason和0至1之间的classification_confidence。",
