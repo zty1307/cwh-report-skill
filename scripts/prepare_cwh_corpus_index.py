@@ -50,6 +50,30 @@ def professional_quote_hint(text: str, aliases: list[str]) -> int:
     return min(3, len(starts))
 
 
+def reasoning_reading_hint(text: str, aliases: list[str]) -> int:
+    """Prioritize reading possible reasoning near this policy, not eligibility.
+
+    An unverified forecast or a policy-primary argument can match this hint.
+    Neither is certified here; the unchanged author/reviewer gates decide.
+    """
+    markers = r'不等于|不意味着|取决于|有助于|这将|这意味着|意味着|预计|研判|建议|风险在于|前提是'
+    specific_aliases = [alias for alias in aliases if len(alias) >= 5]
+    aliases = specific_aliases or aliases
+    paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
+    starts = set()
+    for number, paragraph in enumerate(paragraphs):
+        prefix = ''
+        if number and not re.match(r'^(?:[0-9]+[.、]|[一二三四五六七八九十]+、)', paragraph):
+            prefix = paragraphs[number - 1][-200:]
+        context = prefix + paragraph
+        for match in re.finditer(markers, paragraph):
+            position = len(prefix) + match.start()
+            if any(alias and alias in context[max(0, position-200):position+len(match.group())+200]
+                   for alias in aliases):
+                starts.add((number, match.start()))
+    return min(3, len(starts))
+
+
 def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared_aliases=None, *, shortlist_limit=40) -> Path:
     root = source.parent / "corpus_index"
     root.mkdir(exist_ok=True)
@@ -64,9 +88,12 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared
         aliases = list(dict.fromkeys(a for a in aliases if isinstance(a, str) and len(a) >= 3))
         hints = {str(x['record_id']): professional_quote_hint(str(x.get('content') or ''), aliases)
                  for x in candidates}
+        reasoning_hints = {str(x['record_id']): reasoning_reading_hint(str(x.get('content') or ''), aliases)
+                           for x in candidates}
         ranked = sorted(candidates, key=lambda x: (
             -hints[str(x['record_id'])],
             -max((len(str(alias)) for alias in aliases if str(alias) and str(alias) in str(x.get("title", ""))), default=0),
+            -bool(reasoning_hints[str(x['record_id'])]),
             -bool(re.search("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             -len(re.findall("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             len(str(x.get("title", ""))), str(x.get("record_id", ""))))
@@ -98,11 +125,12 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared
             atomic_write_json(article, row)
             reading_order.append({"record_id": row["record_id"], "title": row.get("title"),
                                   "professional_attribution_hint_count": hints[str(row['record_id'])],
+                                  "reasoning_reading_hint_count": reasoning_hints[str(row['record_id'])],
                                   "source": row.get("source"), "full_text_path": str(article)})
         topic_index = root / f"topic-{number}.json"
         atomic_write_json(topic_index, {"topic": topic, "reading_order_only_not_review": True,
                                       "reading_diversity": "delay_high_overlap_fulltexts_without_excluding_them",
-                                      "priority_hint": "professional_attribution_near_current_policy_not_semantic_eligibility",
+                                      "priority_hint": "professional_attribution_then_possible_reasoning_near_current_policy_not_semantic_eligibility",
                                       "shortlist": reading_order,
                                       "all_candidates": [{k: row.get(k) for k in ("record_id", "title", "source", "published_at", "url")} for row in candidates]})
         index["reading_indexes"].append({"topic": topic, "path": str(topic_index)})
