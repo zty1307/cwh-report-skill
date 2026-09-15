@@ -8,6 +8,7 @@ from cwh_pipeline_runtime import atomic_write_json
 from cwh_weibo_capture import response, window, timestamp
 from run_cwh_agent_reach_comment_collection import validate_comment_payload, iter_comment_objects, published_at, article_id
 from run_cwh_sentiment_stage import stable_sample_id
+from cwh_comment_filters import is_procedural_only
 
 
 def normalize(observations, start, end):
@@ -53,6 +54,8 @@ def normalize(observations, start, end):
             seen.add(identity)
             if not re.search(r'[A-Za-z0-9\u4e00-\u9fff]', re.sub(r'\[[^\]]*\]', '', row['text'])):
                 reason = 'emoji_only_or_empty'
+            if not reason and is_procedural_only(row['text']):
+                reason = 'procedural_only'
             (excluded if reason else accepted).append({**row, 'exclusion_reason': reason} if reason else row)
     return {'schema_version': 1, 'monitoring_period': {'start': start, 'end': end}, 'rows': accepted,
             'excluded': excluded, 'posts': list(posts.values()), 'raw_captures': captures,

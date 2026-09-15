@@ -122,6 +122,39 @@ def test_rejected_heading_without_certified_replacement_is_neutralized_not_reuse
     assert reviewed_display_headings(data)[(0, None)] == '公共服务布局'
 
 
+def test_clear_repetition_and_multi_center_style_faults_share_one_small_repair():
+    data, review = sample(), packet()
+    review['heading_reviews'][0]['replacement']['text'] = '公共服务转向系统性转变与协同'
+    review['heading_reviews'][1]['replacement']['text'] = '服务供给扩大，政策定位提升且投资拉动显著'
+    request = {'headings': heading_manifest(data), 'claims': [{'id': 'e1', 'formal_claim': '原观点'}], 'sources': []}
+    with patch('cwh_host_research.semantic_json', return_value=({'heading_reviews': []}, {'session_id': 'r'})) as model:
+        assert repair_overlong_headings(request, review, [], Path('.'), 30) == review
+    assert len(model.call_args.args[0]['headings']) == 2
+    assert model.call_count == 1
+
+
+def test_heading_replay_preserves_real_prior_repair_provenance():
+    data, review = sample(), packet()
+    review['heading_repair_run'] = {'session_id': 'earlier-real'}
+    review['heading_repair_runs'] = [{'session_id': 'earlier-real'}, {'session_id': 'later-real'}]
+    review['heading_reviews'][0]['reviewer_run_id'] = 'earlier-real'
+    review['heading_reviews'][1]['reviewer_run_id'] = 'later-real'
+    data['research_audit'] = {'heading_quality': build_heading_audit(data, review)}
+    assert [r['reviewer_run_id'] for r in data['research_audit']['heading_quality']['approved']] == ['earlier-real', 'later-real']
+    assert len(reviewed_display_headings(data)) == 2
+
+
+def test_malformed_repair_metadata_does_not_crash_or_certify_a_fake_run():
+    data, review = sample(), packet()
+    review['heading_repair_run'] = 'not-a-host-run'
+    review['heading_repair_runs'] = [None, 'invented', {}, {'session_id': 3}]
+    review['heading_reviews'][0]['reviewer_run_id'] = 'invented'
+    audit = build_heading_audit(data, review)
+    assert audit['approved'][0]['reviewer_run_id'] == review['reviewer_run_id']
+    data['research_audit'] = {'heading_quality': audit}
+    assert len(reviewed_display_headings(data)) == 2
+
+
 def test_factual_certified_heading_is_not_given_an_invented_stance():
     data, review = sample(), packet()
     review['heading_reviews'][0]['replacement']['text'] = '公共服务部门公布布局调整规则'

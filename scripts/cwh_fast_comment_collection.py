@@ -18,6 +18,7 @@ from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
 from cwh_toutiao_capture import normalize
+from cwh_comment_filters import is_procedural_only
 from discover_toutiao_comment_seeds import (
     comment_endpoint,
     discover,
@@ -115,14 +116,28 @@ def discover_topic(
             for future in futures:
                 try:
                     item = future.result()
+                    response_path = raw_dir / f"candidate-response-{item['gid']}-{hashlib.sha256(item['body'].encode()).hexdigest()[:12]}.json"
+                    atomic_write_json(response_path, {'url': item['endpoint'], 'status': 200,
+                        'body': item['body'], 'search_title': item['title'], 'discovery_query': query})
+                    message = item['payload'].get('message')
+                    if message is not None and message != 'success':
+                        search_record['candidate_outcomes'].append({'gid': item['gid'], 'title': item['title'],
+                            'in_window_comments': 0, 'title_relevant': False, 'access_failed': True,
+                            'raw_response_path': str(response_path),
+                            'error': 'Comment API returned a non-success message; cannot infer zero comments'})
+                        continue
                     comments = iter_comments(item["payload"])
                     in_window = [row for row in comments if (parse_time(row.get("create_time")) and
                                  left <= parse_time(row.get("create_time")) <= right)]
+                    reviewable = [row for row in in_window if not is_procedural_only(row.get('text'))]
                     outcome = {"gid": item["gid"], "title": item["title"],
                                "in_window_comments": len(in_window),
+                               "nonprocedural_comments_before_review": len(reviewable),
+                               "procedural_filtered_comments": len(in_window) - len(reviewable),
+                               "raw_response_path": str(response_path), "access_failed": False,
                                "title_relevant": relevant_parent_title(item["title"], topic, aliases)}
                     search_record["candidate_outcomes"].append(outcome)
-                    if not in_window or not outcome["title_relevant"]:
+                    if not reviewable or not outcome["title_relevant"]:
                         continue
                     # Preserve the exact response body. The separately recorded
                     # search title is context only and never injected into it.
@@ -138,15 +153,16 @@ def discover_topic(
                         "url": item["url"],
                         "raw_file": str(raw_path.resolve()),
                         "comment_count": len(in_window),
+                        "nonprocedural_comment_count": len(reviewable),
                         "title": item['title'],
                     })
                 except Exception as exc:
                     search_record["candidate_outcomes"].append({
                         "gid": "", "title": "", "in_window_comments": 0,
-                        "title_relevant": False, "error": f"{type(exc).__name__}: {exc}",
+                        "title_relevant": False, "access_failed": True, "error": f"{type(exc).__name__}: {exc}",
                     })
                     continue
-        accepted.sort(key=lambda row: (-row["comment_count"], row["gid"]))
+        accepted.sort(key=lambda row: (-row["nonprocedural_comment_count"], row["gid"]))
         if len(accepted) >= max_articles:
             break
     return accepted[:max_articles], searches
@@ -294,16 +310,22 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
             if source_id == "toutiao_public_comments":
                 queries = [row["query"] for row in searches_by_topic[topic]]
                 urls = [row["url"] for row in accepted]
+                inaccessible = any(row['status'] == 'access_failed' or
+                    any(o.get('access_failed') for o in row.get('candidate_outcomes') or [])
+                    for row in searches_by_topic[topic])
+                response_files = [o['raw_response_path'] for row in searches_by_topic[topic]
+                    for o in row.get('candidate_outcomes') or [] if o.get('raw_response_path')]
                 checks.append({
                     "source_id": source_id,
-                    "status": "hit" if topic_ids else "no_relevant_result",
+                    "status": "hit" if topic_ids else ("access_failed" if inaccessible else "no_relevant_result"),
                     "execution_mode": "fixed_no_login_toutiao_search_and_comment_api",
                     "queries_or_seed_urls": urls or queries,
                     "queries": queries,
                     "result_count": len(topic_ids),
                     "eligible_comment_ids": topic_ids,
-                    "raw_files": [row["raw_file"] for row in accepted],
-                    "blocker": "" if topic_ids else "No in-window traceable comments found by bounded platform search",
+                    "raw_files": list(dict.fromkeys([row["raw_file"] for row in accepted] + response_files)),
+                    "blocker": "" if topic_ids else ("Some search/comment requests failed; cannot infer absence of discussion"
+                        if inaccessible else "No in-window traceable comments found by bounded platform search"),
                     "fresh_discovery": True,
                 })
             else:

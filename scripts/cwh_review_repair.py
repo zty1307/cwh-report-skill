@@ -182,6 +182,8 @@ def reviewer_narrowing_packet(repaired, initial, raw_result, revisions, run, sou
         final_result['heading_reviews'] = raw_result['heading_reviews']
     if 'heading_repair_run' in raw_result:
         final_result['heading_repair_run'] = raw_result['heading_repair_run']
+    if 'heading_repair_runs' in raw_result:
+        final_result['heading_repair_runs'] = raw_result['heading_repair_runs']
     final = compile_review(repaired, final_result, run, source_hash)
     for row in final['reviews']:
         row['reviewer_run_id'] = run['session_id']

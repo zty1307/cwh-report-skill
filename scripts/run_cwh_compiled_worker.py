@@ -276,6 +276,8 @@ def compile_review(analysis, result, run, digest):
         packet['heading_reviews'] = result['heading_reviews']
     if 'heading_repair_run' in result:
         packet['heading_repair_run'] = result['heading_repair_run']
+    if 'heading_repair_runs' in result:
+        packet['heading_repair_runs'] = result['heading_repair_runs']
     return packet
 
 
@@ -311,6 +313,7 @@ def verify(task, deadline):
     result, run = semantic_json(request_packet, REVIEW_PROMPT,
         command, workspace, "independent-review", deadline-time.monotonic())
     result.pop('heading_repair_run', None)
+    result.pop('heading_repair_runs', None)
     result = repair_overlong_headings(request_packet, result, command, workspace, deadline-time.monotonic()-15)
     packet = compile_review(analysis, result, run, digest)
     output(task, packet)  # Preserve rejection even if a later repair times out.

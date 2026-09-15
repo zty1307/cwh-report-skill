@@ -86,7 +86,8 @@
     "quotes_per_ready_topic": [2, 3],
     "lead_summary_max_cjk": 22,
     "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],
-    "reject_reaction_only": true
+    "reject_reaction_only": true,
+    "procedural_only_texts": ["转发了", "转发微博", "已转发", "分享了", "收藏了", "已收藏", "点赞了", "关注了", "已关注"]
   },
   "hotwords": {
     "opening": "从热词分布来看，",

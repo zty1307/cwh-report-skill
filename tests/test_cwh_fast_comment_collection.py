@@ -22,6 +22,59 @@ def test_declared_aliases_are_searched_inside_default_five_query_cutoff():
     assert len(queries) == len(set(queries))
 
 
+def test_zero_comment_response_is_saved_without_becoming_captured_comments(monkeypatch, tmp_path):
+    import cwh_fast_comment_collection as collector
+    import json
+    monkeypatch.setattr(collector, 'discover', lambda query: {'123': '国常会研究公共服务'})
+    body = json.dumps({'message': 'success', 'data': [], 'repost_params': {'title': '国常会研究公共服务'}})
+    monkeypatch.setattr(collector, 'fetch_candidate', lambda *a: {'gid': '123', 'title': '国常会研究公共服务',
+        'url': 'https://www.toutiao.com/article/123/', 'endpoint': 'https://www.toutiao.com/api/comments',
+        'body': body, 'payload': json.loads(body)})
+    accepted, searches = collector.discover_topic('公共服务', '2026-01-01', '2026-01-02', tmp_path, max_queries=1)
+    assert accepted == []
+    response = searches[0]['candidate_outcomes'][0]
+    assert response['access_failed'] is False and Path(response['raw_response_path']).exists()
+    assert not list(tmp_path.glob('toutiao-*.json'))
+
+
+def test_http200_api_error_is_not_reported_as_verified_zero_comments(monkeypatch, tmp_path):
+    import cwh_fast_comment_collection as collector
+    import json
+    monkeypatch.setattr(collector, 'discover', lambda query: {'123': '国常会研究公共服务'})
+    body = json.dumps({'message': 'error', 'data': []})
+    monkeypatch.setattr(collector, 'fetch_candidate', lambda *a: {'gid': '123', 'title': '国常会研究公共服务',
+        'url': 'https://www.toutiao.com/article/123/', 'endpoint': 'https://www.toutiao.com/api/comments',
+        'body': body, 'payload': json.loads(body)})
+    accepted, searches = collector.discover_topic('公共服务', '2026-01-01', '2026-01-02', tmp_path, max_queries=1)
+    outcome = searches[0]['candidate_outcomes'][0]
+    assert accepted == [] and outcome['access_failed'] is True
+    assert 'cannot infer zero comments' in outcome['error']
+    assert json.loads(Path(outcome['raw_response_path']).read_text(encoding='utf-8'))['body'] == body
+
+
+def test_procedural_actions_do_not_consume_parent_quota_or_outweigh_real_opinions(monkeypatch, tmp_path):
+    import cwh_fast_comment_collection as collector
+    import json
+    from datetime import datetime, timezone
+    created = int(datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp())
+    monkeypatch.setattr(collector, 'discover', lambda query: {'1': '', '2': '', '3': ''})
+    texts = {'1': ['转发了'], '2': ['转发了'] * 10 + ['希望落实细则'],
+             '3': ['支持便利服务', '关注覆盖范围']}
+    def fetch(gid, *args):
+        payload = {'message': 'success', 'repost_params': {'title': '国常会研究公共服务'},
+                   'data': [{'comment': {'text': text, 'create_time': created}} for text in texts[gid]]}
+        return {'gid': gid, 'title': '国常会研究公共服务', 'url': f'https://www.toutiao.com/article/{gid}/',
+                'endpoint': 'https://www.toutiao.com/api/comments',
+                'payload': payload, 'body': json.dumps(payload, ensure_ascii=False)}
+    monkeypatch.setattr(collector, 'fetch_candidate', fetch)
+    accepted, searches = collector.discover_topic('公共服务', '2026-01-01', '2026-01-02',
+                                                  tmp_path, max_queries=1, max_articles=1)
+    assert accepted[0]['gid'] == '3'
+    outcomes = searches[0]['candidate_outcomes']
+    assert outcomes[0]['procedural_filtered_comments'] == 1
+    assert not (tmp_path / 'toutiao-1.json').exists()
+
+
 def test_conjoined_topic_exposes_conservative_suffix_alias():
     assert topic_fragments("就业与社会保障") == ["就业与社会保障", "社会保障"]
     assert "国务院常务会议部署加快建设社会保障" in query_variants("就业与社会保障")
