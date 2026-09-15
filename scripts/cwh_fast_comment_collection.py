@@ -46,15 +46,20 @@ def topic_fragments(topic: str, aliases=()) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
-def query_variants(topic: str) -> list[str]:
+def query_variants(topic: str, aliases=()) -> list[str]:
     fragments = topic_fragments(topic)
     primary = fragments[0]
     suffixes = fragments[1:] or fragments
     queries = [
         f"国务院常务会议部署{primary}工作",
-        f"国务院常务会议研究推进{primary}",
-        f"国务院常务会议研究{primary}",
     ]
+    # Put current, declared short names inside the bounded search cutoff,
+    # rather than using them only after discovery for parent-title matching.
+    declared = [re.sub(r'\s+', '', alias) for alias in aliases
+                if isinstance(alias, str) and len(alias.strip()) >= 3]
+    queries.extend(f"国务院常务会议{alias}" for alias in list(dict.fromkeys(declared))[:2]
+                   if alias != primary)
+    queries.extend([f"国务院常务会议研究推进{primary}", f"国务院常务会议研究{primary}"])
     queries.extend(f"国务院常务会议部署加快建设{fragment}" for fragment in reversed(suffixes))
     queries.append(f"国务院常务会议{primary}")
     return list(dict.fromkeys(queries))
@@ -93,7 +98,7 @@ def discover_topic(
     accepted: list[dict[str, Any]] = []
     searches: list[dict[str, Any]] = []
     tried: set[str] = set()
-    for query in query_variants(topic)[:max_queries]:
+    for query in query_variants(topic, aliases)[:max_queries]:
         try:
             found = discover(query)
             search_record = {"query": query, "status": "completed", "result_count": len(found),

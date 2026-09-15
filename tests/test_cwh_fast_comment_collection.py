@@ -15,6 +15,13 @@ def test_topic_query_variants_are_current_topic_driven():
     assert all("2026" not in query for query in queries)
 
 
+def test_declared_aliases_are_searched_inside_default_five_query_cutoff():
+    queries = query_variants('某公共服务管理条例修订', ['公共服务', '服务条例', '公共服务', ''])[:5]
+    assert queries[0] == '国务院常务会议部署某公共服务管理条例修订工作'
+    assert '国务院常务会议公共服务' in queries and '国务院常务会议服务条例' in queries
+    assert len(queries) == len(set(queries))
+
+
 def test_conjoined_topic_exposes_conservative_suffix_alias():
     assert topic_fragments("就业与社会保障") == ["就业与社会保障", "社会保障"]
     assert "国务院常务会议部署加快建设社会保障" in query_variants("就业与社会保障")
