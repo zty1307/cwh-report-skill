@@ -180,3 +180,5 @@ python cwh-report-skill/scripts/cwh_orchestrator.py `
 ```
 
 The report stage requires this AI-complete audit for every system workbook. It rejects missing or incomplete AI review instead of rebuilding formal hotwords from deterministic candidates.
+
+Workbook preview verification imports the generated XLSX once in a single renderer process and renders every declared sheet with the existing ranges. Each sheet still requires a fresh, non-empty PNG; a partial batch or successful process exit alone does not pass verification. This changes transport/runtime overhead, not evidence review, workbook values, or acceptance thresholds.

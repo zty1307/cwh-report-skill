@@ -208,12 +208,20 @@ def render_workbook_sheets(
     )
     rendered_sheets: list[str] = []
     render_errors: list[dict[str, str]] = []
+    requests = []
     for sheet_name in sheet_names:
         safe_sheet_name = re.sub(r'[\\/:*?"<>|]', "_", sheet_name)
         preview_path = previews_dir / f"{safe_sheet_name}.png"
-        render_started_at = datetime.now().timestamp()
-        render_command = [str(node_path), str(renderer), str(output_path), sheet_name, str(preview_path)]
-        render_result = subprocess.run(render_command, check=False, env=node_environment)
+        requests.append({"sheetName": sheet_name, "previewPath": str(preview_path)})
+    if not requests:
+        return [], []
+    render_started_at = datetime.now().timestamp()
+    render_command = [str(node_path), str(renderer), str(output_path), "--batch",
+                      json.dumps(requests, ensure_ascii=False)]
+    render_result = subprocess.run(render_command, check=False, env=node_environment)
+    for request in requests:
+        sheet_name = request["sheetName"]
+        preview_path = Path(request["previewPath"])
         preview_is_fresh = preview_path.exists() and preview_path.stat().st_mtime >= render_started_at - 2
         # Some Windows artifact runtimes emit the complete PNG and then exit
         # abnormally during Node teardown. A fresh, non-empty preview is the
