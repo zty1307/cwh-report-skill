@@ -56,11 +56,16 @@ def test_inline_transport_accepts_cli_result_not_unrelated_tool_text():
 
 
 def test_fixed_hotword_rejection_is_audited_not_silently_padded():
-    original = {"review_method": "ai_semantic_review", "selected": [{"term": "城市更新"}, {"term": "中央城市工作会议"}]}
+    original = {"review_method": "ai_semantic_review", "selected": [
+        {"term": "城市更新"}, {"term": "中央城市工作会议"},
+        {"term": "核准四个核电项目"}, {"term": "辽宁庄河核电"},
+    ]}
     result = normalize_hotword_transport(original)
     assert [x["term"] for x in result["selected"]] == ["城市更新"]
     assert result["transport_exclusions"][0]["term"] == "中央城市工作会议"
-    assert len(original["selected"]) == 2
+    assert [x["reason"] for x in result["transport_exclusions"][1:]] == [
+        "fixed_procedural_marker_rejected", "fixed_geography_rule_rejected"]
+    assert len(original["selected"]) == 4
     import pytest
     with pytest.raises(ValueError, match="below"):
         validate_transport_result("hotword", {"minimum_term_count": 36}, result)

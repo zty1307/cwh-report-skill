@@ -15,7 +15,7 @@ import uuid
 from cwh_pipeline_runtime import atomic_write_json, sha256_file
 from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
-from cwh_hotword_pipeline import valid_candidate
+from cwh_hotword_pipeline import PROCEDURAL_HOTWORD_MARKERS, looks_like_pure_geography, valid_candidate
 from cwh_json_transport import load_framed_json, normalize_authoring_envelope
 
 
@@ -115,10 +115,17 @@ def normalize_hotword_transport(result: dict) -> dict:
     accepted, rejected = [], []
     for row in result.get("selected", []):
         term = str(row.get("term") or "")
-        if valid_candidate(term):
+        procedural = any(term.startswith(marker) or term.endswith(marker)
+                         for marker in PROCEDURAL_HOTWORD_MARKERS)
+        if valid_candidate(term) and not procedural and not looks_like_pure_geography(term):
             accepted.append(row)
         else:
-            rejected.append({"term": term, "reason": "fixed_candidate_rule_rejected", "original_review": row})
+            reason = "fixed_candidate_rule_rejected"
+            if procedural:
+                reason = "fixed_procedural_marker_rejected"
+            elif looks_like_pure_geography(term):
+                reason = "fixed_geography_rule_rejected"
+            rejected.append({"term": term, "reason": reason, "original_review": row})
     result["selected"] = accepted
     if rejected:
         result.setdefault("transport_exclusions", []).extend(rejected)
@@ -173,7 +180,10 @@ def hotword_shortfall_packet(packet: dict, result: dict, limit: int = 72) -> dic
     remaining = []
     for candidate in packet.get("candidates", []):
         term = str(candidate.get("term") or "").strip()
-        if not term or term in selected or not valid_candidate(term) or not windows.get(term):
+        procedural = any(term.startswith(marker) or term.endswith(marker)
+                         for marker in PROCEDURAL_HOTWORD_MARKERS)
+        if (not term or term in selected or not valid_candidate(term) or procedural
+                or looks_like_pure_geography(term) or not windows.get(term)):
             continue
         remaining.append({**candidate, "source_windows": windows[term]})
         if len(remaining) >= limit:
