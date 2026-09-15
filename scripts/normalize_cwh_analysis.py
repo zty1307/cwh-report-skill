@@ -16,6 +16,7 @@ from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
 from cwh_available_delivery import available_delivery, valid_gap
+from cwh_writing_rules import judgment_heading as canonical_judgment_heading
 from cwh_writing_rules import attribution_verb, formal_attribution, source_rank, writing_rules, writing_rules_sha256
 
 
@@ -29,11 +30,7 @@ def clean_sentence(value: Any) -> str:
 
 def judgment_heading(value: Any) -> str:
     """Use a neutral reported-judgment frame, never invent approval or criticism."""
-    heading = str(value or "").strip().rstrip("。；;")
-    stances = tuple(writing_rules()["viewpoint"]["heading_stance_verbs"])
-    if not heading or heading.startswith(stances) or any(marker in heading for marker in ("尚未形成评论性观点", "以事实性报道为主")):
-        return heading
-    return writing_rules()["viewpoint"]["default_attribution_verb"] + heading
+    return canonical_judgment_heading(value)
 
 
 def evidence_sentence(row: dict[str, Any]) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from cwh_writing_rules import unsupported_padding_issues, writing_rules
+from cwh_writing_rules import unsupported_padding_issues, writing_rules, judgment_heading
 from cwh_available_delivery import available_delivery, valid_gap
 
 
@@ -52,6 +52,12 @@ def enrich_viewpoint_titles(data: dict[str, Any]) -> None:
 
     for viewpoint in _topic_viewpoints(data):
         clusters = list(viewpoint.get("clusters") or [])
+        if valid_gap(viewpoint):
+            viewpoint['heading'] = viewpoint['topic']
+            continue
+        viewpoint['heading'] = judgment_heading(viewpoint.get('heading'))
+        for cluster in clusters:
+            cluster['summary'] = judgment_heading(cluster.get('summary'))
         title_by_person: dict[str, str] = {}
 
         for cluster in clusters:

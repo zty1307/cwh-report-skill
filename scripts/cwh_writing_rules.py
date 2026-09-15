@@ -41,6 +41,22 @@ def ordinal_prefix(value: int) -> str:
     return prefixes[value - 1] if value <= len(prefixes) else f"{chinese_number(value)}是"
 
 
+def judgment_heading(value: Any) -> str:
+    """One shared display frame; preserve explicit stance and source meaning."""
+    heading = str(value or '').strip().rstrip('。；;')
+    rules = writing_rules()['viewpoint']
+    stances = tuple(rules['heading_stance_verbs'])
+    reports = '|'.join(map(re.escape, [*stances, '指出', '表示', '称']))
+    actor = r'(?:舆论|媒体|专家|机构)(?:普遍)?'
+    heading = re.sub('^' + re.escape(rules['default_attribution_verb']) + '(?=' + actor + '(?:' + reports + '))', '', heading)
+    heading = re.sub('^' + actor + '(?=(?:' + reports + '))', '', heading)
+    if not heading.startswith(stances):
+        heading = re.sub(r'^(?:指出|表示|称)', '', heading)
+    if not heading or heading.startswith(stances) or any(marker in heading for marker in ('尚未形成评论性观点', '以事实性报道为主')):
+        return heading
+    return rules['default_attribution_verb'] + heading
+
+
 def opening_paragraph(meeting: dict[str, Any], date_label: str, agenda_topics: str) -> str:
     rules = writing_rules()["document"]
     # Only explicit, source-backed input may name a chair. Missing metadata

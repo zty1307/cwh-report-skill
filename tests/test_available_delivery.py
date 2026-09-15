@@ -172,3 +172,24 @@ def test_builtin_word_template_never_infers_low_attention_from_missing_comments(
     text = '\n'.join(p.text for p in Document(path).paragraphs)
     assert '暂不判断其关注程度或态度' in text
     assert '关注度较低' not in text and '暂无评论性文章' not in text
+
+
+def test_fixed_headline_frame_avoids_double_reporting_and_retains_explicit_stance():
+    from normalize_cwh_analysis import judgment_heading
+    assert judgment_heading('专家肯定制度修订的普惠导向') == '肯定制度修订的普惠导向'
+    assert judgment_heading('专家指出建设应强化协同') == '认为建设应强化协同'
+    assert judgment_heading('建议完善实施条件') == '建议完善实施条件'
+    assert judgment_heading('认为专家肯定制度修订的普惠导向') == '肯定制度修订的普惠导向'
+
+
+def test_shared_render_headlines_preserve_frozen_claims_and_gaps():
+    from report_rules import enrich_viewpoint_titles
+    data = prepare_available_delivery(material())
+    enrich_viewpoint_titles(data)
+    assert data['viewpoints']['by_topic'][0]['heading'] == '动态议题'
+    evidence = {'formal_claim': '原有命题不能改写', 'source_excerpt': '原始片段'}
+    data['viewpoints']['by_topic'].append({'topic': '另议题', 'heading': '认为专家肯定制度改革',
+        'clusters': [{'summary': '专家指出应完善实施条件', 'evidence': [evidence]}]})
+    enrich_viewpoint_titles(data)
+    assert data['viewpoints']['by_topic'][1]['heading'] == '肯定制度改革'
+    assert evidence == {'formal_claim': '原有命题不能改写', 'source_excerpt': '原始片段'}
