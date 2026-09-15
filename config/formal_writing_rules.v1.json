@@ -96,6 +96,8 @@
     "one_group_per_topic": true,
     "quotes_per_ready_topic": [2, 3],
     "lead_summary_max_cjk": 22,
+    "review_samples_per_topic": 30,
+    "review_samples_hard_max": 300,
     "quote_max_chars": 180,
     "additional_heading_verbs": ["询问", "希望明确"],
     "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],

@@ -139,3 +139,25 @@ def test_review_cap_balances_topics_and_retains_omitted_rows():
     assert sum(row["parent_post_id"] == "p1" for row in capture["rows"]) == 4
     assert sum(row["parent_post_id"] == "p2" for row in capture["rows"]) == 4
     assert all(row["exclusion_reason"] == "bounded_semantic_review_sample_cap" for row in capture["excluded"])
+
+
+def test_default_review_cap_does_not_make_twenty_effective_comments_impossible():
+    from cwh_fast_comment_collection import semantic_review_sample_limits
+    total, per_topic = semantic_review_sample_limits(6)
+    assert per_topic >= 20 and total >= 6 * 20 and total <= 300
+    rows = [{'sample_id': f's{i}', 'comment_id': str(i), 'parent_post_id': 'p1',
+             'text': '真实保留样本', 'like_count': 0} for i in range(25)]
+    captured, omitted = apply_review_cap({'rows': rows, 'posts': [{'id': 'p1', 'url': 'https://example.test/1'}],
+        'excluded': []}, {'https://example.test/1': '议题甲'})
+    assert len(captured['rows']) == 25 and omitted == 0
+    assert {row['sample_id'] for row in captured['rows']} == {row['sample_id'] for row in rows}
+    # A small real collection remains small, without padding to readiness.
+    captured, _ = apply_review_cap({'rows': rows[:4], 'posts': [{'id': 'p1', 'url': 'https://example.test/1'}],
+        'excluded': []}, {'https://example.test/1': '议题甲'})
+    assert len(captured['rows']) == 4
+
+
+def test_many_topics_still_respect_the_direct_review_hard_limit():
+    from cwh_fast_comment_collection import semantic_review_sample_limits
+    total, _ = semantic_review_sample_limits(50)
+    assert total <= 300

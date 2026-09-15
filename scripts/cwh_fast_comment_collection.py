@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
+from cwh_writing_rules import writing_rules
 from cwh_toutiao_capture import normalize
 from cwh_comment_filters import is_procedural_only
 from discover_toutiao_comment_seeds import (
@@ -175,15 +176,27 @@ def required_comment_sources(registry: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def semantic_review_sample_limits(topic_count):
+    rules = writing_rules()['comments']
+    per_topic = int(rules['review_samples_per_topic'])
+    hard_max = int(rules['review_samples_hard_max'])
+    if per_topic < 20 or not 20 <= hard_max <= 300 or topic_count < 1:
+        raise ValueError('Comment review sample limits conflict with the classifier/readiness contract')
+    return min(hard_max, topic_count * per_topic), per_topic
+
+
 def apply_review_cap(
     capture: dict[str, Any],
     url_topics: dict[str, str],
     *,
-    max_total: int = 24,
-    max_per_topic: int = 10,
+    max_total: int | None = None,
+    max_per_topic: int | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Bound model input while retaining every omitted row in the audit."""
     posts = {row["id"]: row for row in capture.get("posts") or []}
+    default_total, default_per_topic = semantic_review_sample_limits(max(1, len(set(url_topics.values()))))
+    max_total = default_total if max_total is None else max_total
+    max_per_topic = default_per_topic if max_per_topic is None else max_per_topic
     buckets: dict[str, list[dict[str, Any]]] = {}
     for row in capture.get("rows") or []:
         url = str((posts.get(row.get("parent_post_id")) or {}).get("url") or "")
@@ -221,6 +234,7 @@ def apply_review_cap(
         "reviewed_rows": len(selected),
         "omitted_rows": len(omitted),
         "rule": "round_robin_by_topic_then_like_count_and_substantive_length",
+        "scope": "reviewed collected-comment sample; not a population estimate; omitted rows are deferred, not semantically excluded",
     }
     return capture, len(omitted)
 
@@ -281,7 +295,8 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     capture["topic_assignment_from_historical_seed"] = False
     discovered_comments = len(capture.get("rows") or [])
     url_topics = {row["url"]: topic for topic, rows in accepted_by_topic.items() for row in rows}
-    capture, omitted_comments = apply_review_cap(capture, url_topics)
+    max_total, max_per_topic = semantic_review_sample_limits(len(topics))
+    capture, omitted_comments = apply_review_cap(capture, url_topics, max_total=max_total, max_per_topic=max_per_topic)
     multi_topic_parents = [{'parent_post_id': post['id'], 'topic_candidates': matched}
         for post in capture.get('posts') or []
         if len(matched := [topic for topic in topics

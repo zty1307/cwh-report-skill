@@ -167,6 +167,8 @@ The lead uses the first complete clause of each reviewed group heading. The conf
 
 The compiled comment host independently reviews only selected original quotations and their headings in a fresh serial context, within the existing stage clock (reserve up to 45 seconds, no parallel agent). It cannot relabel, rewrite or add comments. A rejected or uncompleted selection remains in the audit and sentiment corpus but not the formal quotations; available-content delivery continues with the gap marked. Empty selection skips this call.
 
+Bounded collection reviews up to the configured 30 already captured rows per topic and 300 overall, rather than a per-topic cap below the unchanged 20-effective-comment percentage gate. No additional collection round is implied. All omitted rows remain auditable as deferred by sampling, not unrelated. A cap is not a quota: never invent comments, force labels or lower the readiness denominator. Describe sentiment as applying to the reviewed collected-comment sample, not the entire population.
+
 Then group representative raw comments:
 
 Search all workbook topics before selection. Use the configured per-topic query limit: four for `bounded_40m`, six for `bounded_60m`; both retain at most 30 candidates, then select 2-3 traceable comments for each ready topic. `exhaustive` may continue to saturation. Preserve a topic-by-platform matrix with exclusions and blockers. Formal prose includes only topics with traceable substantive comments.

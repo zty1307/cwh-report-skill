@@ -172,6 +172,12 @@ def test_comment_lead_preserves_a_complete_long_clause_without_cutting_a_word():
     assert groups == original
 
 
+def test_sentiment_lead_never_presents_a_collected_sample_as_the_entire_public():
+    data = {'comments': {'sentiment': {'positive': 25, 'neutral': 3, 'negative': 1}}}
+    assert formal.netizen_sentiment_lead(data).startswith('从已审核的网民评论样本看')
+    assert data['comments']['sentiment']['positive'] == 25
+
+
 def test_partial_verified_role_attribution_preserves_the_literal_frozen_claim():
     row = {'speaker_name': '张某', 'speaker_role': '行业研究员、某机构负责人',
            'attribution': '行业研究员、某机构负责人张某', 'attribution_status': 'named_person',

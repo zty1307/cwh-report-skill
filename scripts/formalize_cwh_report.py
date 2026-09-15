@@ -444,10 +444,10 @@ def netizen_sentiment_lead(data: dict[str, Any]) -> str:
             observed = "积极正面评论相对较多"
         return f"本批共取得并复核{total}条有效网民评论，样本尚不足以形成正式情感比例；从本批样本看，{observed}。"
     if negative > positive + neutral:
-        return "网民有关本次国务院常务会议讨论的负面情绪相对突出，同时存在积极正面和客观中立观点。"
+        return "从已审核的网民评论样本看，负面情绪相对突出，同时存在积极正面和客观中立观点。"
     if neutral >= positive and neutral >= negative:
-        return "网民有关本次国务院常务会议讨论的情感属性以客观中立为主，积极正面和负面观点并存。"
-    return "网民有关本次国务院常务会议讨论的情感属性以积极正面和客观中立为主。"
+        return "从已审核的网民评论样本看，情感属性以客观中立为主，积极正面和负面观点并存。"
+    return "从已审核的网民评论样本看，情感属性以积极正面和客观中立为主。"
 
 
 def formal_topic_rows(data: dict[str, Any], include_sentiment: bool | None = None) -> list[list[Any]]:
