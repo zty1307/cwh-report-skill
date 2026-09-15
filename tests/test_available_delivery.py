@@ -43,6 +43,7 @@ def test_final_audit_reports_honest_gap_as_warning_not_fabricated_stance_error()
     issues = audit["quality_summary"]["domestic_viewpoint_quality_issues"]
     assert any(i["code"] == "domestic_interpretation_gap" for i in issues)
     assert all(i["severity"] == "warning" for i in issues)
+    assert any('本轮在监测期内未取得' in problem for problem in audit['acceptance']['blockers'])
     assert audit["acceptance"]["ready_for_formal_delivery"] is False
 
 
@@ -103,8 +104,8 @@ def test_available_delivery_does_not_excuse_unsupported_rhetorical_padding():
                for i in domestic_viewpoint_quality_issues(data))
 
 
-@pytest.mark.parametrize('available', [False, True])
-def test_output_dispatch_continues_with_gaps_without_self_certification(monkeypatch, tmp_path, available):
+@pytest.mark.parametrize('available,ready_on_entry', [(False, False), (True, False), (True, True)])
+def test_output_dispatch_continues_with_gaps_without_self_certification(monkeypatch, tmp_path, available, ready_on_entry):
     import cwh_orchestrator as orchestrator
     import formalize_cwh_report
     import generate_dashboard
@@ -113,11 +114,15 @@ def test_output_dispatch_continues_with_gaps_without_self_certification(monkeypa
     monkeypatch.setattr(orchestrator, 'render_report', lambda *a: 'unit dispatch check')
     monkeypatch.setattr(orchestrator, 'write_bar_svg', lambda *a: None)
     monkeypatch.setattr(orchestrator, 'write_cwh_data_workbook', lambda *a: calls.append('excel'))
-    monkeypatch.setattr(formalize_cwh_report, 'formalize_report', lambda *a: calls.append('word'))
+    def formalize(data, out_dir):
+        calls.append('word')
+        data['audit']['acceptance'].update(ready_for_formal_delivery=False, blockers=['real gap'])
+    monkeypatch.setattr(formalize_cwh_report, 'formalize_report', formalize)
     monkeypatch.setattr(generate_dashboard, 'generate_dashboard', lambda *a: calls.append('html'))
     data = {'artifacts': {}, 'analysis_bundle': {'metadata': {'delivery_policy':
             'deliver_available_with_gaps' if available else 'strict'}},
-            'audit': {'acceptance': {'ready_for_formal_delivery': False, 'blockers': ['real gap']}},
+            'audit': {'acceptance': {'ready_for_formal_delivery': ready_on_entry,
+                                    'blockers': [] if ready_on_entry else ['real gap']}},
             'statistics': {'by_platform': {}, 'by_topic': {}, 'by_date': {}},
             'hotwords': [], 'appendices': {}}
     orchestrator.write_outputs(data, tmp_path)

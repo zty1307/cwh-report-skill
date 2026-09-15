@@ -3393,6 +3393,7 @@ def build_system_audit(
     viewpoint_quality_errors = [
         item for item in viewpoint_quality_issues
         if item.get("severity") == "error" or item.get("strict_severity") == "error"
+        or item.get("code") == "domestic_interpretation_gap"
     ]
     blockers.extend(str(item.get("message") or "") for item in viewpoint_quality_errors)
     if comments and not system_sentiment_final:
@@ -3539,6 +3540,11 @@ def write_outputs(data: dict[str, Any], out_dir: Path) -> None:
         formalize_report(data, out_dir)
     except Exception as exc:
         data.setdefault("audit", {}).setdefault("data_gaps", []).append(f"正式稿/Word渲染失败：{type(exc).__name__}: {exc}")
+    if deliver_available and not formal_delivery_ready(data):
+        # Formatting can add a late quality warning. Label the dashboard from
+        # the final audit, not only the audit observed before generation.
+        data["delivery_class"] = "available_with_gaps"
+        data["artifacts"]["formal_report_status"] = "generated_with_evidence_gaps"
     try:
         from generate_dashboard import generate_dashboard
 
