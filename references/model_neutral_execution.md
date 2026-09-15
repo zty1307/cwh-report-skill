@@ -68,6 +68,8 @@ Word and Markdown use the same executable opening, chapter, attribution, numberi
 
 For token economy, keep accepted artifacts on disk; read only current-stage inputs and required references, reuse source snapshots, and return structured changes instead of redrafting full prose. `scripts/cwh_timing_report.py --job-dir <job>` reports measured command duration separately from wait and other uninstrumented time. It is not an API token meter; old logs without instrumentation remain unknown.
 
+The raw hotword transport pools overlapping or adjacent original source windows only when all source metadata matches and overlap text agrees exactly. Every term retains references to its original character intervals, and the host retains the unpooled packet for all source gates. No omitted gap is filled, no candidate or distinct-source count is dropped, and no semantic decision is supplied by the pool. `cwh_evidence_window_transport.reconstruct_term_windows` verifies exact round-trip preservation. This reduces repeated input text; it does not itself prove model quality or a faster end-to-end delivery.
+
 `cwh_viewpoint_gate.py` applies the same density rule before and after rendering. It counts distinct speaker identities and Chinese characters, not URL count or attribution verbs. Accepted `thin_cluster_exception` records appear in `cwh_audit.json` under `quality_summary.viewpoint_density_exceptions`. An exception never authorizes missing source evidence or unsupported claims.
 
 ### One-topic requests and effective worker budgets

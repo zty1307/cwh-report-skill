@@ -15,6 +15,7 @@ import subprocess
 import time
 import uuid
 from cwh_pipeline_runtime import atomic_write_json, sha256_file
+from cwh_evidence_window_transport import pool_hotword_windows
 from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from cwh_hotword_pipeline import PROCEDURAL_HOTWORD_MARKERS, looks_like_pure_geography, valid_candidate
@@ -432,7 +433,8 @@ def main():
             atomic_write_json(target, result)
             atomic_write_json(cache, {'source_sha256': digest, 'output_sha256': sha256_file(target)})
             continue
-        prompt = prompt_rules + json.dumps({"kind": kind, "reviewer_run_id": session, "output_shape": shape, "packet": transport_packet}, ensure_ascii=False, separators=(",", ":"))
+        prompt_packet = pool_hotword_windows(transport_packet) if kind == 'hotword' else transport_packet
+        prompt = prompt_rules + json.dumps({"kind": kind, "reviewer_run_id": session, "output_shape": shape, "packet": prompt_packet}, ensure_ascii=False, separators=(",", ":"))
         if repair_required:
             prompt += "\n仅修复本节点校验错误，保留仍然有效的已审记录：" + last_error
             if target.exists():
