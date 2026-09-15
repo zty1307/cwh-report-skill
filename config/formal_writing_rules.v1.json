@@ -98,12 +98,13 @@
     "generic_terms_forbidden": ["召开", "投资", "项目", "工程", "市场"]
   },
   "overseas": {
-    "factual_lead_template": "数据周期内，境外媒体以事实性报道为主。如{examples}等",
+    "factual_lead_template": "本轮已审核材料中，境外媒体以事实性报道为主。如{examples}等",
     "mixed_factual_lead_template": "数据周期内，境外媒体报道中包括事实性报道，如{examples}等",
     "interpretive_transition": "，少量解读如下：",
     "mixed_interpretive_transition": "，相关解读如下：",
     "interpretive_lead": "境外媒体围绕会议议题的政策影响展开解读。其中，",
-    "no_interpretation_suffix": "，暂无评论性文章。",
+    "no_interpretation_suffix": "，本轮未取得可引用的评论性文章。",
+    "no_comment_evidence_sentence": "本轮检索范围内未取得可核验的境外网民评论，暂不判断其关注程度或态度。",
     "max_interpretive_examples": 3,
     "max_factual_examples": 3,
     "interpretive_summary_rule": "只写相对于会议事实新增的影响、机制、风险或评价，不复述会议议程，不使用报道并引述解读等元叙述",

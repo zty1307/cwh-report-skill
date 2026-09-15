@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
+from cwh_available_delivery import available_delivery, valid_gap
 from cwh_writing_rules import attribution_verb, formal_attribution, source_rank, writing_rules, writing_rules_sha256
 
 
@@ -72,11 +73,27 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
     for topic in ((data.get("viewpoints") or {}).get("by_topic") or []):
         if not isinstance(topic, dict):
             continue
+        if available_delivery(data) and valid_gap(topic):
+            topic['heading'] = topic['topic']
+            continue
         topic["heading"] = judgment_heading(topic.get("heading"))
         for cluster in topic.get("clusters") or []:
             if not isinstance(cluster, dict):
                 continue
             cluster["summary"] = judgment_heading(cluster.get("summary"))
+            for row in cluster.get('evidence') or []:
+                if row.get('attribution_status') != 'self_media' or 'author_formal_claim' in row:
+                    continue
+                name = clean_sentence(row.get('speaker_name'))
+                original = str(row.get('formal_claim') or '')
+                verbs = ['解读称', *writing_rules()['viewpoint']['attribution_verbs']]
+                match = re.match(re.escape(name) + '(' + '|'.join(map(re.escape, verbs)) + r')[，,:：\s]*', original) if name else None
+                if match and original[match.end():].strip():
+                    # Strip only an exact redundant account attribution before
+                    # freezing/review; original text and author wording remain.
+                    row['author_formal_claim'] = original
+                    row['formal_claim'] = original[match.end():].strip()
+                    row['attribution_verb'] = '称' if match[1] == '解读称' else match[1]
             # Python's stable sort preserves source order within the same
             # priority class. Only explicit source metadata changes priority.
             cluster["evidence"] = sorted(cluster.get("evidence") or [], key=lambda row: source_rank(row) if isinstance(row, dict) else 999)

@@ -1562,7 +1562,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     if foreign_comment_paragraphs:
         lines.extend(["", *foreign_comment_paragraphs])
     else:
-        lines.append("境外网民对本次国务院常务会议关注度较低，暂无评论性观点。")
+        lines.append(writing_rules()["overseas"]["no_comment_evidence_sentence"])
 
     lines.extend(["", "## " + document_rules["fixed_chapters"][3], "", "### （一）外媒报道列表（部分）", ""])
     lines.append(
@@ -2145,7 +2145,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
         if foreign_comment_paragraphs:
             add_paragraphs(document, foreign_comment_paragraphs)
         else:
-            document.add_paragraph("境外网民对本次国务院常务会议关注度较低，暂无评论性观点。")
+            document.add_paragraph(writing_rules()["overseas"]["no_comment_evidence_sentence"])
 
     # Let Word use the remaining space after a short overseas section. A forced
     # break here creates an almost-empty page whenever foreign comments are absent.

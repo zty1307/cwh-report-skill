@@ -9,6 +9,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
+from cwh_writing_rules import writing_rules
 
 
 def set_east_asian_font(style, font_name: str, size_pt: int, bold: bool = False) -> None:
@@ -247,11 +248,12 @@ def build_template(path: Path) -> None:
 
     add_role_paragraph(doc, "三、境外舆论情况", "h1")
     add_role_paragraph(doc, "（一）境外媒体情况", "h2")
-    doc.add_paragraph("【仅有事实性报道时】数据周期内，境外媒体以事实性报道为主。如【来源】文章《【标题】》、【来源】文章《【标题】》、【来源】文章《【标题】》等，暂无评论性文章。")
+    overseas_rules = writing_rules()['overseas']
+    doc.add_paragraph("【仅有事实性报道时】" + overseas_rules['factual_lead_template'].format(examples='【来源】文章《【标题】》') + overseas_rules['no_interpretation_suffix'])
     doc.add_paragraph("【存在评论性解读时】数据周期内，境外媒体以事实性报道为主。如【来源】文章《【标题】》、【来源】文章《【标题】》、【来源】文章《【标题】》等，少量解读如下：")
     doc.add_paragraph("【解读主题判断】。【境外媒体】引述【专家/机构】观点称，【核心解读或风险叙事】。")
     add_role_paragraph(doc, "（二）境外网民评论", "h2")
-    doc.add_paragraph("境外网民对本次国务院常务会议关注度较低，暂无评论性观点。")
+    doc.add_paragraph(overseas_rules['no_comment_evidence_sentence'])
 
     add_role_paragraph(doc, "附录", "h1")
     add_role_paragraph(doc, "（一）外媒报道列表（部分）", "h2")

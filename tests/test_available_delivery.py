@@ -143,3 +143,32 @@ def test_generic_worker_uses_missing_evidence_policy_not_vendor_special_case(tmp
     assert ('不要仅因这些缺口返回blocker' in prompt) is bounded
     assert '禁止编造访问、原文、评论或审核通过' in prompt
     assert '不得修改其他文件' in prompt
+
+
+def test_gap_title_survives_normalization_without_inventing_a_judgment():
+    from normalize_cwh_analysis import normalize_analysis
+    data = normalize_analysis(prepare_available_delivery(material()))
+    assert data['viewpoints']['by_topic'][0]['heading'] == '动态议题'
+
+
+def test_self_media_redundant_prefix_is_normalized_before_independent_review():
+    from normalize_cwh_analysis import normalize_analysis
+    row = {'speaker_name': '账号甲', 'attribution': '账号甲', 'attribution_status': 'self_media',
+           'url': 'https://mp.weixin.qq.com/s/example', 'formal_claim': '账号甲解读称，政策应完善实施条件。',
+           'source_excerpt': '保留原始证据不修改'}
+    data = {'viewpoints': {'by_topic': [{'topic': '动态议题', 'clusters': [{'evidence': [row]}]}]}}
+    normalize_analysis(data)
+    assert row['formal_claim'] == '政策应完善实施条件。'
+    assert row['source_excerpt'] == '保留原始证据不修改'
+    assert row['author_formal_claim'] == '账号甲解读称，政策应完善实施条件。'
+    details = data['viewpoints']['by_topic'][0]['clusters'][0]['details']
+    assert details == '微信公众号“账号甲”称，政策应完善实施条件。'
+    assert normalize_analysis(copy.deepcopy(data)) == data
+
+
+def test_builtin_word_template_never_infers_low_attention_from_missing_comments():
+    from docx import Document
+    path = Path(__file__).resolve().parents[1] / 'templates/formal_report_template_complete_20260714.docx'
+    text = '\n'.join(p.text for p in Document(path).paragraphs)
+    assert '暂不判断其关注程度或态度' in text
+    assert '关注度较低' not in text and '暂无评论性文章' not in text
