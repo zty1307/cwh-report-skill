@@ -70,6 +70,13 @@ def test_empty_selection_does_not_spend_another_model_call(tmp_path):
     assert result == original and audit['status'] == 'not_needed'
 
 
+def test_independent_reviewer_cannot_keep_a_quote_without_an_existing_individual_heading():
+    original = decisions()
+    original['rows'][1].pop('heading')
+    with pytest.raises(ValueError, match='existing individual heading'):
+        apply_quote_review(original, answer())
+
+
 def test_selected_quote_review_preserves_real_parent_title_and_context_kind(tmp_path):
     original = decisions()
     original['rows'][1]['formal'] = False

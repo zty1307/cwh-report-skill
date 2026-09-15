@@ -51,6 +51,42 @@ def test_invalid_results_cannot_create_handoff(changes):
         compile_results({'rows': [{'sample_id': 'real'}]}, ['topic'], {'rows': [row]}, {'session_id': 'real-run'})
 
 
+def test_label_validation_does_not_certify_misnumbered_shared_formal_heading():
+    from cwh_comment_semantics import apply_quote_review
+    capture = {'rows': [{'sample_id': 'a'}, {'sample_id': 'b'}]}
+    result = {'topic_headings': {'1': '作者把分组序号当议题编号'}, 'rows': [
+        {'id': 1, 'topic': 6, 'label': 'positive', 'formal': True,
+         'reason': '具体诉求', 'heading': '建议增加服务设施'},
+        {'id': 2, 'topic': 6, 'label': 'neutral', 'formal': True,
+         'reason': '具体疑问', 'heading': '询问设施开放时间'}]}
+    original = copy.deepcopy(result)
+    topics = ['议题甲', '议题乙', '议题丙', '议题丁', '议题戊', '公共服务']
+    labels = compile_results(capture, topics, result, {'session_id': 'author'}, classification_only=True)
+    assert [row['label'] for row in labels] == ['positive', 'neutral']
+    assert all(row['in_sentiment_denominator'] and not row['ai_formal_include'] for row in labels)
+    with pytest.raises(ValueError, match='shared topic heading'):
+        compile_results(capture, topics, result, {'session_id': 'author'})
+    # A fixture verifies host mechanics only, not native semantic acceptance.
+    reviewed = apply_quote_review(result, {'reviews': [
+        {'id': 1, 'verdict': 'keep', 'reason': '具体诉求'},
+        {'id': 2, 'verdict': 'reject', 'reason': '标题不忠实'}],
+        'topic_headings': {'6': '建议增加服务设施'}})
+    final = compile_results(capture, topics, reviewed, {'session_id': 'author'})
+    assert sum(row['ai_formal_include'] for row in final) == 1
+    assert [row['label'] for row in final] == [row['label'] for row in labels]
+    assert result == original
+
+
+@pytest.mark.parametrize('changes', [{'topic': 0}, {'formal': 'true'}, {'label': 'unreviewed'},
+                                     {'reason': ''}, {'label': 'exclude', 'formal': True}])
+def test_classification_precheck_keeps_original_type_and_disposition_gates(changes):
+    row = {'id': 1, 'topic': 1, 'label': 'neutral', 'formal': False, 'reason': '具体疑问'}
+    row.update(changes)
+    with pytest.raises(ValueError):
+        compile_results({'rows': [{'sample_id': 'a'}]}, ['topic'], {'rows': [row]},
+                        {'session_id': 'author'}, classification_only=True)
+
+
 def test_parent_title_is_not_misrepresented_as_full_body():
     capture = {'rows': [{'parent_post_id': 'p1', 'text': '具体意见'}], 'posts': [
         {'id': 'p1', 'text': '原帖标题', 'source': '媒体', 'published_at': '', 'context_kind': 'api_parent_title_only'}]}

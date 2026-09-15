@@ -197,6 +197,8 @@ def apply_quote_review(result, review):
             row['formal'] = False
             row.pop('heading', None)
         else:
+            if row.get('label') not in VALID_LABELS or not str(row.get('heading') or '').strip():
+                raise ValueError('Kept formal quotes require an existing individual heading and valid label')
             kept_topics.add(str(row['topic']))
     headings = review.get('topic_headings')
     if not isinstance(headings, dict) or set(headings) != kept_topics or any(
@@ -211,7 +213,7 @@ def review_formal_selection(packet, result, command, workspace, timeout):
     if not choices:
         return result, {'status': 'not_needed', 'selected_count': 0}
     review_input = {**packet, 'rows': [{**row, 'topic': choices[row['id']]['topic'],
-        'heading': choices[row['id']]['heading']} for row in packet['rows'] if row['id'] in choices]}
+        'heading': choices[row['id']].get('heading', '')} for row in packet['rows'] if row['id'] in choices]}
     parent_ids = {row.get('post_id') for row in review_input['rows']}
     review_input['posts'] = [post for post in packet.get('posts', []) if post.get('id') in parent_ids]
     try:
@@ -425,7 +427,8 @@ def complete_single_comment_heading(result):
     return completed
 
 
-def compile_results(capture, topics, result, run):
+def compile_results(capture, topics, result, run, *, classification_only=False):
+    """Validate labels first; only strict final compilation certifies quotes."""
     decisions = result.get('rows') or []
     if len(decisions) != len(capture['rows']) or {r.get('id') for r in decisions} != set(range(1, len(capture['rows']) + 1)):
         raise ValueError('Comment reviewer must assess every supplied ID exactly once')
@@ -439,7 +442,9 @@ def compile_results(capture, topics, result, run):
         included = label != 'exclude'
         if not 0 <= topic_index <= len(topics) or (included and topic_index == 0):
             raise ValueError('Comment topic is not an input topic')
-        formal = decision['formal']
+        if decision['formal'] and not included:
+            raise ValueError('Formal comments must be valid included opinions')
+        formal = decision['formal'] and not classification_only
         heading = str(decision.get('heading') or '').strip()
         topic_heading = str((result.get('topic_headings') or {}).get(str(topic_index)) or '').strip()
         if formal and (not included or not heading or not topic_heading):
@@ -522,7 +527,10 @@ def main():
         result, run = semantic_json(review_packet(capture, topics), PROMPT, command, args.output_dir, 'comment-review', author_timeout)
     result = complete_single_comment_heading(result)
     # All compact/split/legacy routes converge here before formal handoff.
-    compile_results(capture, topics, result, run)
+    # The independent reviewer supplies its own exact retained-topic headings.
+    # An author's missing/misnumbered shared heading must not discard valid
+    # classifications before that reviewer has had a chance to assess quotes.
+    compile_results(capture, topics, result, run, classification_only=True)
     result, selection_review = review_formal_selection(review_packet(capture, topics), result,
         command, args.output_dir, min(45, max(0, review_deadline - time.monotonic())))
     rows = compile_results(capture, topics, result, run)
