@@ -127,3 +127,19 @@ def test_hotword_shortfall_preserves_semantic_contract_and_topic_mapping():
     assert result["topic_aliases"] == [["别名"]]
     for key in ("instructions", "allowed_semantic_types", "accepted_style_patterns", "rejected_style_patterns"):
         assert result[key] == packet[key]
+
+
+def test_overseas_span_transport_preserves_original_and_rejects_cross_record_ids():
+    import pytest
+    from run_cwh_inline_review import overseas_span_packet, resolve_overseas_spans
+    packet = {"items": [{"record_id": "a", "content": "政策��點。繁體原文，不能改。"},
+                        {"record_id": "b", "content": "另一條原文。"}]}
+    sent = overseas_span_packet(packet)
+    assert "content" not in sent["items"][0]
+    assert "".join(x["text"] for x in sent["items"][0]["interpretive_segments"]) == packet["items"][0]["content"]
+    review = {"items": [{"record_id": "a", "interpretive_verified": True, "interpretive_range": ["o1/1", "o1/2"]}]}
+    result = resolve_overseas_spans(packet, review)
+    assert result["items"][0]["interpretive_excerpt"] == packet["items"][0]["content"]
+    assert "interpretive_excerpt" not in review["items"][0]
+    with pytest.raises(ValueError, match="belong"):
+        resolve_overseas_spans(packet, {"items": [{"record_id": "a", "interpretive_range": ["o2/1", "o2/1"]}]})
