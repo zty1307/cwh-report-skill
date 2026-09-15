@@ -20,12 +20,14 @@ def test_task_handoff_uses_configured_rules_instead_of_a_second_rule_copy(tmp_pa
     rules['viewpoint'].update(selection_rule='configured-selection', heading_support_rule='configured-heading',
         claim_composition_rule='configured-claim', cluster_structure_rule='configured-structure')
     rules['comments']['heading_summary_rule'] = 'configured-comment'
+    rules['comments']['selection_quality_rule'] = 'configured-quote-selection'
     with patch('cwh_model_contract.writing_rules', return_value=rules):
         task = build_task_payload(stage_id='domestic_viewpoints', task_type='analysis_bundle',
             expected_output=tmp_path / 'author.json', inputs={}, rules=[], profile_name='bounded_60m')
     assert task['writing_handoff']['selection_rule'] == 'configured-selection'
     assert task['writing_handoff']['heading_support_rule'] == 'configured-heading'
     assert task['writing_handoff']['comment_heading_summary_rule'] == 'configured-comment'
+    assert task['writing_handoff']['comment_selection_quality_rule'] == 'configured-quote-selection'
     assert task['writing_handoff']['claim_composition_rule'] == 'configured-claim'
     assert task['writing_handoff']['cluster_structure_rule'] == 'configured-structure'
     assert task['declared_outputs'] == [str(tmp_path / 'author.json')]

@@ -164,6 +164,30 @@ def test_comment_cleanup_repairs_mixed_quotes_and_numeric_ranges():
     assert formal.clean_formal_comment('破旧不堪的"城中村”改造要覆盖50~70岁群体') == '破旧不堪的‘城中村’改造要覆盖50至70岁群体'
 
 
+def test_comment_lead_preserves_a_complete_long_clause_without_cutting_a_word():
+    heading = '认为公共服务改革应兼顾偏远地区特殊群体的长期基本保障需求'
+    groups = [(heading, [])]
+    original = copy.deepcopy(groups)
+    assert heading.removeprefix('认为') in formal.comment_lead({}, groups)
+    assert groups == original
+
+
+def test_partial_verified_role_attribution_preserves_the_literal_frozen_claim():
+    row = {'speaker_name': '张某', 'speaker_role': '行业研究员、某机构负责人',
+           'attribution': '行业研究员、某机构负责人张某', 'attribution_status': 'named_person',
+           'attribution_verb': '表示',
+           'formal_claim': '行业研究员张某认为，应依据实际需求确定投入节奏。',
+           'semantic_review': {'verdict': 'fully_supported'}}
+    original = copy.deepcopy(row)
+    assert evidence_sentence(row) == row['formal_claim'].rstrip('。')
+    assert row == original
+    # Unverified roles and a different speaker must not trigger this shortcut.
+    row['formal_claim'] = '投资顾问张某认为，应依据实际需求确定投入节奏。'
+    assert evidence_sentence(row).startswith(row['attribution'] + '表示，')
+    row['formal_claim'] = '行业研究员李某认为，应依据实际需求确定投入节奏。'
+    assert evidence_sentence(row).startswith(row['attribution'] + '表示，')
+
+
 def test_hotword_focus_with_stance_does_not_render_focus_thinks():
     data = {
         "hotwords": [{"topic": "研究公共服务工作", "word": "公共服务"}],

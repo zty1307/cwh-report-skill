@@ -141,6 +141,7 @@ def build_task_payload(
             "cluster_structure_rule": writing_rules()["viewpoint"]["cluster_structure_rule"],
             "heading_support_rule": writing_rules()["viewpoint"]["heading_support_rule"],
             "comment_heading_summary_rule": writing_rules()["comments"]["heading_summary_rule"],
+            "comment_selection_quality_rule": writing_rules()["comments"]["selection_quality_rule"],
             "prohibited_padding": writing_rules()["viewpoint"]["prohibited_padding"],
         },
         "mechanical_completion": {

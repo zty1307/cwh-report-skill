@@ -163,7 +163,9 @@ Lead sentence:
 网民观点主要围绕{stance_summaries}等方面展开。主要评论如下：
 ```
 
-The lead summarizes only the first, central clause of each reviewed group heading, normally no more than 22 Chinese characters. Keep the full reviewed heading in the numbered body item. This avoids copying two or more long headings verbatim into one overloaded lead sentence.
+The lead uses the first complete clause of each reviewed group heading. The configured 22-character length is an authoring recommendation, never a renderer cutoff: do not sever a word to meet it. Keep the full reviewed heading in the numbered body item. Selection uses the shared `comments.selection_quality_rule`: a long abstract endorsement is not automatically a substantive quotation. Rejecting it for formal selection must not change the frozen sentiment label or denominator; never invent a specific heading to conceal an empty original judgment.
+
+The compiled comment host independently reviews only selected original quotations and their headings in a fresh serial context, within the existing stage clock (reserve up to 45 seconds, no parallel agent). It cannot relabel, rewrite or add comments. A rejected or uncompleted selection remains in the audit and sentiment corpus but not the formal quotations; available-content delivery continues with the gap marked. Empty selection skips this call.
 
 Then group representative raw comments:
 

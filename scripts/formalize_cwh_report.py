@@ -603,25 +603,15 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
 
 def comment_lead(data: dict[str, Any], groups: list[tuple[str, list[dict[str, Any]]]]) -> str:
     rules = writing_rules()["comments"]
-    max_cjk = int(rules.get("lead_summary_max_cjk") or 22)
 
     def lead_summary(name: str) -> str:
         value = clean_sentence(name)
         clauses = [part.strip() for part in re.split(r"[，；]", value) if part.strip()]
         value = clauses[0] if clauses else value
         value = re.sub(r"^认为", "", value)
-        cjk = re.findall(r"[\u3400-\u9fff]", value)
-        if len(cjk) <= max_cjk:
-            return value
-        count = 0
-        output = []
-        for char in value:
-            output.append(char)
-            if "\u3400" <= char <= "\u9fff":
-                count += 1
-            if count >= max_cjk:
-                break
-        return "".join(output).rstrip("，；、")
+        # Length is an authoring target, not permission to cut a Chinese word
+        # or qualification from a reviewed clause. Preserve the whole clause.
+        return value
 
     summaries = "、".join(lead_summary(name) for name, _ in groups)
     if formal_sentiment_available(data):

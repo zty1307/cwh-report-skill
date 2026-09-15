@@ -45,6 +45,17 @@ def evidence_sentence(row: dict[str, Any]) -> str:
     # and its attribution verb, rather than introducing a second attribution.
     if name and subject.endswith(name) and claim.startswith(name) and STANCE_RE.match(claim[len(name):]):
         return subject + claim[len(name):]
+    # A reviewed claim can already introduce the same speaker using one of
+    # their explicitly supplied roles. Keep that literal claim: expanding it
+    # to another role spelling would break the frozen claim-to-prose mapping.
+    # Do not infer a role from arbitrary prose or suppress another speaker.
+    if row.get("attribution_status") == "named_person" and name and subject.endswith(name):
+        role = clean_sentence(row.get("speaker_role"))
+        roles = [role, *re.split(r"[、，,；;]", role)] if role else []
+        for supplied_role in roles:
+            prefix = supplied_role + name
+            if supplied_role and claim.startswith(prefix) and STANCE_RE.match(claim[len(prefix):]):
+                return claim
     if STANCE_RE.match(claim):
         return f"{subject}{claim}"
     verb = attribution_verb(row)
