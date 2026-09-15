@@ -48,6 +48,19 @@ def semantic_packet(packet):
     return {**packet, "items": rows}
 
 
+def author_transport_with_fixed_unread_web(packet):
+    """Do not ask a model to classify an article whose body was not obtained."""
+    readable, fixed = [], {}
+    for item in packet['items']:
+        if item.get('origin') == 'web' and not (item.get('content') or '').strip():
+            fixed[item['id']] = {'id': item['id'], 'decision': 'excluded', 'claims': [],
+                'reason': 'fixed_body_evidence_unavailable:未取得网页正文，仅保留发现信息；未做全文语义审核，待补取',
+                'classification_origin': 'deterministic_body_availability_gate'}
+        else:
+            readable.append(item)
+    return semantic_packet({**packet, 'items': readable}), fixed
+
+
 def batch_author_contract(packets):
     manifest = [{"topic": p["topic"], "required_item_ids": [row["id"] for row in p["items"]]}
                 for p in packets]
@@ -229,9 +242,9 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
     for number, packet in enumerate(packets, 1):
         if deadline - time.monotonic() < 15:
             raise TimeoutError("No remaining single-topic semantic budget")
-        ids = [row['id'] for row in packet['items']]
-        contract = single_topic_author_contract(packet)
-        model_packet = semantic_packet(packet)
+        model_packet, fixed_unread = author_transport_with_fixed_unread_web(packet)
+        ids = [row['id'] for row in model_packet['items']]
+        contract = single_topic_author_contract(model_packet)
         digest = hashlib.sha256(json.dumps(model_packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         retained = prior_feedback.get(packet['topic']) or {}
         if retained.get('source_packet_sha256') != digest:
@@ -245,7 +258,13 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         if retained.get('feedback'):
             local_prompt += '\n仅修复本议题的真实反馈，不改变原文身份；JSON值中术语用中文引号或正确转义：' + json.dumps(retained['feedback'], ensure_ascii=False)
         try:
-            result, run = semantic_json(model_packet, local_prompt, command, workspace,
+            if fixed_unread and not model_packet['items']:
+                result = {'items': [], 'heading': '', 'clusters': [],
+                          'shortfall_reason': '仅有网页发现信息，未取得正文，不能判断是否含独立观点'}
+                run = {'session_id': str(uuid.uuid4()), 'seconds': 0, 'model_invoked': False,
+                       'transport': 'fixed_unread_web_only'}
+            else:
+                result, run = semantic_json(model_packet, local_prompt, command, workspace,
                                        f"author-topic-{number}", single_topic_request_budget(
                                            deadline - time.monotonic(), len(packets) - number,
                                            maximum_request_seconds, future_topic_reserve_seconds), reuse_cache=reuse_cache)
@@ -256,6 +275,11 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         returned = [row.get('id') for row in result.get('items') or []]
         if len(returned) != len(set(returned)) or set(returned) != set(ids):
             raise ValueError(f"[{packet['topic']}] Single-topic response must review every item exactly once")
+        if fixed_unread:
+            by_id = {row['id']: row for row in result['items']}
+            result = {**result, 'items': [by_id.get(row['id'], fixed_unread.get(row['id']))
+                                         for row in packet['items']]}
+            run = {**run, 'fixed_unread_web_ids': list(fixed_unread)}
         try:
             result, completion_run = repair_missing_reasons(packet, result, command, workspace,
                                                             deadline - time.monotonic() - 15)

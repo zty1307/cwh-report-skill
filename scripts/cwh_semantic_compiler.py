@@ -211,10 +211,14 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         if choice["decision"] != "eligible" and claims:
             raise ValueError("Unselected item cannot contain selected claims")
         raw = item["origin"] == "raw_monitoring"
-        metadata_only = not raw and not item.get('content')
+        metadata_only = not raw and not (item.get('content') or '').strip()
         model_disposition = None
+        machine_disposition = None
         if metadata_only:
-            model_disposition = copy.deepcopy(choice)
+            if choice.get('classification_origin') == 'deterministic_body_availability_gate':
+                machine_disposition = copy.deepcopy(choice)
+            else:
+                model_disposition = copy.deepcopy(choice)
             choice = {**choice, 'decision': 'excluded',
                       'reason': ('公开网页读取失败，未取得完整正文，不能判断是否含独立解读'
                                  if item.get('full_text_status') == 'access_failed' else
@@ -230,7 +234,9 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
             for ci, claim in enumerate(claims or [None]):
                 candidate_id = f'{topic_id}-{item["id"]}-{query["query_id"]}-v{ci+1}'
                 row = {"candidate_id": candidate_id, "decision": choice["decision"] if qi == 0 else "duplicate",
-                       "decision_reason": choice["reason"] if qi == 0 else "同一原始URL已由前序查询保留并审核",
+                       "decision_reason": choice["reason"] if qi == 0 else (
+                           "同一原始URL的发现记录已由前序查询保留，未取得正文" if metadata_only else
+                           "同一原始URL已由前序查询保留并审核"),
                        "discovery_query_id": query["query_id"], "first_seen_round": query["round"],
                        "discovered_source_id": query.get("source_id", "monitoring"), "relevant": choice.get("relevant") is True,
                        "discovery_origin": "raw_monitoring" if raw else {"stable_registry": "fixed_registry_web", "open_web": "open_web", "public_platform": "public_platform_web"}[query["route"]],
@@ -243,9 +249,11 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                     row['full_text_status'] = item.get('full_text_status', 'not_fetched_bounded_budget')
                 if model_disposition is not None:
                     row['model_disposition'] = model_disposition
+                if machine_disposition is not None:
+                    row['machine_disposition'] = machine_disposition
                 if raw:
                     row["raw_evidence_record_id"] = item["record_id"]
-                if item.get("content"):
+                if item.get("content") and not metadata_only:
                     capture = item.get("capture") or {}
                     row["source_snapshot"] = {"url": item["url"], "title": item["title"], "source_text": item["content"],
                                               "captured_at": capture.get("captured_at") or utc_now(),
