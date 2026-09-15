@@ -275,6 +275,11 @@ def main():
             prompt += "\n仅修复本节点校验错误，保留仍然有效的已审记录：" + last_error
             if target.exists():
                 prompt += "\n已有结果：" + target.read_text(encoding="utf-8")
+        if kind != "hotword":
+            required_ids = [row["record_id"] for row in packet.get("items", [])]
+            prompt += ("\n最终覆盖清单：返回items的record_id必须与以下清单完全一致，"
+                       "每项恰好一次；include=false的排除项也必须返回，不能只列入选记录。"
+                       + json.dumps(required_ids, ensure_ascii=False, separators=(",", ":")))
         log_path = workspace / f"{kind}.{session}.jsonl"
         started = time.monotonic()
         remaining = deadline - started
