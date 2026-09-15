@@ -132,6 +132,10 @@ Every claim should include evidence sources such as experts, media, institutions
 Avoid unsupported generic wording such as `媒体普遍认为` unless evidence is cited.
 Formal Markdown and Word must not append `样本来源：……`、`公开网络补证`、`原始报道汇总` or any link-list paragraph after a viewpoint. Put the verified original link on the corresponding dashboard evidence card and keep source metadata in structured audit data. Formal body prose consists only of concrete attributed claims.
 Write every independent voice as `完整机构/职务/姓名+认为/指出/建议+具体观点`; when no named person is available, write `媒体/平台/自媒体账号全名+认为/指出/建议+具体观点`. Prohibit vague aggregation such as `报道汇集刘某、伍某、严某等对……的分析` or `多家媒体关注……`; split genuinely distinct speakers into separate attributed sentences. If several URLs reproduce the same speaker and same claim, render that claim once and keep the other URLs as duplicate audit records.
+
+For self-media, the formal display name includes the platform type. Derive it from the evidence URL when possible: `微信公众号“账号”称`、`头条号“账号”称`、`百家号“账号”称`、`微博账号“账号”称`; if the platform cannot be determined, use `自媒体账号“账号”称`. Keep the raw account name unchanged in evidence data. The model may provide a source-supported attribution verb, while the deterministic fallback uses `认为` for named people and `称` for media/self-media, avoiding a mechanical wall of `认为` without inventing stronger approval or criticism.
+
+Headings are editorial conclusions, not stitched summaries. A top-level viewpoint heading should normally contain 12-26 Chinese characters and a cluster heading 10-24. Each heading expresses one central judgment; do not join different clusters with `并/与/及`. Choose `认可、肯定、建议、期待、希望、支持、质疑、担忧、强调、认为` according to the evidence. Variation is desirable only when the source stance supports it; never turn neutral analysis into approval merely to vary the verb.
 For a mature multi-source cluster, normally use 2-4 selected independent voices. Each voice receives one complete 45-120-character attributed claim. A substantive agenda normally yields 2-4 clusters; one-cluster and thin-cluster cases need traceable exceptions. Do not compress several sources into an anonymous summary or inflate page count with repeated wording.
 The shared executable density gate requires two distinct speaking subjects and at least 120 Chinese characters, or a `thin_cluster_exception` containing non-empty `reason`, `search_evidence` and `reviewed_by`. Both draft validation and final auditing use this rule. The exception is retained in the audit and does not waive the minimum quality of each claim, original-source mapping or independent semantic review. Repeated URLs, repeated speakers and repeated attribution verbs do not increase independent-voice count.
 Bold each `一是/二是……` conclusion and the named source plus attribution verb (`某专家认为`、`某媒体报道称`、`微信公众号“某某”称`).
@@ -143,6 +147,7 @@ Apply the following source and wording rules to every meeting:
 - Use the source passage as the wording anchor. Lightly trim repetition and connect clauses for readability, but preserve the original claim's key nouns, verbs, scope, qualifications, examples and policy mechanism. Do not replace a specific source statement with a broader AI-created causal conclusion.
 - Check each speaking subject separately, including several experts quoted by the same article. A single attributed proposition should normally contain about 45-120 Chinese characters of substantive content. A proposition with fewer than 30 Chinese characters fails the formal gate: return to the original passage to include its reasoning, mechanism, condition or example, combine a related passage from the same source, or omit that voice. Do not pad a weak sentence with generic policy language. Do not count noun phrases such as `宏观分析人士` or `政策解读文章` as attribution verbs, and do not merge several short expert statements into one long evidence row to pass the threshold.
 - Public-article TOP ranking is not a writing-evidence filter. Before drafting, inspect the complete agenda-relevant raw public-article corpus and all eligible web candidates, regardless of read rank. When one article quotes several named speakers, extract and assess each voice separately. This rule is reusable across meetings and must not be relaxed or narrowed to imitate one benchmark.
+- Prefer named experts, professional institutions and media judgments that explain a policy mechanism, condition, effect boundary or concrete suggestion. Self-media remains eligible, but exclude commercial self-promotion for its own company/product, tangential promotion of an activity or service, and text whose substance is only a slogan, pun, metaphor or generic growth forecast. These are editorial-use exclusions, not deletions from the evidence pool.
 - Period prose may cite a public-web page only when its source-page timestamp has been preserved and verified inside the monitoring window. Exclude later pages even when their wording closely matches the desired report; do not backdate them from search snippets or article subject matter.
 - If a top-level subtopic has only one mature cluster, write the top-level heading and its evidence paragraph directly. Do not create a lone `一是` without a `二是`.
 
@@ -153,6 +158,8 @@ Lead sentence:
 ```text
 网民观点主要围绕{stance_summaries}等方面展开。主要评论如下：
 ```
+
+The lead summarizes only the first, central clause of each reviewed group heading, normally no more than 22 Chinese characters. Keep the full reviewed heading in the numbered body item. This avoids copying two or more long headings verbatim into one overloaded lead sentence.
 
 Then group representative raw comments:
 
@@ -177,6 +184,7 @@ Write one explanatory paragraph, not only a word list:
 
 Hotwords must be connected back to public attention points and subtopics.
 Follow the ranked wording pattern `位居前列`、`热度较高`、`持续热传`、`受到关注`; introduce lower-ranked remaining topics with `此外`. Vary the second clause among `相关讨论主要聚焦`、`讨论内容集中于`、`讨论重点进一步延伸至`、`相关观点主要讨论` and `相关观点多涉及`. Do not repeat `舆论围绕` for every topic. If the workbook contains a word-cloud picture, use it unchanged.
+When the reviewed focus already starts with a stance verb, write `舆论认为/建议/期待……`; do not produce malformed combinations such as `主要聚焦认为……`.
 
 ## 三、境外舆论情况
 
@@ -195,6 +203,8 @@ Required content:
 - List representative overseas reports with source and title.
 - If there is interpretation or risk framing, write it as a separate paragraph after the factual-report sentence.
 - If there is no commentary, use `暂无评论性文章。`
+
+An interpretive summary contains only the materially additional impact, mechanism, risk or evaluation found in the article. Do not recap the meeting agenda and do not write meta-summaries such as `报道……并引述……解读……`.
 
 The primary evidence source is the full title and body already contained in the current raw monitoring Excel. Classify every accepted Excel row as factual, interpretive or risk-framed before building the standard workbook, and preserve the classification, reason, confidence and reviewed Simplified Chinese source/title/summary in that workbook. Do not assume interpretation must come from supplemental search, and never silently default an unclassified row to factual. When interpretation exists, use the distribution-dependent transition above and summarize reviewed interpretive reports in the next paragraph. Do not number the report categories.
 

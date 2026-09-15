@@ -6,7 +6,11 @@
     "opening_order": ["meeting_date", "meeting_context", "agenda_topics", "report_transition"],
     "title_template": "{date}国务院常务会议舆情综述",
     "opening_with_chair": "{chair_name}{date}主持召开国务院常务会议，{agenda}。本次国务院常务会议舆情传播情况如下：",
+    "opening_with_chair_topic_list": "{chair_name}{date}主持召开国务院常务会议，会议涉及{agenda}等议题。本次国务院常务会议舆情传播情况如下：",
+    "opening_with_chair_no_agenda": "{chair_name}{date}主持召开国务院常务会议。本次国务院常务会议舆情传播情况如下：",
     "opening_without_chair": "{date}召开的国务院常务会议，{agenda}。本次国务院常务会议舆情传播情况如下：",
+    "opening_without_chair_topic_list": "{date}召开的国务院常务会议涉及{agenda}等议题。本次国务院常务会议舆情传播情况如下：",
+    "opening_without_chair_no_agenda": "{date}召开国务院常务会议。本次国务院常务会议舆情传播情况如下：",
     "fixed_chapters": ["一、舆情传播情况", "二、境内舆论情况", "三、境外舆论情况", "附录"],
     "domestic_subsections": ["（一）境内媒体自媒体情况", "（二）网民评论情况", "（三）热词分布情况"],
     "overseas_subsections": ["（一）境外媒体情况", "（二）境外网民评论"]
@@ -24,6 +28,16 @@
     "cluster_ordinal_prefixes": ["一是", "二是", "三是", "四是", "五是", "六是", "七是", "八是"],
     "attribution_verbs": ["认为", "指出", "表示", "建议", "强调", "称", "提到", "提出", "研判", "预计", "呼吁", "担忧", "主张"],
     "default_attribution_verb": "认为",
+    "default_attribution_verbs_by_status": {
+      "named_person": "认为", "media_voice": "称", "media_only": "称", "self_media": "称"
+    },
+    "topic_heading_cjk_range": [12, 26],
+    "cluster_heading_cjk_range": [10, 24],
+    "heading_rules": [
+      "每个标题只表达一个中心判断，不把多个观点簇用并、与、及机械拼接",
+      "根据证据使用认可、肯定、建议、期待、希望、支持、质疑、担忧、强调或认为，避免所有标题机械重复同一动词",
+      "标题保留具体政策对象和判断，不使用口号、押韵梗、行业黑话或空泛前景判断"
+    ],
     "claim_cjk_range": [45, 120],
     "minimum_claim_cjk": 30,
     "density_gate": {
@@ -41,13 +55,36 @@
       "self_media": "public_account", "self_media_article": "public_account", "self_media_post": "public_account", "public_account": "public_account"
     },
     "prohibited_phrases": ["媒体普遍认为", "多家媒体关注", "报道汇集", "样本来源", "公开网络补证", "原始报道汇总"],
-    "prohibited_padding": ["具有重要意义", "引发广泛关注", "为高质量发展注入新动能", "值得关注的是"]
+    "prohibited_padding": ["具有重要意义", "引发广泛关注", "为高质量发展注入新动能", "值得关注的是"],
+    "editorial_exclusions": [
+      {
+        "code": "commercial_self_promotion",
+        "description": "把政策直接写成本品牌、本产品或本公司业务机会，缺少公共政策分析",
+        "patterns": ["(?:对|为)[^，。；]{2,24}是市场机遇[^。；]{0,50}(?:核心业务|产品|品牌)", "(?:核心业务|本公司|本品牌|本产品)[^。；]{0,30}(?:直接增效|价值释放|增长动能|受益)"]
+      },
+      {
+        "code": "tangential_promotion",
+        "description": "借会议议题宣传无直接政策论证的机构活动、服务或文化项目",
+        "patterns": ["刚柔相济[^。；]{0,50}(?:触手可及|幼有所承)"]
+      },
+      {
+        "code": "beneficiary_market_pitch",
+        "description": "只从消费、金融、板块或产业链受益角度推介市场机会，缺少公共政策分析",
+        "patterns": ["利好[^。；]{2,40}(?:消费|金融|板块|产业链)"]
+      },
+      {
+        "code": "slogan_or_wordplay_only",
+        "description": "主要依靠口号、押韵梗或宣传性排比，未提供具体机制、条件或建议",
+        "patterns": ["钱景可观", "把流量变留量", "公平打底、质量为王、活力为要"]
+      }
+    ]
   },
   "comments": {
     "lead_template": "网民观点主要围绕{stance_summaries}等方面展开。主要评论如下：",
     "sentiment_lead_template": "{sentiment_lead}，主要有{stance_summaries}等观点。主要评论如下：",
     "one_group_per_topic": true,
     "quotes_per_ready_topic": [2, 3],
+    "lead_summary_max_cjk": 22,
     "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],
     "reject_reaction_only": true
   },
@@ -69,6 +106,7 @@
     "no_interpretation_suffix": "，暂无评论性文章。",
     "max_interpretive_examples": 3,
     "max_factual_examples": 3,
+    "interpretive_summary_rule": "只写相对于会议事实新增的影响、机制、风险或评价，不复述会议议程，不使用报道并引述解读等元叙述",
     "category_numbering": false
   },
   "style": {

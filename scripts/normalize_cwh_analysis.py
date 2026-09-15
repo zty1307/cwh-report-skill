@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
-from cwh_writing_rules import source_rank, writing_rules, writing_rules_sha256
+from cwh_writing_rules import attribution_verb, formal_attribution, source_rank, writing_rules, writing_rules_sha256
 
 
 STANCE_RE = re.compile("^(?:" + "|".join(re.escape(value) for value in writing_rules()["viewpoint"]["attribution_verbs"]) + ")")
@@ -39,12 +39,7 @@ def evidence_sentence(row: dict[str, Any]) -> str:
     claim = clean_sentence(row.get("formal_claim"))
     if not claim:
         return ""
-    subject = clean_sentence(
-        row.get("attribution")
-        or row.get("speaker_name")
-        or row.get("source")
-        or row.get("platform")
-    )
+    subject = clean_sentence(formal_attribution(row))
     if not subject or claim.startswith(subject):
         return claim
     name = clean_sentence(row.get("speaker_name"))
@@ -54,7 +49,7 @@ def evidence_sentence(row: dict[str, Any]) -> str:
         return subject + claim[len(name):]
     if STANCE_RE.match(claim):
         return f"{subject}{claim}"
-    verb = writing_rules()["viewpoint"]["default_attribution_verb"]
+    verb = attribution_verb(row)
     return f"{subject}{verb}，{claim}"
 
 

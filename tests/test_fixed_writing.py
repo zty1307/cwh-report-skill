@@ -57,6 +57,24 @@ def test_chair_name_requires_explicit_current_source():
     assert sourced.startswith("张某1月2日主持召开")
 
 
+def test_noun_only_agenda_is_rendered_as_a_grammatical_sentence():
+    agenda = formal.joined_agenda_topics(["城市更新", "农业农村现代化", "基础教育改革发展"])
+    assert agenda == "城市更新、农业农村现代化和基础教育改革发展"
+    text = opening_paragraph({}, "5月15日", agenda)
+    assert text.startswith("5月15日召开的国务院常务会议涉及")
+    assert "等议题。" in text
+
+
+def test_self_media_attribution_includes_platform_and_uses_stable_verb():
+    row = {
+        "speaker_name": "九开间", "source": "九开间", "attribution_status": "self_media",
+        "url": "https://mp.weixin.qq.com/s/example", "formal_claim": "城市更新需要建立长期运营机制。",
+    }
+    assert evidence_sentence(row) == "微信公众号“九开间”称，城市更新需要建立长期运营机制"
+    row["attribution_verb"] = "建议"
+    assert evidence_sentence(row) == "微信公众号“九开间”建议，城市更新需要建立长期运营机制"
+
+
 def test_unsupported_padding_is_blocked_but_original_quote_is_preserved():
     claim = "应完善不同部门的职责分工，保留具体实施条件并根据公开反馈定期评估政策效果，为高质量发展注入新动能"
     row = {"attribution": "测试机构", "source": "测试机构", "formal_claim": claim, "source_excerpt": "应完善不同部门的职责分工"}
@@ -103,3 +121,46 @@ def test_hotword_frames_cover_all_topics_without_truncating_conditions():
         assert f"主题词{index}" in text
         assert f"建议落实议题{index}并保留特殊地区与特定群体的适用条件" in text
     assert text.startswith(writing_rules()["hotwords"]["opening"])
+
+
+def test_comment_lead_uses_short_first_clause_but_body_keeps_full_heading():
+    heading = "认为城市更新应优先保障居住安全，并完善长期运营和资金平衡机制"
+    groups = [(heading, [{"content": "支持改善居住环境"}])]
+    lead = formal.comment_lead({}, groups)
+    assert "围绕城市更新应优先保障居住安全" in lead
+    assert "围绕认为" not in lead
+    assert "长期运营" not in lead
+    assert groups[0][0] == heading
+
+
+def test_comment_cleanup_repairs_mixed_quotes_and_numeric_ranges():
+    assert formal.clean_formal_comment('破旧不堪的"城中村”改造要覆盖50~70岁群体') == '破旧不堪的‘城中村’改造要覆盖50至70岁群体'
+
+
+def test_hotword_focus_with_stance_does_not_render_focus_thinks():
+    data = {
+        "hotwords": [{"topic": "研究公共服务工作", "word": "公共服务"}],
+        "viewpoints": {"by_topic": [{"topic": "研究公共服务工作", "clusters": [{"summary": "认为应完善基层服务机制"}]}]},
+    }
+    text = formal.hotword_paragraph(data)
+    assert "舆论认为应完善基层服务机制" in text
+    assert "聚焦认为" not in text
+
+
+def test_weak_self_media_promotion_is_blocked_and_repeated_heading_verb_is_warned():
+    viewpoints = []
+    for index in range(3):
+        evidence = []
+        if index == 0:
+            evidence = [{
+                "attribution_status": "self_media", "source": "某企业账号",
+                "formal_claim": "这对某企业是市场机遇，并为其核心业务带来直接增效与价值释放。",
+            }]
+        viewpoints.append({
+            "topic": f"议题{index}", "heading": "认为相关政策应完善长期实施机制",
+            "clusters": [{"summary": "认为应完善长期实施机制", "details": "某媒体称，应完善长期实施机制并定期评估政策效果。", "evidence": evidence}],
+        })
+    issues = domestic_viewpoint_quality_issues({"viewpoints": {"by_topic": viewpoints}})
+    codes = {row["code"] for row in issues}
+    assert "commercial_self_promotion" in codes
+    assert "mechanical_heading_verb_repetition" in codes

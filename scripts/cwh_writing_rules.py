@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "config/formal_writing_rules.v1.json"
 
@@ -45,11 +47,60 @@ def opening_paragraph(meeting: dict[str, Any], date_label: str, agenda_topics: s
     # uses a neutral frame and never defaults to a historical office holder.
     chair_name = str(meeting.get("chair_name") or "").strip()
     chair_source = str(meeting.get("chair_source") or "").strip()
+    governing_verbs = ("听取", "研究", "审议", "进一步部署", "部署", "决定")
     if chair_name and chair_source:
-        template = rules["opening_with_chair"]
+        if not agenda_topics:
+            template = rules["opening_with_chair_no_agenda"]
+        elif agenda_topics.startswith(governing_verbs):
+            template = rules["opening_with_chair"]
+        else:
+            template = rules["opening_with_chair_topic_list"]
     else:
-        template = rules["opening_without_chair"]
+        if not agenda_topics:
+            template = rules["opening_without_chair_no_agenda"]
+        elif agenda_topics.startswith(governing_verbs):
+            template = rules["opening_without_chair"]
+        else:
+            template = rules["opening_without_chair_topic_list"]
     return template.format(date=date_label, agenda=agenda_topics, chair_name=chair_name)
+
+
+def formal_attribution(row: dict[str, Any]) -> str:
+    """Return a stable formal display label without changing evidence identity."""
+    status = str(row.get("attribution_status") or "").strip().lower()
+    subject = str(
+        row.get("attribution")
+        or row.get("speaker_name")
+        or row.get("source")
+        or row.get("platform")
+        or ""
+    ).strip()
+    if status != "self_media" or not subject:
+        return subject
+    if re.match(r"^(?:微信公众号|头条号|百家号|微博账号|自媒体账号)[“\"]", subject):
+        return subject
+    bare = str(row.get("speaker_name") or row.get("source") or row.get("attribution") or subject).strip()
+    host = (urlsplit(str(row.get("url") or "")).hostname or "").lower()
+    if host == "mp.weixin.qq.com" or host.endswith(".mp.weixin.qq.com"):
+        platform = "微信公众号"
+    elif host.endswith("toutiao.com"):
+        platform = "头条号"
+    elif host.endswith("baijiahao.baidu.com"):
+        platform = "百家号"
+    elif host.endswith("weibo.com") or host.endswith("weibo.cn"):
+        platform = "微博账号"
+    else:
+        platform = "自媒体账号"
+    return f"{platform}“{bare}”"
+
+
+def attribution_verb(row: dict[str, Any]) -> str:
+    rules = writing_rules()["viewpoint"]
+    supplied = str(row.get("attribution_verb") or "").strip()
+    if supplied in rules["attribution_verbs"]:
+        return supplied
+    status = str(row.get("attribution_status") or "").strip().lower()
+    return rules["default_attribution_verbs_by_status"].get(status, rules["default_attribution_verb"])
 
 
 def source_rank(row: dict[str, Any]) -> int:

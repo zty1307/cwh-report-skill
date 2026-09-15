@@ -316,6 +316,9 @@ def clean_formal_comment(text: Any) -> str:
     value = FORMAL_EMOJI_RE.sub("", value)
     value = re.sub(r"\s+", " ", value)
     value = re.sub(r"([，。！？；、])\1+", r"\1", value)
+    value = re.sub(r'"([^"\n]{1,160})[”"]', r'‘\1’', value)
+    value = re.sub(r'“([^”"\n]{1,160})"', r'‘\1’', value)
+    value = re.sub(r"(?<=\d)\s*[~～]\s*(?=\d)", "至", value)
     return value.strip(" ，。！？；、;,.!?\t\r\n")
 
 
@@ -446,7 +449,7 @@ def joined_agenda_topics(topics: list[str]) -> str:
         topic = quote_title(raw_topic)
         prefix = next((item for item in prefixes if topic.startswith(item)), "")
         obj = topic[len(prefix) :].strip() if prefix else topic
-        if groups and prefix and groups[-1][0] == prefix:
+        if groups and groups[-1][0] == prefix:
             groups[-1][1].append(obj)
         else:
             groups.append((prefix, [obj]))
@@ -554,7 +557,27 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
 
 def comment_lead(data: dict[str, Any], groups: list[tuple[str, list[dict[str, Any]]]]) -> str:
     rules = writing_rules()["comments"]
-    summaries = "、".join(name for name, _ in groups)
+    max_cjk = int(rules.get("lead_summary_max_cjk") or 22)
+
+    def lead_summary(name: str) -> str:
+        value = clean_sentence(name)
+        clauses = [part.strip() for part in re.split(r"[，；]", value) if part.strip()]
+        value = clauses[0] if clauses else value
+        value = re.sub(r"^认为", "", value)
+        cjk = re.findall(r"[\u3400-\u9fff]", value)
+        if len(cjk) <= max_cjk:
+            return value
+        count = 0
+        output = []
+        for char in value:
+            output.append(char)
+            if "\u3400" <= char <= "\u9fff":
+                count += 1
+            if count >= max_cjk:
+                break
+        return "".join(output).rstrip("，；、")
+
+    summaries = "、".join(lead_summary(name) for name, _ in groups)
     if formal_sentiment_available(data):
         return rules["sentiment_lead_template"].format(
             sentiment_lead=netizen_sentiment_lead(data).rstrip("。"), stance_summaries=summaries,
@@ -625,7 +648,7 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         clusters = item.get("clusters") or []
         if clusters:
             focus = clean_sentence(clusters[0].get("summary") or clusters[0].get("details"))
-            focus = re.sub(r"^(?:舆论|媒体|专家|网民)(?:普遍)?(?:认为|关注|指出|建议|表示|强调)", "", focus)
+            focus = re.sub(r"^(?:舆论|媒体|专家|网民)(?:普遍)?", "", focus).strip()
             focus_by_topic[display] = focus
     focus_phrases = frames["focus_phrases"]
     for index, topic in enumerate(ordered_topics):
@@ -636,7 +659,10 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         quoted = "、".join(f"“{word}”" for word in selected)
         rank = rank_phrases[min(index, len(rank_phrases) - 1)]
         focus = focus_by_topic.get(topic)
-        focus_clause = ("，" + focus_phrases[index % len(focus_phrases)] + focus) if focus else ""
+        if focus and focus.startswith(STANCE_HEADING_PREFIXES):
+            focus_clause = "，舆论" + focus
+        else:
+            focus_clause = ("，" + focus_phrases[index % len(focus_phrases)] + focus) if focus else ""
         lead = "" if index < 4 else "此外，" if index == 4 else "同时，"
         chunks.append(f"{lead}{quoted}等词{rank}{focus_clause}")
     if not chunks:

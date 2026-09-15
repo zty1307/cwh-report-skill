@@ -239,12 +239,24 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
     issues: list[dict[str, Any]] = []
     cross_topic_voices: dict[str, set[str]] = {}
     voice_labels: dict[str, str] = {}
+    topic_heading_prefixes: list[str] = []
+    viewpoint_rules = writing_rules()["viewpoint"]
 
     for viewpoint in _topic_viewpoints(data):
         topic = str(viewpoint.get("topic") or viewpoint.get("heading") or "未命名子议题")
         heading = str(viewpoint.get("heading") or "").strip().rstrip("。")
         reviewed_heading = re.sub(r"^(?:舆论|媒体|专家|机构)(?:普遍)?", "", heading).strip()
-        stance_prefixes = tuple(writing_rules()["viewpoint"]["heading_stance_verbs"])
+        stance_prefixes = tuple(viewpoint_rules["heading_stance_verbs"])
+        matched_prefix = next((value for value in stance_prefixes if reviewed_heading.startswith(value)), "")
+        if matched_prefix:
+            topic_heading_prefixes.append(matched_prefix)
+        heading_min, heading_max = viewpoint_rules.get("topic_heading_cjk_range", [0, 999])
+        heading_length = _cjk_length(reviewed_heading)
+        if heading and "尚未形成评论性观点" not in heading and not heading_min <= heading_length <= heading_max:
+            issues.append({
+                "code": "viewpoint_heading_length", "severity": "warning", "topic": topic,
+                "message": f"{topic}的一级标题“{heading}”有{heading_length}个汉字；建议控制在{heading_min}—{heading_max}个汉字并只保留一个中心判断。",
+            })
         if heading and not reviewed_heading.startswith(stance_prefixes) and "尚未形成评论性观点" not in heading:
             issues.append(
                 {
@@ -262,6 +274,14 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
         for cluster_index, cluster in enumerate(viewpoint.get("clusters") or [], 1):
             details = str(cluster.get("details") or cluster.get("analysis") or "").strip()
             cluster_name = str(cluster.get("summary") or f"分论点{cluster_index}")
+            cluster_min, cluster_max = viewpoint_rules.get("cluster_heading_cjk_range", [0, 999])
+            cluster_length = _cjk_length(re.sub(r"^(?:舆论|媒体|专家|机构)(?:普遍)?", "", cluster_name).strip())
+            if cluster.get("summary") and "尚未形成评论性观点" not in cluster_name and not cluster_min <= cluster_length <= cluster_max:
+                issues.append({
+                    "code": "viewpoint_cluster_heading_length", "severity": "warning", "topic": topic,
+                    "cluster": cluster_name,
+                    "message": f"{topic}的分论点“{cluster_name}”有{cluster_length}个汉字；建议控制在{cluster_min}—{cluster_max}个汉字并只保留一个中心判断。",
+                })
             for phrase in writing_rules()["viewpoint"]["prohibited_phrases"]:
                 if phrase in details or phrase in cluster_name or phrase in heading:
                     issues.append({
@@ -275,6 +295,17 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                         "cluster": cluster_name, "evidence_id": evidence.get("evidence_id"),
                         "message": f"{topic}的观点新增了原文片段没有的套话“{phrase}”；请回到原文核对，不得填充字数。",
                     })
+                if str(evidence.get("attribution_status") or "").lower() == "self_media":
+                    claim_text = str(evidence.get("formal_claim") or evidence.get("claim") or "")
+                    for exclusion in viewpoint_rules.get("editorial_exclusions") or []:
+                        if any(re.search(pattern, claim_text) for pattern in exclusion.get("patterns") or []):
+                            issues.append({
+                                "code": str(exclusion.get("code") or "weak_self_media_evidence"),
+                                "severity": "error", "topic": topic, "cluster": cluster_name,
+                                "evidence_id": evidence.get("evidence_id") or evidence.get("candidate_id"),
+                                "message": f"{topic}的自媒体观点不宜进入正式正文：{exclusion.get('description')}。应改选有具体政策机制、条件或建议的独立声音。",
+                            })
+                            break
             for pattern, reason in PROHIBITED_VIEWPOINT_PROSE_PATTERNS:
                 if pattern.search(details):
                     issues.append(
@@ -403,6 +434,13 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                     ),
                 }
             )
+
+    if len(topic_heading_prefixes) >= 3 and len(set(topic_heading_prefixes)) == 1:
+        verb = topic_heading_prefixes[0]
+        issues.append({
+            "code": "mechanical_heading_verb_repetition", "severity": "warning",
+            "message": f"{len(topic_heading_prefixes)}个一级标题全部以“{verb}”开头，读感机械。应根据证据改用认可、肯定、建议、期待、支持、质疑等准确动词；不得只为求变化改写立场。",
+        })
 
     for key, topics in cross_topic_voices.items():
         if len(topics) <= 2:

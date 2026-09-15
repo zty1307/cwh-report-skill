@@ -3,7 +3,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from cwh_overseas_semantics import compile_review, media_candidates, social_audit, query_plan, partition_reviewable
+from cwh_overseas_semantics import PROMPT, compile_review, media_candidates, social_audit, query_plan, partition_reviewable
 
 
 def test_media_candidates_prioritize_registered_overseas_domains():
@@ -76,3 +76,8 @@ def test_hard_eligibility_failures_do_not_consume_semantic_review():
     reviewable, excluded = partition_reviewable(packet)
     assert [row['id'] for row in reviewable['rows']] == [3]
     assert [row['id'] for row in excluded] == [1, 2]
+
+
+def test_overseas_prompt_requires_distinct_interpretive_angle_not_agenda_recap():
+    assert "只写相对于会议事实新增的影响、机制、风险或评价" in PROMPT
+    assert "不复述会议议程" in PROMPT
