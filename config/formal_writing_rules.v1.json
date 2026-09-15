@@ -95,7 +95,6 @@
     "sentiment_lead_template": "{sentiment_lead}，主要有{stance_summaries}等观点。主要评论如下：",
     "one_group_per_topic": true,
     "quotes_per_ready_topic": [2, 3],
-    "lead_summary_max_cjk": 22,
     "review_samples_per_topic": 30,
     "review_samples_hard_max": 300,
     "quote_max_chars": 180,
