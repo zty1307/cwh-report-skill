@@ -57,6 +57,37 @@ def test_no_call_for_complete_reasons_or_insufficient_budget(monkeypatch, tmp_pa
     assert repair_missing_reasons(packet, decision, [], tmp_path, 90) == (decision, None)
 
 
+def test_partial_native_reasons_complete_only_remaining_ids_in_original_budget(monkeypatch, tmp_path):
+    packet, decision = fixture()
+    decision['items'][1].pop('reason')
+    calls = []
+    def model(request, prompt, command, workspace, label, timeout, **kwargs):
+        calls.append((request, label, timeout))
+        rows = [{'id': 'r1', 'reason': '原文机制'}] if len(calls) == 1 else [{'id': 'r2', 'reason': '原文仅事实'}]
+        return {'items': rows}, {'session_id': str(len(calls)), 'seconds': 1}
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    result, run = repair_missing_reasons(packet, decision, [], tmp_path, 90)
+    assert [row['id'] for row in calls[1][0]['items']] == ['r2']
+    assert calls[1][2] <= calls[0][2] <= 45
+    assert calls[0][1] != calls[1][1]
+    assert [row['reason'] for row in result['items']] == ['原文机制', '原文仅事实']
+    assert run['seconds'] == 2 and len(run['reason_completion_runs']) == 2
+    assert 'reason' not in decision['items'][0]
+
+
+def test_reason_cache_namespace_is_topic_specific(monkeypatch, tmp_path):
+    packet, decision = fixture()
+    labels = []
+    def model(request, prompt, command, workspace, label, timeout, **kwargs):
+        labels.append(label)
+        return {'items': [{'id': 'r1', 'reason': '原文机制'}]}, {'session_id': 'test'}
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    repair_missing_reasons(packet, decision, [], tmp_path, 90)
+    packet['topic'] = '另一议题'
+    repair_missing_reasons(packet, decision, [], tmp_path, 90)
+    assert labels[0] != labels[1]
+
+
 def test_plain_timestamp_source_header_excludes_outside_period_without_editing_source():
     content = '文章标题\n2026-08-13 17:07\n来源：\n真实媒体\n正文含2026年8月15日施行。'
     evidence = labeled_publication_date(content)

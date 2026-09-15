@@ -23,7 +23,7 @@ from run_cwh_batched_viewpoints import merge_topic_bundles
 from cwh_source_spans import source_segments, selected_quote
 from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_repairs, complete_decisions
 from cwh_semantic_repairs import normalize_excluded_claims
-from cwh_semantic_repairs import repair_missing_reasons
+from cwh_semantic_repairs import repair_missing_reasons, repair_missing_author_items
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
 from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from cwh_heading_quality import cross_topic_shared_source_spans
@@ -316,9 +316,13 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if result.get('topic') not in (None, packet['topic']):
             raise ValueError('Single-topic response changed the requested topic')
-        returned = [row.get('id') for row in result.get('items') or []]
-        if len(returned) != len(set(returned)) or set(returned) != set(ids):
-            raise ValueError(f"[{packet['topic']}] Single-topic response must review every item exactly once")
+        try:
+            result, coverage_run = repair_missing_author_items(model_packet, result, prompt, command,
+                workspace, deadline - time.monotonic() - 15, f'author-topic-{number}-missing-items')
+        except ValueError as exc:
+            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+        if coverage_run:
+            run = {**run, 'missing_item_completion_run': coverage_run}
         if fixed_unread:
             by_id = {row['id']: row for row in result['items']}
             result = {**result, 'items': [by_id.get(row['id'], fixed_unread.get(row['id']))

@@ -24,6 +24,14 @@ from cwh_source_spans import source_segments, selected_quote
 from raw_system_workbook_pipeline import normalize_text as normalize_raw_text
 
 
+def configured_raw_review_batch_size():
+    """Optional process-local transport sizing; never shorten source rows."""
+    value = os.environ.get('CWH_RAW_REVIEW_BATCH_SIZE', '12')
+    if not isinstance(value, str) or not value.isdigit() or not 1 <= int(value) <= 12:
+        raise ValueError('CWH_RAW_REVIEW_BATCH_SIZE must be an integer from 1 to 12')
+    return int(value)
+
+
 def overseas_span_packet(packet):
     result = copy.deepcopy(packet)
     result["instructions"] = [
@@ -494,6 +502,7 @@ def main():
         atomic_write_json(workspace / "blocker.json", {"blocker": True, "type": "inline_transport_stage_not_supported", "stage": task["stage_id"]})
         raise SystemExit(23)
     command_template = json.loads(os.environ["CWH_MODEL_COMMAND_JSON"])
+    batch_size = configured_raw_review_batch_size()
     deadline = time.monotonic() + int(task.get("remaining_budget_seconds") or task["time_budget_seconds"]) - 5
     records = []
     for kind in ("public_top", "overseas", "hotword"):
@@ -528,9 +537,9 @@ def main():
                                      interpretive_verified=False, interpretive_range=["o1/1", "o1/2"])
         transport_packet = overseas_span_packet(packet) if kind == "overseas" else packet
         prompt_rules = raw_review_prompt_rules(kind, deliver_available)
-        if kind in {'overseas', 'public_top'} and len(packet.get('items') or []) > 12:
+        if kind in {'overseas', 'public_top'} and len(packet.get('items') or []) > batch_size:
             result = review_overseas_batches(packet, shape, prompt_rules, command_template, workspace, deadline,
-                                             feedback=last_error if repair_required else '', kind=kind)
+                                             feedback=last_error if repair_required else '', kind=kind, batch_size=batch_size)
             atomic_write_json(target, result)
             atomic_write_json(cache, {'source_sha256': digest, 'output_sha256': sha256_file(target)})
             continue
