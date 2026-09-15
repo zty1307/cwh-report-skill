@@ -107,6 +107,29 @@ def cached_public_pages(workspace, urls, timeout=8):
     return pages
 
 
+def recover_failed_page_slots(workspace, observations, urls, pages, plan, deadline, *, topic=''):
+    """One bounded replacement wave for failed reads, never inferred eligibility."""
+    failed = sum(row.get('status') == 'access_failed' for row in pages)
+    ceiling = int((plan.get('execution_budget') or {}).get('max_full_page_fetches_per_topic') or 0)
+    room = max(0, ceiling - len(urls))
+    extra_urls = [url for url in balanced_fetch_urls(observations, ceiling, topic=topic)
+                  if url not in urls][:min(failed, room)]
+    # Preserve 60 seconds for the next stage; at most four parallel public reads.
+    required_seconds = 60 + ((len(extra_urls) + 3) // 4) * 8
+    if not extra_urls or deadline - time.monotonic() < required_seconds:
+        return pages
+    recovery = workspace / 'failed_page_recovery'
+    recovery.mkdir(parents=True, exist_ok=True)
+    extra_pages = cached_public_pages(recovery, extra_urls, timeout=8)
+    atomic_write_json(recovery / 'reading_audit.json', {
+        'scope': 'replacement reading opportunities only; no semantic eligibility decision',
+        'initial_urls': urls, 'initial_failed_reads': failed,
+        'supplementary_urls': extra_urls, 'attempted_total': len(urls) + len(extra_urls),
+        'configured_ceiling': ceiling, 'waves': 1,
+    })
+    return [*pages, *extra_pages]
+
+
 def single_topic_request_budget(remaining, future_topics, maximum=180, future_reserve=45):
     """Bound one request without borrowing the whole remaining author allocation."""
     if remaining <= 0:
@@ -200,6 +223,8 @@ def author(task, deadline):
                                      min(65, (deadline - time.monotonic()) * .12))
         urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
         pages = cached_public_pages(workspace, urls, timeout=8)
+        pages = recover_failed_page_slots(workspace, observations, urls, pages, plan,
+                                          deadline, topic=indexed['topic'])
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         atomic_write_json(workspace / "source_packet.json", packet)
