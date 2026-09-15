@@ -117,6 +117,32 @@ def test_host_compiler_keeps_source_and_does_not_self_certify():
     assert validate_analysis_mapping(bundle)["status"] == "blocked"
 
 
+def test_metadata_quarantine_keeps_raw_voice_and_attributes_only_count_gaps_to_host():
+    from cwh_semantic_compiler import exclude_unverified_web_metadata
+    packet, decision, observation, plan = fixture()
+    packet['items'][1].update(content='日报\n发布日期：2026年5月20日\n真实独立观点。',
+        full_text_status='completed', capture={'capture_method': 'test-fixture'})
+    decision['items'][1].update(decision='eligible', source='日报', published_at='2026-05-16',
+        date_quote='5月20日', reason='原生作者误把越窗日期算期内', claims=[{'cluster': 'k2', 'claim': '待核观点'}])
+    decision['clusters'].append({'key': 'k2', 'heading': '待核标题'})
+    frozen = copy.deepcopy((packet, decision))
+    isolated = exclude_unverified_web_metadata(packet, decision)
+    bundle = compile_topic(packet, isolated, observation, plan, 'bounded_60m', 'v1', 'original-author')
+    topic = bundle['viewpoints']['by_topic'][0]
+    assert len(topic['clusters']) == 1
+    assert topic['clusters'][0]['evidence'][0]['formal_claim'] == decision['items'][0]['claims'][0]['claim']
+    assert 'semantic_review' not in topic['clusters'][0]['evidence'][0]
+    for exception in (topic['evidence_shortfall'], topic['single_cluster_exception'],
+                      topic['clusters'][0]['thin_cluster_exception']):
+        assert exception['reviewed_by'] == 'host:deterministic_web_metadata_gate'
+        assert exception['reason_origin'] == 'host_metadata_integrity_gate'
+    pool = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]
+    row = next(r for r in pool['candidates'] if r['url'] == 'https://wrong.test/a')
+    assert row['decision'] == 'excluded' and row['formal_metadata_verified'] is False
+    assert row['machine_disposition']['transport_exclusions'][0]['original_review'] == decision['items'][1]
+    assert (packet, decision) == frozen
+
+
 def test_unread_webpage_cannot_be_certified_as_having_no_interpretation():
     packet, decision, observations, plan = fixture()
     original = copy.deepcopy((packet, decision, observations))

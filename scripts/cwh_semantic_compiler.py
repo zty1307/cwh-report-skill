@@ -83,6 +83,25 @@ def web_metadata_errors(packet, decision):
     return errors
 
 
+def exclude_unverified_web_metadata(packet, decision):
+    """Quarantine only candidates failing the unchanged literal metadata gate."""
+    result = copy.deepcopy(decision)
+    sources = {item['id']: item for item in packet['items']}
+    for choice in result.get('items') or []:
+        source = sources.get(choice.get('id'))
+        if not source or source.get('origin') != 'web' or choice.get('decision') != 'eligible':
+            continue
+        problems = web_metadata_errors({**packet, 'items': [source]}, {'items': [choice]})
+        if not problems:
+            continue
+        original = copy.deepcopy(choice)
+        choice.update(decision='excluded', claims=[], classification_origin='deterministic_web_metadata_gate',
+            reason='fixed_web_metadata_unverified:日期或来源未通过原文校验，隔离正式选材；不据此断言原文没有独立解读')
+        choice.setdefault('transport_exclusions', []).append({'reason': 'fixed_web_metadata_unverified',
+            'validation_problems': problems, 'original_review': original})
+    return result
+
+
 def duplicate_voice_errors(decision):
     voices = {}
     for item in decision.get("items") or []:
@@ -245,6 +264,9 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                        "discovery_route": query["route"], "source_type": "expert" if claim and claim["speaker_type"] == "named_person" else "mainstream_media",
                        "source_tier": "monitoring_export" if raw else "public_web", "content_summary": choice["reason"]}
                 row['review_scope'] = 'discovery_metadata_only' if metadata_only else 'full_text_semantic_review'
+                if choice.get('classification_origin') == 'deterministic_web_metadata_gate':
+                    row.update(review_scope='full_text_review_with_unverified_formal_metadata',
+                               formal_metadata_verified=False, machine_disposition=copy.deepcopy(choice))
                 if not raw:
                     row['full_text_status'] = item.get('full_text_status', 'not_fetched_bounded_budget')
                 if model_disposition is not None:
@@ -357,6 +379,26 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
     for cl in decision.get("clusters") or []:
         if cl.get("thin_reason"):
             clusters[cl["key"]]["thin_cluster_exception"] = {"reason": cl["thin_reason"], "search_evidence": search_evidence, "reviewed_by": run_id}
+    quarantined = [item['id'] for item in decision.get('items') or []
+                   if item.get('classification_origin') == 'deterministic_web_metadata_gate']
+    if quarantined:
+        # Only count-based gap explanations are host-authored. Never certify
+        # claim meaning or falsely attribute these explanations to the author.
+        viewpoint['clusters'] = [cl for cl in viewpoint['clusters'] if cl['evidence']]
+        reason = f'网页{", ".join(quarantined)}未通过日期/来源原文校验，已隔离；其余已选观点继续独立复核，隔离不等于原文没有解读。'
+        gap = {'reason': reason, 'search_evidence': search_evidence,
+               'reviewed_by': 'host:deterministic_web_metadata_gate', 'reason_origin': 'host_metadata_integrity_gate',
+               'quarantined_item_ids': quarantined}
+        voice_count = sum(len(cl['evidence']) for cl in viewpoint['clusters'])
+        if voice_count < 4:
+            viewpoint.setdefault('evidence_shortfall', copy.deepcopy(gap))
+        if len(viewpoint['clusters']) <= 1:
+            viewpoint.setdefault('single_cluster_exception', copy.deepcopy(gap))
+        density = writing_rules()['viewpoint']['density_gate']
+        for cl in viewpoint['clusters']:
+            cjk = sum('\u4e00' <= char <= '\u9fff' for ev in cl['evidence'] for char in ev['formal_claim'])
+            if len(cl['evidence']) < density['minimum_independent_voices'] or cjk < density['minimum_details_cjk']:
+                cl.setdefault('thin_cluster_exception', copy.deepcopy(gap))
     route_coverage = [{"route": route, "status": "completed" if any(q["status"] == "completed" for q in queries if q["route"] == route) else "access_failed"}
                       for route in ("open_web", "public_platform")]
     return {"viewpoints": {"by_topic": [viewpoint]}, "research_audit": {"domestic_media_research": {

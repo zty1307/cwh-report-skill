@@ -15,6 +15,7 @@ from cwh_semantic_compiler import AUTHOR_PROMPT, make_packet, compile_topic
 from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import normalize_web_publication_dates
 from cwh_semantic_compiler import exclude_certain_period_misses
+from cwh_semantic_compiler import exclude_unverified_web_metadata
 from cwh_semantic_compiler import duplicate_voice_errors
 from cwh_semantic_compiler import query_domains, domain_matches
 from run_cwh_batched_viewpoints import merge_topic_bundles
@@ -213,19 +214,19 @@ def repair_topic_web_metadata(packet, decision, command, workspace, timeout, lab
     if not problems:
         return decision, None
     if timeout < 15:
-        raise TimeoutError('No remaining local web metadata repair budget')
+        return exclude_unverified_web_metadata(packet, decision), None
     feedback = [f"[{packet['topic']}] {problem}" for problem in problems]
     request = repair_packet([packet], [decision], feedback, semantic_packet)
     response, run = semantic_json(request,
         REPAIR_PROMPT + batch_author_contract(request['topics']) +
         '\n本次只修复列明的网页发布元数据；保留其他正确选材、观点、身份、引文、标题和簇。'
         '本篇原文没有完整发布日期时excluded且claims为空，不补年份；仅删除因此删空的簇。',
-        command, workspace, label, min(45, timeout), reuse_cache=True)
+        command, workspace, label, min(45, timeout), reuse_cache=False)
     repaired = apply_semantic_repairs([decision], request, response)[0]
     repaired = exclude_certain_period_misses(packet, normalize_web_publication_dates(packet, repaired))
     remaining_errors = web_metadata_errors(packet, repaired)
     if remaining_errors:
-        raise ValueError('; '.join(remaining_errors))
+        repaired = exclude_unverified_web_metadata(packet, repaired)
     repaired.setdefault('transport_repairs', []).append({
         'kind': 'model_local_web_metadata_repair', 'validation_problems': feedback, 'run': run})
     return repaired, run

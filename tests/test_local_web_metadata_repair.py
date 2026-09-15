@@ -32,19 +32,25 @@ def test_missing_full_date_gets_one_local_repair_without_inferred_year(monkeypat
         return {'topics': [patch]}, {'session_id': 'actual-local-repair', 'seconds': 1}
     monkeypatch.setattr(worker, 'semantic_json', model)
     result, run = worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 100, 'local')
-    assert len(calls) == 1 and calls[0][1] == 45 and calls[0][2]['reuse_cache']
+    assert len(calls) == 1 and calls[0][1] == 45 and not calls[0][2]['reuse_cache']
     assert result['items'][0]['decision'] == 'excluded'
     assert result['items'][0]['date_quote'] == decision['items'][0]['date_quote']
     assert (packet, decision) == frozen
     assert run['session_id'] == 'actual-local-repair'
 
 
-def test_still_unanchored_date_cannot_pass_after_repair(monkeypatch, tmp_path):
+def test_still_unanchored_date_is_quarantined_not_admitted_after_repair(monkeypatch, tmp_path):
     packet, decision = case()
     monkeypatch.setattr(worker, 'semantic_json', lambda *args, **kwargs:
                         ({'topics': [copy.deepcopy(decision)]}, {'session_id': 'not-passed'}))
-    with pytest.raises(ValueError, match='Web publication date not anchored'):
-        worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'local')
+    frozen = copy.deepcopy(decision)
+    result, run = worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'local')
+    item = result['items'][0]
+    assert item['decision'] == 'excluded' and item['claims'] == []
+    assert item['classification_origin'] == 'deterministic_web_metadata_gate'
+    assert 'Web publication date not anchored' in item['transport_exclusions'][0]['validation_problems'][0]
+    assert item['transport_exclusions'][0]['original_review'] == frozen['items'][0]
+    assert decision == frozen and not worker.web_metadata_errors(packet, result)
 
 
 def test_valid_metadata_adds_no_model_call_even_without_remaining_time(monkeypatch, tmp_path):
@@ -59,5 +65,20 @@ def test_valid_metadata_adds_no_model_call_even_without_remaining_time(monkeypat
 def test_invalid_metadata_cannot_borrow_time_after_deadline(monkeypatch, tmp_path):
     packet, decision = case()
     monkeypatch.setattr(worker, 'semantic_json', lambda *args, **kwargs: pytest.fail('No time extension'))
-    with pytest.raises(TimeoutError, match='metadata repair budget'):
-        worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 14, 'local')
+    result, run = worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 14, 'local')
+    assert run is None and result['items'][0]['decision'] == 'excluded'
+
+
+def test_quarantine_changes_only_failed_web_candidate_not_good_web_or_raw_claims():
+    from cwh_semantic_compiler import exclude_unverified_web_metadata
+    packet, decision = case()
+    packet['items'] += [{'id': 'w2', 'origin': 'web', 'content': '日报\n发布日期：2026年1月2日\n真实观点'},
+                        {'id': 'r1', 'origin': 'raw_monitoring', 'content': '原始监测全文未重复日期'}]
+    decision['items'] += [{'id': 'w2', 'decision': 'eligible', 'source': '日报', 'date_quote': '2026年1月2日',
+                           'published_at': '2026-01-02', 'claims': [{'claim': '忠实原观点'}]},
+                          {'id': 'r1', 'decision': 'eligible', 'claims': [{'claim': '原始表日期仍有效'}]}]
+    frozen = copy.deepcopy((packet, decision))
+    result = exclude_unverified_web_metadata(packet, decision)
+    assert result['items'][0]['decision'] == 'excluded'
+    assert result['items'][1:] == decision['items'][1:]
+    assert (packet, decision) == frozen
