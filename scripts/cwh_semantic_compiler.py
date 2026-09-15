@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+from datetime import date as calendar_date
 from urllib.parse import urlsplit
 from cwh_pipeline_runtime import utc_now
 from cwh_source_spans import selected_quote
@@ -44,6 +45,40 @@ def web_metadata_errors(packet, decision):
                 or not packet["period"]["start"][:10] <= date <= packet["period"]["end"][:10]):
             errors.append(f'Web publication date not anchored in original text: {item["id"]}')
     return errors
+
+
+def labeled_publication_date(content):
+    pattern = (r"(?:发布日期|发布时间|发布于|Publication Date|Published on)\s*[:：]\s*"
+               r"(\d{4})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})(?:日)?")
+    matches = list(re.finditer(pattern, content[:2400], re.IGNORECASE))
+    evidence = []
+    for match in matches:
+        try:
+            stamp = calendar_date(*(int(value) for value in match.groups())).isoformat()
+        except ValueError:
+            continue
+        evidence.append({"date": stamp, "quote": match.group(0), "start": match.start(), "end": match.end()})
+    if evidence and len({row["date"] for row in evidence}) == 1:
+        return evidence[0]
+    return None
+
+
+def exclude_certain_period_misses(packet, decision):
+    result = copy.deepcopy(decision)
+    sources = {item["id"]: item for item in packet["items"]}
+    for choice in result.get("items") or []:
+        source = sources.get(choice.get("id"), {})
+        if source.get("origin") != "web" or choice.get("decision") != "eligible":
+            continue
+        evidence = labeled_publication_date(source.get("content") or "")
+        if evidence and not packet["period"]["start"][:10] <= evidence["date"] <= packet["period"]["end"][:10]:
+            original = copy.deepcopy(choice)
+            choice.update(decision="excluded", claims=[],
+                          reason=f'fixed_outside_monitoring_period:正文明确发布日期为{evidence["date"]}，不计入本期观点')
+            choice.setdefault("transport_exclusions", []).append({
+                "reason": "fixed_outside_monitoring_period", "publication_evidence": evidence,
+                "original_review": original})
+    return result
 
 
 def domain_matches(url, domains):

@@ -8,6 +8,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, terminal_transport_error, collect_topic, HostModelError
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_semantic_compiler import web_metadata_errors
+from cwh_semantic_compiler import labeled_publication_date, exclude_certain_period_misses
+
+
+def test_explicit_outside_publication_date_is_excluded_with_verbatim_audit():
+    content = "发布日期：\n2026年08月18日\n会议通过日期2026年7月31日"
+    evidence = labeled_publication_date(content)
+    assert evidence["date"] == "2026-08-18"
+    assert content[evidence["start"]:evidence["end"]] == evidence["quote"]
+    packet = {"period": {"start": "2026-07-31", "end": "2026-08-03"},
+              "items": [{"id": "w1", "origin": "web", "content": content}]}
+    original = {"items": [{"id": "w1", "decision": "eligible", "claims": [{"claim": "期外观点"}]}]}
+    result = exclude_certain_period_misses(packet, original)
+    assert result["items"][0]["decision"] == "excluded"
+    assert result["items"][0]["claims"] == []
+    assert result["items"][0]["transport_exclusions"][0]["original_review"] == original["items"][0]
+    assert original["items"][0]["decision"] == "eligible"
+    assert labeled_publication_date("成文日期：2026年08月18日") is None
+    assert labeled_publication_date("发布日期：2026-08-18\n发布时间：2026-08-19") is None
 
 
 def test_web_metadata_precheck_reports_all_fields_and_records():
