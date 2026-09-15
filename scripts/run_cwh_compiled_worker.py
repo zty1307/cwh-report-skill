@@ -14,6 +14,7 @@ from cwh_semantic_compiler import AUTHOR_PROMPT, make_packet, compile_topic
 from run_cwh_batched_viewpoints import merge_topic_bundles
 from cwh_source_spans import source_segments, selected_quote
 from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_repairs, complete_decisions
+from cwh_semantic_repairs import normalize_excluded_claims
 
 
 def read(path):
@@ -140,6 +141,7 @@ def author(task, deadline):
         result, run = semantic_json(packet, prompt, command, Path(task["stage_workspace"]),
             "author-all-topics", deadline - time.monotonic(), reuse_cache=not actual_feedback)
         decisions = result.get("topics") or []
+    decisions = normalize_excluded_claims(decisions)
     if len(decisions) != len(packets) or {d.get("topic") for d in decisions} != {p["topic"] for p in packets}:
         raise ValueError("Each requested topic requires exactly one semantic decision bundle")
     atomic_write_json(checkpoint, {"source_packet_sha256": packet_hash, "decisions": decisions, "run": run,

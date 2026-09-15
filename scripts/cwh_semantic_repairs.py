@@ -2,6 +2,19 @@
 import copy
 
 
+def normalize_excluded_claims(decisions):
+    result = copy.deepcopy(decisions)
+    for topic in result:
+        for item in topic.get("items") or []:
+            if item.get("decision") in {"excluded", "duplicate"} and item.get("claims"):
+                item.setdefault("transport_exclusions", []).append({
+                    "reason": "claims_removed_from_model_excluded_item",
+                    "original_claims": copy.deepcopy(item["claims"]),
+                })
+                item["claims"] = []
+    return result
+
+
 def complete_decisions(packets, decisions):
     if not isinstance(decisions, list) or len(decisions) != len(packets):
         return False

@@ -4,6 +4,17 @@ from pathlib import Path
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_semantic_repairs import repair_packet, apply_semantic_repairs, complete_decisions
+from cwh_semantic_repairs import normalize_excluded_claims
+
+
+def test_excluded_claims_are_removed_by_disposition_with_original_audit():
+    original = [{"items": [{"id": "r1", "decision": "excluded", "claims": [{"claim": "未入选"}]},
+                          {"id": "r2", "decision": "eligible", "claims": [{"claim": "入选"}]}]}]
+    result = normalize_excluded_claims(original)
+    assert result[0]["items"][0]["claims"] == []
+    assert result[0]["items"][0]["transport_exclusions"][0]["original_claims"] == [{"claim": "未入选"}]
+    assert result[0]["items"][1] == original[0]["items"][1]
+    assert original[0]["items"][0]["claims"]
 
 
 def fixture():
