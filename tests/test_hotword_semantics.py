@@ -66,3 +66,20 @@ def test_unreviewed_viewpoints_cannot_enter_hotword_model():
     from test_host_compiler import compiled
     with pytest.raises(ValueError, match='independently verified'):
         evidence_documents(compiled(), [])
+
+def test_available_hotwords_allow_shortfall_but_preserve_second_pass_and_source_checks():
+    topics, docs, decision = fixture()
+    decision['selected'] = decision['selected'][:1]
+    selected = compile_selection(topics, docs, decision, minimum=1, require_coverage=False)
+    reviewed = {'reviews': [{'id': selected[0]['id'], 'keep': True, 'reason': 'real support'}]}
+    result = finish(topics, docs, selected, reviewed, {'session_id': 'a'}, {'session_id': 'b'},
+                    minimum=1, deliver_available=True)
+    assert len(result['selected']) == 1
+    assert result['count_shortfall']['actual_count'] == 1
+    assert result['second_pass_completed'] is True
+    with pytest.raises(ValueError, match='fresh model run'):
+        finish(topics, docs, selected, reviewed, {'session_id': 'a'}, {'session_id': 'a'},
+               minimum=1, deliver_available=True)
+    decision['selected'][0]['term'] = '无证据词条'
+    with pytest.raises(ValueError, match='literal support'):
+        compile_selection(topics, docs, decision, minimum=1, require_coverage=False)

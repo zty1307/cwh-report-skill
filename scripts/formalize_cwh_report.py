@@ -159,6 +159,14 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
             }
         )
     data["hotwords"] = normalized
+    shortfall = payload.get("count_shortfall") or {}
+    if payload.get("delivery_policy") == "deliver_available_with_gaps" and shortfall.get("notice"):
+        audit = data.setdefault("audit", {})
+        audit.setdefault("data_gaps", []).append(shortfall["notice"])
+        acceptance = audit.setdefault("acceptance", {})
+        acceptance.setdefault("blockers", []).append(shortfall["notice"])
+        acceptance["blockers"] = list(dict.fromkeys(acceptance["blockers"]))
+        acceptance["ready_for_formal_delivery"] = False
     data.setdefault("artifacts", {})["hotword_audit"] = str(audit_path.resolve())
 
 

@@ -229,6 +229,22 @@ class HotwordSemanticReviewTests(unittest.TestCase):
                 review=review,
             )
 
+    def test_available_delivery_keeps_verified_short_hotword_list_without_padding(self):
+        review = self.review()
+        review["selected"] = review["selected"][:1]
+        review["delivery_policy"] = "deliver_available_with_gaps"
+        result = self.pipeline.build_hotword_payload(
+            self.rows, self.metadata, ["国务院常务会议"], review=review)
+        self.assertEqual(1, len(result["selected"]))
+        self.assertEqual(1, result["settings"]["minimum_term_count"])
+        self.assertEqual(2, result["settings"]["configured_minimum_term_count"])
+        self.assertEqual(1, result["count_shortfall"]["actual_count"])
+        self.assertTrue(result["second_pass_completed"])
+        review["second_pass_completed"] = False
+        with self.assertRaisesRegex(ValueError, "第二遍"):
+            self.pipeline.build_hotword_payload(
+                self.rows, self.metadata, ["国务院常务会议"], review=review)
+
     def test_ai_must_fill_to_minimum_with_evidence(self):
         review = self.review()
         review["selected"] = review["selected"][:1]

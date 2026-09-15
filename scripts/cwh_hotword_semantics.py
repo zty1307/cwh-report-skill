@@ -66,7 +66,7 @@ def author_packet(topics, documents):
             'sources': [{k: d[k] for k in ('id', 'title', 'excerpts', 'topic_hits')} for d in documents]}
 
 
-def compile_selection(topics, documents, decision, *, minimum=36, maximum=DEFAULT_TERM_COUNT):
+def compile_selection(topics, documents, decision, *, minimum=36, maximum=DEFAULT_TERM_COUNT, require_coverage=True):
     selected = decision.get('selected')
     if not isinstance(selected, list) or not minimum <= len(selected) <= maximum:
         raise ValueError('Hotword selection does not meet the configured count bounds')
@@ -100,7 +100,7 @@ def compile_selection(topics, documents, decision, *, minimum=36, maximum=DEFAUL
         row.update(id=f'w{len(compiled)+1}', evidence_tier='core' if len(matched) >= 2 else 'supporting')
         compiled.append(row)
         seen.add(term)
-    if set(range(1, len(topics)+1)) - {h for r in compiled for h in r['topic_hits']}:
+    if require_coverage and set(range(1, len(topics)+1)) - {h for r in compiled for h in r['topic_hits']}:
         raise ValueError('Hotword selection omits an input topic')
     return compiled
 
@@ -111,7 +111,7 @@ def second_packet(topics, documents, selected):
         'excerpts': sources[i]['excerpts']} for i in r['source_ids']]} for r in selected]}
 
 
-def finish(topics, documents, selected, result, author_run, reviewer_run, *, minimum=36, maximum=DEFAULT_TERM_COUNT):
+def finish(topics, documents, selected, result, author_run, reviewer_run, *, minimum=36, maximum=DEFAULT_TERM_COUNT, deliver_available=False):
     if not author_run.get('session_id') or not reviewer_run.get('session_id') or author_run['session_id'] == reviewer_run['session_id']:
         raise ValueError('Second hotword pass needs a fresh model run')
     rows = result.get('reviews') or []
@@ -122,14 +122,20 @@ def finish(topics, documents, selected, result, author_run, reviewer_run, *, min
         raise ValueError('Second pass requires explicit decisions and reasons')
     decisions = {r['id']: r for r in rows}
     kept = [r for r in selected if decisions[r['id']]['keep']]
-    if len(kept) < minimum or set(range(1, len(topics)+1)) - {h for r in kept for h in r['topic_hits']}:
+    if len(kept) < minimum or (not deliver_available and set(range(1, len(topics)+1)) - {h for r in kept for h in r['topic_hits']}):
         raise ValueError('Second pass rejected required coverage or too many terms')
     review = {'review_method': 'ai_semantic_review', 'second_pass_completed': True, 'selected': kept}
+    if deliver_available:
+        review['delivery_policy'] = 'deliver_available_with_gaps'
     scored = apply_hotword_ai_review(review, [], documents, topics, [[t] for t in topics],
         minimum_term_count=minimum, target_term_count=maximum)
     return {'schema_version': 1, 'status': 'ai_review_complete', 'method': 'ai_semantic_review_with_evidence',
         'review_method': review['review_method'], 'second_pass_completed': True,
-        'settings': {'minimum_term_count': minimum, 'term_count': maximum}, 'selected': scored,
+        'settings': {'minimum_term_count': minimum, 'configured_minimum_term_count': 36, 'term_count': maximum}, 'selected': scored,
+        'delivery_policy': 'deliver_available_with_gaps' if deliver_available else None,
+        'count_shortfall': {'configured_minimum': 36, 'actual_count': len(scored),
+            'notice': f'热词经审核仅保留{len(scored)}个，低于数量目标36个；不补造词条。'}
+            if deliver_available and len(scored) < 36 else None,
         'review_provenance': {'author_run': author_run, 'reviewer_run': reviewer_run, 'decisions': rows,
                               'first_selection': selected},
         'corpus_audit': {'deduplicated_relevant_document_count': len(documents)}}
@@ -149,15 +155,18 @@ def run_task(task_path):
     command = json.loads(os.environ['CWH_SEMANTIC_COMMAND_JSON'])
     deadline = time.monotonic() + float(task.get('remaining_budget_seconds') or task['time_budget_seconds']) - 8
     packet = author_packet(topics, documents)
+    deliver_available = (task.get('repair_contract') or {}).get('missing_evidence') == 'deliver_available_with_gaps'
+    minimum = 1 if deliver_available else 36
+    prompt = AUTHOR_PROMPT + ('\n数量与议题覆盖是质量目标：仅返回真正支持的词，允许少于36个，不为无证据议题造词。' if deliver_available else '')
     atomic_write_json(workspace / 'hotword_source_packet.json', packet)
-    proposed, author_run = semantic_json(packet, AUTHOR_PROMPT, command, workspace, 'hotword-selection',
+    proposed, author_run = semantic_json(packet, prompt, command, workspace, 'hotword-selection',
         max(1, (deadline-time.monotonic()) * .55))
-    selected = compile_selection(topics, documents, proposed)
+    selected = compile_selection(topics, documents, proposed, minimum=minimum, require_coverage=not deliver_available)
     if time.monotonic() >= deadline:
         raise TimeoutError('Hotword stage budget exhausted before second pass')
     reviewed, reviewer_run = semantic_json(second_packet(topics, documents, selected), REVIEW_PROMPT, command,
         workspace, 'hotword-second-pass', max(1, deadline-time.monotonic()))
-    payload = finish(topics, documents, selected, reviewed, author_run, reviewer_run)
+    payload = finish(topics, documents, selected, reviewed, author_run, reviewer_run, minimum=minimum, deliver_available=deliver_available)
     payload['source_records'] = [{k: d[k] for k in ('id', 'url', 'source', 'topic_hits', 'is_comment')} for d in documents]
     payload['input_sha256'] = {k: hashlib.sha256(p.read_bytes()).hexdigest() for k, p in [('analysis_bundle', analysis_path), ('comment_handoff', comments_path)]}
     if time.monotonic() >= deadline:

@@ -1010,7 +1010,8 @@ def apply_hotword_ai_review(
 
     if errors:
         raise ValueError("热词AI审核未通过：" + "；".join(errors[:12]))
-    if len(output) < minimum_term_count:
+    effective_minimum = 1 if review.get("delivery_policy") == "deliver_available_with_gaps" else minimum_term_count
+    if len(output) < effective_minimum:
         raise ValueError(
             f"热词AI审核后仅{len(output)}个，少于最低{minimum_term_count}个；"
             "请让AI从审核包document_samples继续补提有证据的词"
@@ -1046,6 +1047,7 @@ def build_hotword_payload(
     candidates = generate_candidates(documents, topic_titles, topic_aliases)
     term_count = int(settings.get("term_count") or DEFAULT_TERM_COUNT)
     minimum_term_count = int(settings.get("minimum_term_count") or min(36, term_count))
+    deliver_available = bool(review and review.get("delivery_policy") == "deliver_available_with_gaps")
     review_packet = build_hotword_review_packet(
         candidates,
         documents,
@@ -1077,7 +1079,8 @@ def build_hotword_payload(
         "second_pass_completed": bool(review and review.get("second_pass_completed") is True),
         "settings": {
             "term_count": term_count,
-            "minimum_term_count": minimum_term_count,
+            "minimum_term_count": 1 if deliver_available else minimum_term_count,
+            "configured_minimum_term_count": minimum_term_count,
             "shape": settings.get("shape") or "cloud",
             "background": "transparent",
             "color": settings.get("color") or DEFAULT_COLOR,
@@ -1102,6 +1105,12 @@ def build_hotword_payload(
             "deduplicated_relevant_document_count": len(documents),
             "candidate_count": len(candidates),
         },
+        "delivery_policy": "deliver_available_with_gaps" if deliver_available else None,
+        "count_shortfall": {
+            "configured_minimum": minimum_term_count,
+            "actual_count": len(selected),
+            "notice": f"热词经审核仅保留{len(selected)}个，低于数量目标{minimum_term_count}个；不补造词条。"
+        } if deliver_available and status == "ai_review_complete" and len(selected) < minimum_term_count else None,
         "selected": selected[:term_count],
         "candidates": candidates,
         "review_packet": review_packet,

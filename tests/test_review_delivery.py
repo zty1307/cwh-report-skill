@@ -100,6 +100,10 @@ def test_fixed_hotword_rejection_is_audited_not_silently_padded():
 
 
 def test_topic_hit_transport_accepts_indices_exact_titles_and_unique_aliases():
+
+    validate_transport_result("hotword", {
+        "minimum_term_count": 36, "delivery_policy": "deliver_available_with_gaps"
+    }, {"review_method": "ai_semantic_review", "selected": [{"term": "城市更新"}]})
     packet = {
         "topic_titles": ["新型电网建设", "核准四个核电项目"],
         "topic_aliases": [["新型电网"], ["核电项目"]],

@@ -148,7 +148,8 @@ def validate_transport_result(kind: str, packet: dict, result: dict) -> None:
         if len(actual) != len(set(actual)) or set(actual) != set(expected):
             raise ValueError("review must cover exactly every packet record_id once")
     else:
-        if len(result.get("selected", [])) < int(packet.get("minimum_term_count") or 36):
+        minimum = 1 if packet.get("delivery_policy") == "deliver_available_with_gaps" else int(packet.get("minimum_term_count") or 36)
+        if not isinstance(result.get("selected"), list) or len(result["selected"]) < minimum:
             raise ValueError("hotword selection is below the evidence-backed minimum")
 
 
@@ -279,6 +280,9 @@ def main():
     for kind in ("public_top", "overseas", "hotword"):
         source = Path(task["inputs"][kind])
         packet = json.loads(source.read_text(encoding="utf-8"))
+        deliver_available = (task.get("repair_contract") or {}).get("missing_evidence") == "deliver_available_with_gaps"
+        if kind == "hotword" and deliver_available:
+            packet["delivery_policy"] = "deliver_available_with_gaps"
         target = Path(task["inputs"]["expected_outputs"][f"{kind}_ai_review"])
         if str(target) not in task["declared_outputs"]:
             raise ValueError("output is not declared")
@@ -310,7 +314,9 @@ def main():
                   "include的境外报道必须填写报道类型及准确简体标题/来源/摘要；区分转载来源与原创发言主体。"
                   "解读性报道须在本条interpretive_segments中选择支持判断的连续分析片段，填写interpretive_range:[起始id,结束id]及interpretive_verified=true；"
                   "id必须照抄本条编号，不得跨条混用；不输出interpretive_excerpt，宿主按范围提取逐字原文。事实性报道范围留空且verified=false。"
-                  "热词必须按minimum_term_count与target_term_count选足有证据的词；不足就返回blocker，不凑数。"
+                  + ("热词数量目标只是质量参考；返回实际有证据且完成二次自审的selected，不凑数，也不因少于minimum_term_count返回blocker。"
+                     if deliver_available else "热词必须按minimum_term_count与target_term_count选足有证据的词；不足就返回blocker，不凑数。")
+                  +
                   "不得把来源名当作另一家媒体，也不得把负面立场本身当作歪曲的证据。\n"
                   "直接返回符合output_shape的对象，不返回kind、packet或output_shape包装层。\n"
                   + json.dumps({"kind": kind, "reviewer_run_id": session, "output_shape": shape, "packet": transport_packet}, ensure_ascii=False, separators=(",", ":")))
@@ -360,8 +366,10 @@ def main():
                     result = resolve_overseas_spans(packet, result)
             if kind == "hotword" and not result.get("blocker"):
                 result = normalize_hotword_transport(result)
+                if deliver_available:
+                    result["delivery_policy"] = "deliver_available_with_gaps"
                 minimum = int(packet.get("minimum_term_count") or 36)
-                if len(result.get("selected", [])) < minimum:
+                if not deliver_available and len(result.get("selected", [])) < minimum:
                     supplement_packet = hotword_shortfall_packet(packet, result)
                     supplement_session = str(uuid.uuid4())
                     supplement_command = [x.replace("{session_id}", supplement_session) for x in command_template]

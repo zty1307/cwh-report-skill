@@ -24,6 +24,8 @@ Before a full run, read [references/model_neutral_execution.md](references/model
 
 The controller resolves stage budgets from the input mode at intake. A standard workbook does not reserve the raw-normalization allocation: `bounded_60m` gives workbook validation 30 seconds, domestic authoring 1290 seconds and independent review 600 seconds, without increasing the total or reducing rendering time. Raw inputs keep their original allocation. Never change a running job's clocks to apply a new policy.
 
+In bounded delivery, the hotword count is a quality target, not a reason to withhold every artifact. Retain only genuinely supported terms after the required second pass, record configured versus actual counts, and continue with a shorter nonempty list. Never manufacture words to reach 36. An empty or unreviewed list remains a real missing-evidence state. The explicit 40-minute raw-input profile reserves up to 480 seconds for normalization; the global 2400-second clock is unchanged, and per-stage maxima cannot all be consumed at once.
+
 Run the preflight before expensive model work:
 
 ```powershell

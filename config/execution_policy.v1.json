@@ -5,6 +5,10 @@
     "bounded_40m": {
       "formal": true,
       "wall_clock_budget_seconds": 2400,
+      "input_mode_budget_overrides": {
+        "raw_workbook": {"workbook": 480, "domestic_comments_sentiment": 180, "overseas_evidence": 150, "hotwords": 30},
+        "standard_workbook": {"workbook": 30}
+      },
       "reserved_delivery_buffer_seconds": 360,
       "stage_budgets_seconds": {
         "preflight": 30,
