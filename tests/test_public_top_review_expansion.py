@@ -83,3 +83,19 @@ def test_ranking_gap_is_propagated_only_for_hash_bound_workbook(tmp_path):
     other = {'collection': {'system_workbook': str(workbook)}}
     apply_raw_public_top_audit(other)
     assert 'audit' not in other
+
+
+def test_model_cannot_override_explicit_roundup_rule_but_original_decision_is_kept():
+    rows = inputs(15)
+    for i, row in enumerate(rows):
+        row['account'] = f'account-{i}'
+    rows[0]['title'] = 'roundup anchor topic'
+    config = {**CONFIG, 'public_roundup_patterns': ['roundup']}
+    packet = pipeline.filter_public_top(rows, config, META)['review_packet']
+    result = pipeline.filter_public_top(rows, config, META, review=reviewed(packet))
+    row = next(row for row in result['decisions'] if row['source_row'] == 0)
+    assert row['decision'] == 'exclude' and row['host_fixed_rule_veto']
+    assert row['model_decision'] == 'include'
+    assert row['model_review_reason'] == 'Focused original body'
+    assert 0 not in {row['source_row'] for row in result['selected']}
+    assert len(result['selected']) == 10

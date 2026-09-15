@@ -1379,6 +1379,11 @@ def filter_public_top(
         hits = item.get("topic_hits") or []
         if decision == "include" and not hits:
             raise PipelineError(f"公众TOP纳入项缺少topic_hits：{row.get('account')}《{row.get('title')}》")
+        model_decision, model_reason = decision, reason
+        fixed_veto = decision == 'include' and contains_any(normalize_text(row.get('title')), roundups)
+        if fixed_veto:
+            decision = 'exclude'
+            reason = 'fixed_roundup_rule_exclusion'
         ai_decisions.append({
             "source_row": row.get("source_row"),
             "account": row.get("account"),
@@ -1391,6 +1396,9 @@ def filter_public_top(
             "classification_confidence": float(confidence),
             "topic_hits": hits,
             "record_id": record_id,
+            "model_decision": model_decision,
+            "model_review_reason": model_reason,
+            "host_fixed_rule_veto": fixed_veto,
         })
         if decision == "include":
             ai_accepted.append({**row, "topic_hits": sorted(set(hits)), "ai_review_reason": reason, "ai_review_confidence": float(confidence)})
@@ -2048,6 +2056,7 @@ def write_audit(
     )
     public_reason_labels = {
         "roundup_or_breakfast_digest": "早餐/早报/复盘/消息合集",
+        "fixed_roundup_rule_exclusion": "宿主执行既有消息合集排除规则（保留模型原判断）",
         "meeting_not_primary_focus": "本次会议不是文章主体",
         "missing_or_invalid_read_count": "阅读量缺失或异常",
         "duplicate_url": "重复URL",
