@@ -121,6 +121,8 @@ Every top-level item must begin with an evidence-supported stance or action verb
 
 The attitude verb is a conclusion from evidence, not a positivity template. Use `肯定/认可/支持` only when the source itself expresses approval, `建议/期待/呼吁` for proposals, `认为/指出` for analytical judgment, and `质疑/担忧` for criticism or risk. Do not rewrite neutral analysis as praise merely to imitate a historical report.
 
+Use the configured `viewpoint.selection_rule` before freezing claims: retain different substantive judgments actually present in the read sources, rather than letting several broad-meaning statements crowd out distinct mechanisms, conditions, risk boundaries or proposals. These are comparison dimensions, not mandatory topic columns. One article can provide multiple independently attributed voices. A cluster must have a genuinely shared judgment; different mechanisms cannot acquire the first speaker's causal chain merely by sharing a policy topic. `viewpoint.heading_support_rule` applies in the author and independent heading review, without an extra whole-report rewriting pass.
+
 Inside a viewpoint group, use dynamically generated `一是、二是……` when there are multiple viewpoint clusters; there is no fixed five- or eight-group truncation. The text after every ordinal must pass the same stance-verb gate as the top-level heading; do not write bare conclusions such as `一是宏观政策重在……` or `二是项目建设……`. A purely factual cluster may only use the explicit exceptions `尚未形成评论性观点` or `以事实性报道为主`.
 
 Every claim should include evidence sources such as experts, media, institutions, or public accounts:
@@ -144,11 +146,11 @@ Bold each `一是/二是……` conclusion and the named source plus attribution
 
 Apply the following source and wording rules to every meeting:
 
-- Within one system subtopic, the same named person or the same media/self-media source should normally appear in only one viewpoint cluster. Merge that source's related observations into one fuller passage, then use independent voices for the remaining clusters. Limited reuse across different subtopics is allowed only when the source makes a separate, directly relevant argument; avoid letting one familiar expert dominate the whole chapter.
+- Within one system subtopic, the same named person or the same media/self-media source should normally appear in only one viewpoint cluster. The author selects its most substantive, source-supported complete claim before freezing and independent review; the host never merges reserve claims or changes frozen meanings to create a fuller passage. Limited reuse across different subtopics is allowed only when the source makes a separate, directly relevant argument; avoid letting one familiar expert dominate the whole chapter.
 - Distinguish the speaking subject exactly. When the publication itself gives analysis or advice, write `某媒体认为/称/建议`. When the article quotes a verified person, write the person's full verified institution, title and name. When the article truly uses an unnamed source, write `某媒体援引业内人士观点称` and retain the review marker. Never invent `某媒体受访专家指出` when the original does not provide a name, and never convert a publication's own editorial judgment into an anonymous expert judgment.
 - Use the source passage as the wording anchor. Lightly trim repetition and connect clauses for readability, but preserve the original claim's key nouns, verbs, scope, qualifications, examples and policy mechanism. Do not replace a specific source statement with a broader AI-created causal conclusion.
 - Check each speaking subject separately, including several experts quoted by the same article. A single attributed proposition should normally contain about 45-120 Chinese characters of substantive content. A proposition with fewer than 30 Chinese characters fails the formal gate: return to the original passage to include its reasoning, mechanism, condition or example, combine a related passage from the same source, or omit that voice. Do not pad a weak sentence with generic policy language. Do not count noun phrases such as `宏观分析人士` or `政策解读文章` as attribution verbs, and do not merge several short expert statements into one long evidence row to pass the threshold.
-- Public-article TOP ranking is not a writing-evidence filter. Before drafting, inspect the complete agenda-relevant raw public-article corpus and all eligible web candidates, regardless of read rank. When one article quotes several named speakers, extract and assess each voice separately. This rule is reusable across meetings and must not be relaxed or narrowed to imitate one benchmark.
+- Public-article TOP ranking is not a writing-evidence filter. Use the complete controller corpus index to choose bounded full-text reads regardless of appendix read rank; retain unread IDs as deferred, not reviewed or excluded. Exhaustive mode reads the entire corpus. When one article quotes several named speakers, extract and assess each voice separately. This rule is reusable across meetings and must not be relaxed or narrowed to imitate one benchmark.
 - Prefer named experts, professional institutions and media judgments that explain a policy mechanism, condition, effect boundary or concrete suggestion. Self-media remains eligible, but exclude commercial self-promotion for its own company/product, tangential promotion of an activity or service, and text whose substance is only a slogan, pun, metaphor or generic growth forecast. These are editorial-use exclusions, not deletions from the evidence pool.
 - Period prose may cite a public-web page only when its source-page timestamp has been preserved and verified inside the monitoring window. Exclude later pages even when their wording closely matches the desired report; do not backdate them from search snippets or article subject matter.
 - If a top-level subtopic has only one mature cluster, write the top-level heading and its evidence paragraph directly. Do not create a lone `一是` without a `二是`.
@@ -174,6 +176,7 @@ Search all workbook topics before selection. Use the configured per-topic query 
 
 Use real collected comments only. Preserve original wording, with only light formatting cleanup. Keep platform/account/time/link/interaction metadata in structured data and appendices.
 Every selected comment must have a completed AI formal-use review. The group heading must summarize the actual stance, expectation, criticism, reason or concrete suggestion shared by the quoted comments. Never fall back to `关注+议题名称`; a missing reviewed heading blocks formal rendering rather than triggering a generic title.
+Apply `comments.heading_summary_rule`: use a natural sentence about the actual object and opinion, not an abstract noun string copied from the quote with an added attitude verb. A genuine comment can remain in the sentiment denominator without being a suitable formal quotation. Preserve the original quote exactly; easier-to-read headings do not permit rewriting it.
 Treat each system agenda/subtopic as one comment group and one numbered item. Put 2-3 coherent representative comments beneath a single AI-reviewed `topic_comment_heading`; do not split different reactions to the same agenda into separate `一是/二是` items.
 
 ### （三）热词分布情况
@@ -181,11 +184,11 @@ Treat each system agenda/subtopic as one comment group and one numbered item. Pu
 Write one explanatory paragraph, not only a word list:
 
 ```text
-从热词分布来看，“A”“B”“C”等词位居前列，相关讨论主要聚焦……。“D”“E”等词热度较高，讨论内容集中于……。“F”“G”等词持续热传，讨论重点进一步延伸至……。此外，“H”“I”等词受到关注，相关观点多涉及……。
+从热词分布来看，“A”“B”“C”等词主要涉及{议题甲}，相关观点认为{已审核判断}。“D”“E”等词主要涉及{议题乙}，相关观点建议{已审核建议}。此外，“F”“G”等词主要涉及{议题丙}，相关观点多涉及{有依据的讨论对象}。
 ```
 
 Hotwords must be connected back to public attention points and subtopics.
-Follow the ranked wording pattern `位居前列`、`热度较高`、`持续热传`、`受到关注`; introduce lower-ranked remaining topics with `此外`. Vary the second clause among `相关讨论主要聚焦`、`讨论内容集中于`、`讨论重点进一步延伸至`、`相关观点主要讨论` and `相关观点多涉及`. Do not repeat `舆论围绕` for every topic. If the workbook contains a word-cloud picture, use it unchanged.
+Use the neutral configured word-group frame by default. `位居前列/热度较高` requires actual term-frequency comparison, and `持续热传` requires actual temporal term evidence; neither follows from topic propagation order or cloud layout. Historical report phrasing is not that evidence. Link only reviewed judgments using `相关观点`, without implying population-wide consensus. If the workbook contains a word-cloud picture, use it unchanged.
 When the reviewed focus already starts with a stance verb, write `舆论认为/建议/期待……`; do not produce malformed combinations such as `主要聚焦认为……`.
 
 ## 三、境外舆论情况

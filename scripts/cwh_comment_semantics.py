@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from cwh_host_research import semantic_json
 from cwh_pipeline_runtime import atomic_write_json
+from cwh_writing_rules import writing_rules
 from run_cwh_sentiment_stage import (build_workbook_summary, build_report_comment_handoff, workbook_metadata,
                                      write_csv, OUTPUT_FIELDS, REPORT_HANDOFF_FIELDS, VALID_LABELS, stable_sample_id)
 
@@ -159,6 +160,7 @@ PROMPT += QUOTE_CONSTRAINT_PROMPT
 COMPACT_PROMPT += QUOTE_CONSTRAINT_PROMPT
 QUOTE_PROMPT += QUOTE_CONSTRAINT_PROMPT
 QUOTE_HEADING_PROMPT = '\n正式引用的heading及topic_headings须以有原话支持的支持、肯定、期待、建议、担忧、认为、询问或希望明确等动词起头，每个标题只留一个中心判断。中性政策疑问用询问/希望明确及具体问题表述，不写成政策本身关系不明的客观定性，不用公众普遍关注等由单条样本推导的范围判断。'
+QUOTE_HEADING_PROMPT += '\n' + writing_rules()['comments']['heading_summary_rule']
 PROMPT += QUOTE_HEADING_PROMPT
 COMPACT_PROMPT += QUOTE_HEADING_PROMPT
 QUOTE_PROMPT += QUOTE_HEADING_PROMPT

@@ -12,6 +12,7 @@ HEADING_REVIEW_PROMPT = '''同时返回heading_reviews数组，每个headings输
 HEADING_REVIEW_PROMPT += '\n替代一级标题12—26个汉字，分簇标题10—24个汉字；只保留一个中心判断，不带专家强调、媒体认为等套头，不堆砌并列论点。只有客观细则而没有评价依据时用中性标题，不凭空补肯定或认可。'
 HEADING_REVIEW_PROMPT += '\n专家对机制或影响的实质判断可准确概括为认为、强调，不要求原文逐字出现同一个标题动词；但政策发布事实不能改成舆论赞扬、已经实现的效果或额外主张。'
 HEADING_REVIEW_PROMPT += '\n标题语义受支持但带“机构解读”“专家强调”“媒体认为”“审慎提示”等来源标签或审核动作套头，也应needs_revision：直接写具体判断，不把审核过程当观点。不要改变真实批评、风险或建议的强度，不因有部分审慎建议就将同簇明确批评一律软化为提示。'
+HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['heading_support_rule']
 
 
 def repair_runs(packet):

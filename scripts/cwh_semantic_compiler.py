@@ -29,6 +29,8 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 只输出必要JSON，不输出分析过程、长篇逐条说明或原文全文。'''
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["meeting_reference_rule"]
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["selection_rule"]
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["heading_support_rule"]
 AUTHOR_PROMPT += '\n网页date_quote须是原文连续的完整年、月、日，且对应发布日期；只有月日和时分不足，不能从URL、会议年份或正文事件年份补齐。找不到完整发布日期就excluded并保留具体原因，不反复改写日期凑校验。'
 AUTHOR_PROMPT += '\n没有segments完整正文的网页，只能排除为未读取或访问失败；不能据搜索摘要断言整篇没有独立解读，也不能将全部发现链接数说成已读全文数。缺口理由须区分发现、读取和合格声音三个范围。'
 
