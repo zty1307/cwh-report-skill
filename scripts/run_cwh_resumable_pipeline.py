@@ -227,7 +227,11 @@ def maybe_run_ai_worker(
         )
         for item in template
     ]
-    timeout = (runner.input_contract.get("stage_timeouts_seconds") or {}).get(spec.stage_id)
+    # The runner has already applied stage allocation, predecessor carry,
+    # research cutoff and global wall clock. Do not cap its worker again at
+    # the original nominal stage allocation after handing it a larger budget.
+    timeout = remaining if remaining is not None else (
+        runner.input_contract.get("stage_timeouts_seconds") or {}).get(spec.stage_id)
     code, log_path = runner.run_command(spec.stage_id, command, cwd=runner.root, timeout_seconds=timeout)
     if code != 0:
         if code in {28, 29}:

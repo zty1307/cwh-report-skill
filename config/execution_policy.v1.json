@@ -25,6 +25,8 @@
       },
       "model_contract": {
         "max_repair_rounds_per_stage": 2,
+        "single_topic_request_timeout_seconds": 180,
+        "minimum_future_topic_request_seconds": 45,
         "temperature_guidance": 0.1,
         "require_json_only": true,
         "allow_skill_mutation": false,
@@ -97,6 +99,8 @@
       },
       "model_contract": {
         "max_repair_rounds_per_stage": 2,
+        "single_topic_request_timeout_seconds": 180,
+        "minimum_future_topic_request_seconds": 45,
         "temperature_guidance": 0.1,
         "require_json_only": true,
         "allow_skill_mutation": false,

@@ -116,6 +116,10 @@ def build_task_payload(
         "stage_id": stage_id,
         "execution_profile": resolved_profile,
         "time_budget_seconds": budget,
+        "semantic_request_limits": {
+            "single_topic_max_seconds": int(model_contract.get("single_topic_request_timeout_seconds") or 0),
+            "future_topic_reserve_seconds": int(model_contract.get("minimum_future_topic_request_seconds") or 0),
+        },
         "expected_output": str(expected_output),
         "declared_outputs": declared_outputs,
         "stage_workspace": str(workspace),
