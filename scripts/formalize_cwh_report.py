@@ -1934,11 +1934,17 @@ def add_chart_caption(document: Any, text: str) -> Any:
     return paragraph
 
 
-def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: str) -> Any:
+def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: str, max_height: Any = None) -> Any:
     paragraph = document.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.first_line_indent = Pt(0)
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(6)
     shape = paragraph.add_run().add_picture(image_path, width=width)
+    if max_height is not None and shape.height > max_height:
+        shape.width = round(shape.width * max_height / shape.height)
+        shape.height = max_height
     shape._inline.docPr.set("descr", alt_text)
     shape._inline.docPr.set("title", alt_text)
     return shape
@@ -2095,7 +2101,7 @@ def write_override_section(
     if key == "two":
         chart = docx_charts.get("hotword_distribution")
         if chart and Path(chart).exists():
-            add_centered_picture(document, chart, width=Inches(5.8), alt_text="境内舆情热词分布词云图")
+            add_centered_picture(document, chart, width=Inches(5.8), alt_text="境内舆情热词分布词云图", max_height=Inches(3.0))
     if key == "four" and not overseas_inserted:
         add_overseas_table(document, formal_appendix_overseas_rows(data))
     if key == "four" and not wechat_inserted:
@@ -2172,15 +2178,11 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
         document.add_paragraph(hotword_paragraph(data))
         chart = docx_charts.get("hotword_distribution")
         if chart and Path(chart).exists():
-            add_centered_picture(document, chart, width=Inches(5.8), alt_text="境内舆情热词分布词云图")
+            add_centered_picture(document, chart, width=Inches(5.8), alt_text="境内舆情热词分布词云图", max_height=Inches(3.0))
             document.add_paragraph("")
 
-    # Start the overseas section on a fresh page. The report-wide cleanup below
-    # intentionally removes Word's fragile keep-next controls, which otherwise
-    # render as black-square artifacts in some viewers. Without an explicit page
-    # break this major heading can be stranded beside the footer at the bottom
-    # of the word-cloud page.
-    document.add_page_break()
+    # Continue natural flow after the bounded-height cloud; forcing a fresh
+    # overseas page can leave the preceding page with nothing but the cloud.
     if three_override:
         write_override_section(document, data, "three", three_override, docx_charts)
     else:

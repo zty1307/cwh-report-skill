@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -45,9 +46,10 @@ DEFAULT_RENDER_SCALE = 2
 DEFAULT_WORD_SPACING = 2
 DEFAULT_LAYOUT_X_SPREAD = 1.10
 DEFAULT_LAYOUT_Y_SPREAD = 0.98
-DEFAULT_FONT_PATH: Path | None = None
 DEFAULT_CLOUD_MASK_ASSET = Path(__file__).resolve().parent.parent / "assets" / "wordcloud_cloud_mask.png"
+BUNDLED_CJK_FONT = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "TencentFont.otf"
 BUNDLED_CJK_FALLBACK_FONT = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
+DEFAULT_FONT_PATH = BUNDLED_CJK_FONT
 DEFAULT_MICROCLOUD_GRID = 300
 DEFAULT_MICROCLOUD_DENSITY = 0.18
 DEFAULT_MICROCLOUD_HEADLINE_SCALE = 1.30
@@ -1087,9 +1089,7 @@ def build_hotword_payload(
             "rotation": int(settings.get("rotation", DEFAULT_ROTATION)),
             "width": int(settings.get("width") or DEFAULT_WIDTH),
             "height": int(settings.get("height") or DEFAULT_HEIGHT),
-            "font_path": settings.get("font_path") or (
-                str(DEFAULT_FONT_PATH) if DEFAULT_FONT_PATH and DEFAULT_FONT_PATH.exists() else ""
-            ),
+            "font_path": settings.get("font_path") or "",
             "mask_path": settings.get("mask_path") or "",
             "primary_font_min": int(settings.get("primary_font_min") or DEFAULT_PRIMARY_FONT_MIN),
             "primary_font_max": int(settings.get("primary_font_max") or DEFAULT_PRIMARY_FONT_MAX),
@@ -1125,6 +1125,7 @@ def resolve_font(requested: str | Path | None) -> Path:
         raise FileNotFoundError(f"指定词云字体不存在：{path}")
     candidates = [
         Path(os.environ["CWH_CJK_FONT"]) if os.environ.get("CWH_CJK_FONT") else None,
+        BUNDLED_CJK_FONT,
         BUNDLED_CJK_FALLBACK_FONT,
         Path(r"C:\Windows\Fonts\msyh.ttc"),
         Path(r"C:\Windows\Fonts\simhei.ttf"),
@@ -2129,7 +2130,8 @@ def _july19_text_sprite(
     rotated = Image.new("RGBA", alpha.size, (red, green, blue, 255))
     rotated.putalpha(alpha)
     collision_filter = 5 if font_size >= 18 else 3 if font_size >= 12 else 1
-    # A size-one maximum filter is an identity; avoid native crashes on Windows.
+    # Pillow's native size-one filter can crash on some Windows builds. It is
+    # mathematically the identity, so bypass it without changing placement.
     collision = alpha.filter(ImageFilter.MaxFilter(collision_filter)) if collision_filter > 1 else alpha
     return rotated, np.asarray(collision) > 18
 
@@ -2297,6 +2299,8 @@ def render_wordcloud_png(
     payload["render_audit"] = {
         "method": "july19_hierarchy_edge_fill",
         "font_path": str(font_path.resolve()),
+        "font_family": list(ImageFont.truetype(str(font_path), 32).getname()),
+        "font_sha256": hashlib.sha256(font_path.read_bytes()).hexdigest(),
         "font_scale": {
             "primary_min": primary_minimum,
             "primary_max": primary_maximum,
