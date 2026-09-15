@@ -14,6 +14,32 @@ from normalize_cwh_analysis import normalize_analysis, evidence_sentence
 from report_rules import domestic_viewpoint_quality_issues
 
 
+def test_invalid_shared_heading_uses_only_an_existing_single_approved_individual_heading():
+    row = {'topic': '基础工程', 'platform': '境内平台', 'url': 'https://example.test/comment',
+           'quote_verified': True, 'evidence_mode': 'platform_comment', 'comment_id': 'c1',
+           'content': '这些基础工程将改善资源配置。', 'ai_formal_include': True,
+           'ai_semantic_quality': 'substantive', 'topic_comment_heading': '基础工程影响',
+           'comment_heading': '认为基础工程将改善资源配置'}
+    original = copy.deepcopy(row)
+    groups = formal.comment_groups([row])
+    assert groups[0][0] == row['comment_heading']
+    assert groups[0][1][0]['comment_id'] == 'c1'
+    assert row == original
+
+
+def test_invalid_shared_heading_does_not_combine_distinct_individual_judgments():
+    base = {'topic': '基础工程', 'platform': '境内平台', 'url': 'https://example.test/comment',
+            'quote_verified': True, 'evidence_mode': 'platform_comment', 'ai_formal_include': True,
+            'ai_semantic_quality': 'substantive', 'topic_comment_heading': '基础工程影响'}
+    rows = [{**base, 'comment_id': 'c1', 'content': '希望保持基本服务覆盖。',
+             'comment_heading': '希望保持基本服务覆盖'},
+            {**base, 'comment_id': 'c2', 'content': '应公开实施安排。',
+             'comment_heading': '建议公开实施安排'}]
+    original = copy.deepcopy(rows)
+    assert formal.comment_groups(rows) == []
+    assert rows == original
+
+
 def test_explicit_zero_is_not_replaced_by_sample_count_and_peak_requires_valid_date():
     stats = {"total_spread": 0, "total_samples": 500,
              "by_date": {"无日期": 9999, "2026-99-99": 8888, "2026-01-02": 5}}

@@ -555,11 +555,9 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         text = clean_formal_comment(item.get("content") or item.get("title"))
         if not text or not comment_is_substantive(item, text):
             continue
-        reviewed_heading = comment_stance_heading(
-            item.get("topic_comment_heading")
-            or item.get("comment_heading")
-            or item.get("ai_comment_heading")
-        )
+        reviewed_heading = (comment_stance_heading(item.get("topic_comment_heading"))
+                            or comment_stance_heading(item.get("comment_heading"))
+                            or comment_stance_heading(item.get("ai_comment_heading")))
         if not reviewed_heading:
             continue
         # One system agenda/subtopic is one numbered report item.  Different
