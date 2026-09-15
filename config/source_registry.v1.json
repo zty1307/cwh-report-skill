@@ -1,6 +1,6 @@
 {
-  "version": "2026.08-v6",
-  "updated_at": "2026-08-12",
+  "version": "2026.09-v7",
+  "updated_at": "2026-09-15",
   "purpose": "Versioned stable source registry for CWH evidence collection and auditable coverage.",
   "execution": {
     "mode": "registry_first_then_open_search",
@@ -17,6 +17,10 @@
     "paused_platforms": ["reddit"]
   },
   "sources": [
+    {"id":"medical_society","name":"中华医学会","region":"domestic","tier":"finance_industry","domains":["cma.org.cn"],"must_check":true,"source_type":"industry_institution","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":[],"verification_url":"https://www.cma.org.cn/","verified_at":"2026-09-15"},
+    {"id":"law_society","name":"中国法学会","region":"domestic","tier":"finance_industry","domains":["chinalaw.org.cn"],"must_check":true,"source_type":"industry_institution","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":[],"verification_url":"https://www.chinalaw.org.cn/portal/page/index.html?id=9","verified_at":"2026-09-15"},
+    {"id":"electricity_council","name":"中国电力企业联合会","region":"domestic","tier":"finance_industry","domains":["cec.org.cn"],"must_check":true,"source_type":"industry_institution","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":[],"verification_url":"https://huiyi.cec.org.cn/HYPXQT/hy_hy/list","verified_at":"2026-09-15"},
+    {"id":"logistics_federation","name":"中国物流与采购联合会","region":"domestic","tier":"finance_industry","domains":["chinawuliu.com.cn"],"must_check":true,"source_type":"industry_institution","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":[],"verification_url":"https://account.chinawuliu.com.cn/","verified_at":"2026-09-15"},
     {"id":"gov_cn","name":"\u4e2d\u56fd\u653f\u5e9c\u7f51","region":"domestic","tier":"authoritative","domains":["gov.cn"],"must_check":true,"source_type":"official","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":["2026-06-29","2026-07-10"]},
     {"id":"xinhua","name":"\u65b0\u534e\u7f51","region":"domestic","tier":"authoritative","domains":["news.cn","xinhuanet.com"],"must_check":true,"source_type":"mainstream_media","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":["2026-06-29","2026-07-10"]},
     {"id":"people","name":"\u4eba\u6c11\u7f51","region":"domestic","tier":"authoritative","domains":["people.com.cn"],"must_check":true,"source_type":"mainstream_media","reader":"full_page","comment_adapter":"none","login_required":false,"baseline_periods":["2026-06-29","2026-07-10"]},

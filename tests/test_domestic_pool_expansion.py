@@ -13,6 +13,18 @@ def test_academic_discovery_uses_alternative_source_types_not_all_types_at_once(
     assert '(研究院 OR 智库 OR 学者 OR 协会 OR 学会)' in query
     assert '(解读 OR 分析 OR 建议 OR 评论)' in query
     assert '公共服务政策' in query and '2026-07-31' in query
+
+
+def test_cross_sector_professional_sources_reach_real_bounded_lane_without_more_queries():
+    sources = load_source_registry()['sources']
+    lanes = stable_source_tasks('公共服务政策', '2026-07-31', sources, profile_name='bounded_60m')
+    industry = next(row for row in lanes if row['source_id'] == 'lane_industry_expert')
+    ids = {'medical_society', 'law_society', 'electricity_council', 'logistics_federation'}
+    assert ids <= set(industry['source_ids'])
+    assert all('site:' + domain in industry['query'] for domain in
+               ('cma.org.cn', 'chinalaw.org.cn', 'cec.org.cn', 'chinawuliu.com.cn'))
+    assert '公共服务政策' in industry['query']
+    assert len(lanes) == 6
 from run_cwh_compiled_worker import domestic_reading_limits, balanced_fetch_urls
 from prepare_cwh_corpus_index import prepare_corpus_index
 from cwh_model_contract import execution_profile
