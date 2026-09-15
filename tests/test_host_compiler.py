@@ -246,6 +246,20 @@ def test_independent_packet_does_not_merge_different_segment_namespaces():
     assert ''.join(s['text'] for s in packet['claims'][1]['excerpt_segments']) == alternate['source_excerpt']
 
 
+def test_independent_packet_carries_current_topic_and_original_event_title_without_rewriting_quotes():
+    bundle = compiled()
+    candidate = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]
+    candidate['title'] = '另一场会议的公共服务政策解读'
+    original = copy.deepcopy(bundle)
+    packet = independent_packet(bundle)
+    assert packet['agenda_topics'] == ['公共服务']
+    assert packet['claims'][0]['topic'] == '公共服务'
+    assert packet['sources'][0]['title'] == candidate['title']
+    ev = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    assert ''.join(row['text'] for row in packet['claims'][0]['excerpt_segments']) == ev['source_excerpt']
+    assert bundle == original
+
+
 def test_review_range_extracts_frozen_text_without_certifying_support():
     bundle = compiled()
     ev = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]

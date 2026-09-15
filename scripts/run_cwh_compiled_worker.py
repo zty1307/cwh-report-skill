@@ -261,6 +261,7 @@ REVIEW_PROMPT = '''独立核验每条formal_claim是否被同条excerpt_segments
 返回且只返回{"reviews":[{"id":"输入短ID","verdict":"fully_supported|partially_supported|unsupported|uncertain","rationale":"一句具体理由","revision":null或{"formal_claim":"45至120汉字的完整忠实观点","verdict":"fully_supported","rationale":"一句说明重组后为何被原文完整支持"}}]}，每个ID恰好一次。原观点fully_supported时revision必须为null；否则revision必须是对象：只从同一excerpt中删除越界内容、纠正主客体方向或重新组织明确受支持的信息，形成45至120汉字的完整观点；不得新增事实、改变发言主体，也不得因原句删短就返回null。对revision再次逐项核对，只有确认为fully_supported才提交。
 判断前须检查观点中的每个事实、因果、效果、程度、数字、限定词、发言主体和职务；任何一部分缺乏支持都不能判fully_supported。媒体自身评论可按source元数据核对媒体名，但不得把其引用人物冒充媒体观点。只允许依据同条excerpt_segments；宿主负责逐字引用、位置、哈希、命题覆盖和时间。'''
 REVIEW_PROMPT += '\n' + HEADING_REVIEW_PROMPT
+REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
 
 
 def compile_review(analysis, result, run, digest):
@@ -333,10 +334,11 @@ def independent_packet(analysis):
                 claim_id = f'e{len(claims)+1}'
                 if snapshot['source_text'][ev['source_excerpt_start']:ev['source_excerpt_end']] != ev['source_excerpt']:
                     raise ValueError('Frozen source does not contain the exact declared excerpt')
-                claims.append({"id": claim_id, "source_id": short,
+                claims.append({"id": claim_id, "source_id": short, "topic": topic['topic'],
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
-    return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis)}
+    return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
+            "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']]}
 
 
 def verify(task, deadline):
