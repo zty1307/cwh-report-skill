@@ -107,11 +107,17 @@ def labeled_publication_date(content):
     pattern = (r"(?:发布日期|发布时间|发布于|Publication Date|Published on)\s*[:：]\s*"
                r"(\d{4})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})(?:日)?")
     matches = list(re.finditer(pattern, content[:2400], re.IGNORECASE))
+    # A source label and date on the same publication-metadata line; never a
+    # bare narrative/event date or a year guessed from the URL or meeting.
+    source_date_pattern = (r"(?m)^[ \t]*(?:来源|Source)\s*[:：][^\r\n]{1,100}?"
+                           r"(?:日期|时间|Date)\s*[:：]\s*"
+                           r"(\d{4})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})(?:日)?")
+    matches += list(re.finditer(source_date_pattern, content[:2400], re.IGNORECASE))
     # Plain article-header timestamps immediately followed by a source label.
     # Do not treat dates within narrative text or URL paths as publication dates.
     header_pattern = (r"(?m)^[ \t]*(\d{4})-(\d{1,2})-(\d{1,2})[ \t]+"
                       r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?[ \t]*"
-                      r"(?=\r?\n[ \t]*(?:来源|Source)[ \t]*[:：])")
+                      r"(?=\r?\n[ \t]*(?:来源|Source|发布于)[ \t]*[:：])")
     matches += list(re.finditer(header_pattern, content[:2400], re.IGNORECASE))
     evidence = []
     for match in matches:

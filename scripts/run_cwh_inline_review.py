@@ -116,7 +116,9 @@ def compact_hotword_packet(packet: dict) -> dict:
 
 
 def response_object(log: str) -> dict:
-    from cwh_json_transport import insert_single_missing_member_comma, normalize_single_smart_quoted_member_key
+    from cwh_json_transport import (insert_single_missing_member_comma,
+        normalize_single_smart_quoted_member_key, remove_single_stray_period_before_string_value)
+    parse_failures = []
     def parse(value):
         if isinstance(value, dict):
             if value.get("is_error"):
@@ -140,6 +142,15 @@ def response_object(log: str) -> dict:
                     repaired = insert_single_missing_member_comma(text)
                 if repaired is None:
                     repaired = normalize_single_smart_quoted_member_key(text)
+                if repaired is None:
+                    repaired = remove_single_stray_period_before_string_value(text)
+                if repaired is None and text.startswith('{'):
+                    try:
+                        json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        context = repr(text[max(0, exc.pos - 60):exc.pos + 60])
+                        parse_failures.append(f"JSON syntax: {exc.msg}; line {exc.lineno}, "
+                                              f"column {exc.colno}, char {exc.pos}; data context={context}")
                 return parse(repaired) if repaired is not None else None
         return None
     try:
@@ -155,7 +166,8 @@ def response_object(log: str) -> dict:
                 return found
         except ValueError:
             continue
-    raise ValueError("model returned no parseable review JSON")
+    detail = '; ' + parse_failures[-1] if parse_failures else ''
+    raise ValueError("model returned no parseable review JSON" + detail)
 
 
 def validate_transport_result(kind: str, packet: dict, result: dict) -> None:

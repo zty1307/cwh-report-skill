@@ -14,6 +14,44 @@ def unique_members(pairs):
     return result
 
 
+def remove_single_stray_period_before_string_value(text):
+    """Remove exactly one decoder-confirmed dot outside an intact string value.
+
+    No key, quoted value, numeric token or missing field is inferred. The whole
+    object must then parse without any second repair or duplicate keys.
+    """
+    def reject_constant(value):
+        raise ValueError('Non-standard JSON constant')
+    try:
+        json.loads(text, object_pairs_hook=unique_members, parse_constant=reject_constant)
+        return None
+    except json.JSONDecodeError as error:
+        if error.msg != 'Expecting value':
+            return None
+        position = error.pos
+    except ValueError:
+        return None
+    if text[position:position + 2] != '."':
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text[position + 1:])
+        if not isinstance(value, str):
+            return None
+        result = json.loads(text[:position] + text[position + 1:],
+                            object_pairs_hook=unique_members, parse_constant=reject_constant)
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    repairs = result.get('transport_repairs')
+    if repairs is not None and not isinstance(repairs, list):
+        return None
+    result.setdefault('transport_repairs', []).append({
+        'kind': 'removed_single_stray_period_before_string_value', 'position': position,
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
+    return result
+
+
 def normalize_single_smart_quoted_member_key(text):
     """Fix one decoder-confirmed smart-quoted ASCII member key, not values.
 

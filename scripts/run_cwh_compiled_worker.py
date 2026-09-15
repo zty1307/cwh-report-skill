@@ -187,6 +187,36 @@ def author_contract_sha256(prompt, command):
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
+def repair_topic_web_metadata(packet, decision, command, workspace, timeout, label):
+    """One local metadata repair before later topics consume stage retries.
+
+    Dates and publishers still require the same literal original-text gate.
+    The separate model cache records repairs without rewriting raw authorship.
+    """
+    decision = normalize_excluded_claims([{**decision, 'topic': packet['topic']}])[0]
+    decision = exclude_certain_period_misses(packet, normalize_web_publication_dates(packet, decision))
+    problems = web_metadata_errors(packet, decision)
+    if not problems:
+        return decision, None
+    if timeout < 15:
+        raise TimeoutError('No remaining local web metadata repair budget')
+    feedback = [f"[{packet['topic']}] {problem}" for problem in problems]
+    request = repair_packet([packet], [decision], feedback, semantic_packet)
+    response, run = semantic_json(request,
+        REPAIR_PROMPT + batch_author_contract(request['topics']) +
+        '\n本次只修复列明的网页发布元数据；保留其他正确选材、观点、身份、引文、标题和簇。'
+        '本篇原文没有完整发布日期时excluded且claims为空，不补年份；仅删除因此删空的簇。',
+        command, workspace, label, min(45, timeout), reuse_cache=True)
+    repaired = apply_semantic_repairs([decision], request, response)[0]
+    repaired = exclude_certain_period_misses(packet, normalize_web_publication_dates(packet, repaired))
+    remaining_errors = web_metadata_errors(packet, repaired)
+    if remaining_errors:
+        raise ValueError('; '.join(remaining_errors))
+    repaired.setdefault('transport_repairs', []).append({
+        'kind': 'model_local_web_metadata_repair', 'validation_problems': feedback, 'run': run})
+    return repaired, run
+
+
 def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=(),
                            maximum_request_seconds=180, future_topic_reserve_seconds=45):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
@@ -233,6 +263,16 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if completion_run:
             run = {**run, 'missing_reason_completion_run': completion_run}
+        metadata_remaining = max(0, deadline - time.monotonic())
+        metadata_timeout = single_topic_request_budget(metadata_remaining, len(packets) - number,
+            45, future_topic_reserve_seconds) if metadata_remaining else 0
+        try:
+            result, metadata_run = repair_topic_web_metadata(packet, result, command, workspace,
+                metadata_timeout, f'author-topic-{number}-web-metadata-repair')
+        except ValueError as exc:
+            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+        if metadata_run:
+            run = {**run, 'web_metadata_repair_run': metadata_run}
         decisions.append({**result, 'topic': packet['topic']})
         runs.append(run)
     return decisions, {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),

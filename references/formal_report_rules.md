@@ -307,3 +307,8 @@ Those belong in `cwh_audit.json` and, if needed, a separate review note.
 境外summary_cn_simplified是正文观点，review_reason是选材审核理由。两者不能混写：“属会议事实之外新增的分析”“因此纳入”等只放审核理由；正式摘要直接写判断、机制和条件，无原文分析就不补造。
 
 本期议程明确涉及的其他会议或背景政策的实质解读可以保留，但成文须明确原文实际讨论对象。不能把该原文中的“本次会议”“新增部署”等指称直接移到报告会议，冒称另一场会议的要求是本次报告会议的新决定。独立复核同时收到当前议题、议程组和原始标题，用于讨论对象消歧；标题不代替原文论据，不新增原文未支持的日期、因果或结论。
+### Early publication-metadata checks
+
+Before moving to the next author topic, validate selected web articles against their literal original publisher and complete publication date. Explicit source/date metadata on one line, or a standalone full timestamp immediately followed by a source/publishing-location label, may establish a publication date. Navigation dates, narrative event dates, month/day without year, and conflicting metadata dates must not be inferred. A verified out-of-period header is a deterministic exclusion with original model selection preserved in audit.
+
+Other invalid selected-web metadata gets at most one local model repair, capped at 45 seconds and the current stage's remaining allocation with future-topic reserve. It uses a separate hash-checked model cache, never overwrites the raw author answer, and must pass the same original-text metadata gate afterward. Missing dates cannot be supplemented from URLs or meeting years. This does not reset stage retries or enlarge the full-run budget.

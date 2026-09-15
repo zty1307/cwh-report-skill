@@ -18,6 +18,26 @@ from cwh_json_transport import load_framed_json, normalize_authoring_envelope
 from run_cwh_inline_review import response_object
 
 
+def test_invalid_member_colon_is_not_guessed_but_retry_gets_bounded_diagnostic():
+    answer = '{"items":[{"id":"r10","decision":"excluded":"真实审核理由","claims":[]}]}'
+    raw = json.dumps({'type': 'result', 'result': '```json\n' + answer + '\n```'})
+    frozen = raw
+    with pytest.raises(ValueError) as error:
+        response_object(raw)
+    message = str(error.value)
+    assert 'JSON syntax:' in message
+    assert "Expecting ',' delimiter" in message
+    assert 'line 1, column' in message
+    assert 'excluded' in message
+    assert len(message) < 350
+    assert raw == frozen
+
+
+def test_parse_diagnostic_does_not_change_valid_review_acceptance():
+    result = {'items': [{'id': 'r10', 'decision': 'excluded', 'reason': '真实审核理由'}]}
+    assert response_object(json.dumps({'type': 'result', 'result': json.dumps(result)})) == result
+
+
 def bundle(topic):
     return {"viewpoints": {"by_topic": [{"topic": topic, "clusters": []}]}, "research_audit": {
         "domestic_media_research": {"registry_version": "test", "execution_profile": "bounded_60m",
