@@ -35,9 +35,19 @@ def complete_corpus_deferrals(data: dict, corpus: dict, topics: list[str]) -> di
 
 def professional_quote_hint(text: str, aliases: list[str]) -> int:
     """Reading hint only: named professional attribution near a policy object."""
-    pattern = r'(?:教授|研究员|研究总监|研究中心主任|研究院院长|研究院副院长|首席经济学家|首席分析师|专委会副主任|联合会会长)[\u4e00-\u9fff]{2,4}(?:认为|表示|指出|强调|称|建议)'
-    return min(3, sum(any(alias and alias in text[max(0, m.start()-500):m.end()+500]
-                         for alias in aliases) for m in re.finditer(pattern, text)))
+    roles = '教授|研究员|研究总监|研究中心主任|研究院院长|研究院副院长|首席经济学家|首席分析师|首席专家|专委会副主任|专家委员会委员|联合会会长|副会长|理事长'
+    verbs = '认为|表示|指出|强调|称|建议|解读'
+    # Learn only explicitly attributed names from this same source. A later
+    # "X told [outlet]" paragraph need not repeat the full professional role.
+    names = {m.group(1) for m in re.finditer(
+        rf'(?:{roles})([\u4e00-\u9fff]{{2,4}})(?=对|在|[，,]?\s*(?:{verbs}))', text)}
+    starts = set()
+    for name in names:
+        pattern = rf'{re.escape(name)}(?:(?:对|在)[^。！？；\n]{{0,80}}?)?[，,]?\s*(?:{verbs})'
+        for match in re.finditer(pattern, text):
+            if any(alias and alias in text[max(0, match.start()-500):match.end()+500] for alias in aliases):
+                starts.add(match.start())
+    return min(3, len(starts))
 
 
 def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared_aliases=None, *, shortlist_limit=40) -> Path:
