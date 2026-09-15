@@ -93,9 +93,14 @@ def cached_public_pages(workspace, urls, timeout=8):
     return pages
 
 
-def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache):
+def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=()):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
     decisions, runs = [], []
+    feedback_path = workspace / 'author_topic_feedback.json'
+    prior_feedback = read(feedback_path) if feedback_path.is_file() else {}
+    targets = {p['topic'] for p in packets if any(p['topic'] in str(f) for f in feedback)}
+    if feedback and not targets:
+        targets = {p['topic'] for p in packets}  # Unscoped errors must not be guessed.
     for number, packet in enumerate(packets, 1):
         if deadline - time.monotonic() < 15:
             raise TimeoutError("No remaining single-topic semantic budget")
@@ -103,8 +108,24 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         contract = ('\n本次只审核一个议题，顶层直接返回items、heading、clusters（不是topics数组）。'
                     '所有输入ID恰好一次，排除项也保留reason和claims:[]；不得串用其他议题。'
                     '输入议题：' + packet['topic'] + '；ID清单：' + json.dumps(ids, ensure_ascii=False))
-        result, run = semantic_json(semantic_packet(packet), prompt + contract, command, workspace,
-                                   f"author-topic-{number}", deadline - time.monotonic(), reuse_cache=reuse_cache)
+        model_packet = semantic_packet(packet)
+        digest = hashlib.sha256(json.dumps(model_packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        retained = prior_feedback.get(packet['topic']) or {}
+        if retained.get('source_packet_sha256') != digest:
+            retained = {}
+        if packet['topic'] in targets:
+            retained = {'source_packet_sha256': digest, 'feedback': list(feedback)}
+        if retained:
+            prior_feedback[packet['topic']] = retained
+            atomic_write_json(feedback_path, prior_feedback)
+        local_prompt = prompt + contract
+        if retained.get('feedback'):
+            local_prompt += '\n仅修复本议题的真实反馈，不改变原文身份；JSON值中术语用中文引号或正确转义：' + json.dumps(retained['feedback'], ensure_ascii=False)
+        try:
+            result, run = semantic_json(model_packet, local_prompt, command, workspace,
+                                       f"author-topic-{number}", deadline - time.monotonic(), reuse_cache=reuse_cache)
+        except ValueError as exc:
+            raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if result.get('topic') not in (None, packet['topic']):
             raise ValueError('Single-topic response changed the requested topic')
         returned = [row.get('id') for row in result.get('items') or []]
@@ -147,8 +168,6 @@ def author(task, deadline):
         blocker = read(blocker_path)
         if blocker.get("error_type") in {"ValueError", "KeyError", "TypeError"}:
             feedback = [*feedback, str(blocker.get("blocker"))]
-    if feedback:
-        prompt += "\n上次门禁反馈（首次缺文件不是内容错误），只修复真实错误，不改变已正确原文身份：" + json.dumps(feedback, ensure_ascii=False)
     packet = {"topics": [semantic_packet(p) for p in packets]}
     packet_hash = hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     checkpoint = Path(task["stage_workspace"]) / "author_decisions.json"
@@ -165,7 +184,7 @@ def author(task, deadline):
         decisions = apply_semantic_repairs(prior["decisions"], request, result)
     else:
         decisions, run = author_topic_decisions(packets, prompt, command, Path(task["stage_workspace"]),
-                                                deadline, reuse_cache=not actual_feedback)
+                                                deadline, reuse_cache=True, feedback=actual_feedback)
     decisions = normalize_excluded_claims(decisions)
     if len(decisions) != len(packets) or {d.get("topic") for d in decisions} != {p["topic"] for p in packets}:
         raise ValueError("Each requested topic requires exactly one semantic decision bundle")

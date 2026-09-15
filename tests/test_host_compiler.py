@@ -10,6 +10,18 @@ from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import labeled_publication_date, exclude_certain_period_misses
 from cwh_semantic_compiler import duplicate_voice_errors
+from cwh_json_transport import escape_cjk_internal_quotes
+from run_cwh_inline_review import response_object
+
+
+def test_cjk_quote_transport_repair_preserves_decoded_text_not_claim_content():
+    malformed = '{"items":[{"id":"r1","claim":"国民健康"十五五"规划"}]}'
+    repaired = response_object(json.dumps({'type': 'result', 'result': malformed}, ensure_ascii=False))
+    assert repaired['items'][0]['claim'] == '国民健康"十五五"规划'
+    assert repaired['transport_repairs'][0]['kind'] == 'escaped_cjk_internal_quotes'
+    assert escape_cjk_internal_quotes('{"items":[{"id":"r1" "claim":"少逗号"}]}') is None
+    assert escape_cjk_internal_quotes('{"items":[{"id":"r1","claim":"截断') is None
+    assert escape_cjk_internal_quotes('{"items":[{"bad"键":"值"}]}') is None
 
 
 def test_duplicate_voice_feedback_names_all_conflicting_items_and_clusters():

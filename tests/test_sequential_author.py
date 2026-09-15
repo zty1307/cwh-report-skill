@@ -25,3 +25,30 @@ def test_single_topic_partial_or_cross_topic_result_is_rejected(monkeypatch, tmp
     monkeypatch.setattr(worker, 'semantic_json', lambda *a, **k: ({'items': []}, {'session_id': 'r'}))
     with pytest.raises(ValueError, match='every item'):
         worker.author_topic_decisions([{'topic': '动态甲', 'items': [{'id': 'r1', 'content': '原文'}]}], '规则', [], tmp_path, time.monotonic()+60, reuse_cache=False)
+
+
+def test_scoped_feedback_keeps_other_topic_requests_and_prior_repairs_cacheable(monkeypatch, tmp_path):
+    cache, actual = {}, []
+    def model(packet, prompt, command, workspace, label, timeout, reuse_cache):
+        key = (str(packet), prompt, label)
+        if not reuse_cache or key not in cache:
+            actual.append(packet['topic'])
+            cache[key] = ({'items': [{'id': 'r1', 'decision': 'excluded', 'claims': []}],
+                           'heading': packet['topic'], 'clusters': []}, {'session_id': label})
+        return cache[key]
+    monkeypatch.setattr(worker, 'semantic_json', model)
+    packets = [{'topic': topic, 'items': [{'id': 'r1', 'content': topic + '原文'}]}
+               for topic in ('动态甲', '动态乙', '动态丙')]
+    for feedback in ([], ['[动态乙] JSON格式错误'], ['[动态丙] JSON格式错误']):
+        worker.author_topic_decisions(packets, '规则', [], tmp_path, time.monotonic()+60,
+                                     reuse_cache=True, feedback=feedback)
+    assert actual == ['动态甲', '动态乙', '动态丙', '动态乙', '动态丙']
+
+
+def test_parse_error_names_the_affected_topic(monkeypatch, tmp_path):
+    def model(*args, **kwargs):
+        raise ValueError('model returned no parseable review JSON')
+    monkeypatch.setattr(worker, 'semantic_json', model)
+    with pytest.raises(ValueError, match=r'\[动态甲\].*no parseable'):
+        worker.author_topic_decisions([{'topic': '动态甲', 'items': []}], '规则', [], tmp_path,
+                                     time.monotonic()+60, reuse_cache=True)

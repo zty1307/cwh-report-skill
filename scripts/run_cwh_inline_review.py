@@ -16,7 +16,7 @@ from cwh_pipeline_runtime import atomic_write_json, sha256_file
 from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from cwh_hotword_pipeline import PROCEDURAL_HOTWORD_MARKERS, looks_like_pure_geography, valid_candidate
-from cwh_json_transport import load_framed_json, normalize_authoring_envelope
+from cwh_json_transport import load_framed_json, normalize_authoring_envelope, escape_cjk_internal_quotes
 from cwh_source_spans import source_segments, selected_quote
 from raw_system_workbook_pipeline import normalize_text as normalize_raw_text
 
@@ -121,7 +121,8 @@ def response_object(log: str) -> dict:
             try:
                 return parse(load_framed_json(text))
             except ValueError:
-                return None
+                repaired = escape_cjk_internal_quotes(text)
+                return parse(repaired) if repaired is not None else None
         return None
     try:
         found = parse(load_framed_json(log))
