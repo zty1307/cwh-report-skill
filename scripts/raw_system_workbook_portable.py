@@ -194,7 +194,7 @@ def write_total_event(workbook: Workbook, data: dict[str, Any], chart_path: Path
     worksheet["A2"] = (data.get("metadata") or {}).get("event_sheet_title", "国务院常务会议")
     worksheet.merge_cells("O2:AB2")
     worksheet["O2"] = worksheet["A2"].value
-    left_headers = ["日期", "境内主流媒体", "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"]
+    left_headers = ["日期", (data.get("channel_labels") or {}).get("domestic_mainstream", "境内主流媒体"), "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"]
     for column, header in enumerate(left_headers, 1):
         worksheet.cell(3, column, header)
     for column, header in enumerate(data.get("daily_display_headers") or [], 15):
@@ -243,7 +243,7 @@ def write_child(workbook: Workbook, child: dict[str, Any], headers: list[str]) -
     worksheet["A2"] = f"子事件{index}-{child.get('title', '')}"
     worksheet.merge_cells("H2:U2")
     worksheet["H2"] = worksheet["A2"].value
-    left_headers = ["日期", "境内主流媒体", "境外媒体", "新媒体", "信息传播量"]
+    left_headers = ["日期", (child.get("channel_labels") or {}).get("domestic_mainstream", "境内主流媒体"), "境外媒体", "新媒体", "信息传播量"]
     for column, header in enumerate(left_headers, 1):
         worksheet.cell(3, column, header)
     for column, header in enumerate(headers, 8):
@@ -292,7 +292,9 @@ def write_summary(workbook: Workbook, children: list[dict[str, Any]], chart_path
     worksheet.merge_cells("E2:E3")
     worksheet.merge_cells("F2:F3")
     worksheet.merge_cells("G2:I2")
-    for column, header in enumerate(["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量", "网民情感"], 1):
+    domestic_label = ((children[0].get("channel_labels") or {}).get("domestic_mainstream", "境内主流媒体")
+                      if children else "境内主流媒体")
+    for column, header in enumerate(["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量", "网民情感"], 1):
         worksheet.cell(2, column, header)
     for column, header in enumerate(["正面", "中立", "负面"], 7):
         worksheet.cell(3, column, header)

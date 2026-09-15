@@ -20,7 +20,7 @@ from typing import Any
 from ingest_monitoring_workbook import ingest_workbook
 from report_rules import domestic_viewpoint_quality_issues
 from cwh_viewpoint_gate import cluster_density_result
-from cwh_writing_rules import opening_paragraph
+from cwh_writing_rules import opening_paragraph, domestic_media_label
 
 SCHEMA_VERSION = "0.3"
 DEFAULT_DATE = "2026-06-29"
@@ -2648,7 +2648,7 @@ def write_cwh_data_workbook(data: dict[str, Any], path: Path) -> None:
                 }
         ws["A2"] = title
         ws["A2"].font = title_font
-        summary_headers = ["日期", "境内主流媒体", "境外媒体", "微信公众号", "新浪微博", "视频号", "新媒体", "信息传播量"] if is_total_event else ["日期", "境内主流媒体", "境外媒体", "新媒体", "信息传播量"]
+        summary_headers = ["日期", domestic_media_label(data), "境外媒体", "微信公众号", "新浪微博", "视频号", "新媒体", "信息传播量"] if is_total_event else ["日期", domestic_media_label(data), "境外媒体", "新媒体", "信息传播量"]
         detail_headers = ["日期", "公众文章", "公号-在看量", "公号-精选评论量", "新浪微博", "境内新闻", "境内APP", "境内论坛", "其他视频", "境外新闻", "推特", "境外其他", "视频号发文", "抖音"]
         for col, value in enumerate(summary_headers, 1):
             ws.cell(3, col, value)
@@ -2728,7 +2728,7 @@ def write_cwh_data_workbook(data: dict[str, Any], path: Path) -> None:
         write_trend_sheet(wb.create_sheet(workbook_sheet_title(f"子事件{idx}")), f"子事件{idx}-{topic_display(topic)}", topic_samples, system_event, False)
 
     ws = wb.create_sheet("子事件数据汇总")
-    ws.append(["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量", "网民情感", "", "", "", "", "总量/万"])
+    ws.append(["序号", "标题", domestic_media_label(data), "新媒体", "境外媒体", "总量", "网民情感", "", "", "", "", "总量/万"])
     ws.append(["", "", "", "", "", "", "正面", "中立", "负面", "合计", "", ""])
     for cell in ws[1] + ws[2]:
         cell.fill = header_fill
@@ -2849,7 +2849,7 @@ def render_report(data: dict[str, Any]) -> str:
         peak_text = f"，传播峰值出现在{peak_date}，当日系统传播量为{peak_count}条" if stats.get("authority") == "monitoring_system" else f"，样本传播峰值出现在{peak_date}，当日归集{peak_count}条"
     if stats.get("authority") == "monitoring_system":
         generation_note = "本报告由 CWH 自动化流程依据部门舆情监测系统汇总数据和已接入明细生成；系统未导出的明细统一列入文末审核清单。"
-        overall_note = f"监测系统给出相关信息传播总量{stats['total_spread']}条；当前接入可追溯证据明细{len(samples)}条、网民评论明细{stats['total_comments']}条。其中，境内主流媒体传播量{stats['by_source_bucket'].get('domestic_media', 0)}条，新媒体传播量{stats['by_source_bucket'].get('self_media', 0)}条，境外媒体传播量{stats['by_source_bucket'].get('overseas_media', 0)}条。"
+        overall_note = f"监测系统给出相关信息传播总量{stats['total_spread']}条；当前接入可追溯证据明细{len(samples)}条、网民评论明细{stats['total_comments']}条。其中，{domestic_media_label(data)}传播量{stats['by_source_bucket'].get('domestic_media', 0)}条，新媒体传播量{stats['by_source_bucket'].get('self_media', 0)}条，境外媒体传播量{stats['by_source_bucket'].get('overseas_media', 0)}条。"
     else:
         generation_note = "本报告由 CWH 自动化流程根据公开检索、已接入样本和结构化分析结果生成；采集不足或需人工判断的部分统一列入文末审核清单。"
         overall_note = f"当前批次共归集相关样本{stats['total_samples']}条，累计可读传播量/热度值{stats['total_spread']}，评论量{stats['total_comments']}。其中，境内媒体样本{stats['by_source_bucket'].get('domestic_media', 0)}条，自媒体及社交平台样本{stats['by_source_bucket'].get('self_media', 0)}条，网民评论样本{stats['by_source_bucket'].get('comments', 0)}条，境外媒体样本{stats['by_source_bucket'].get('overseas_media', 0)}条。"
@@ -3212,6 +3212,7 @@ def apply_system_authority(
             "authority": "monitoring_system",
         }
     )
+    authoritative["source_bucket_labels"] = dict(system_data.get("channel_labels") or {})
     topic_stats: list[dict[str, Any]] = []
     for item in system_data.get("subevents") or []:
         title = str(item.get("title") or "")

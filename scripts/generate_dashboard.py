@@ -11,7 +11,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from cwh_writing_rules import formal_attribution
+from cwh_writing_rules import formal_attribution, domestic_media_label
 from normalize_cwh_analysis import assemble_cluster_details
 
 from report_rules import (
@@ -1083,6 +1083,7 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
         "analysis_bundle": data.get("analysis_bundle") or {},
         "title": title,
         "sentiment_available": formal_sentiment_available(data),
+        "domestic_media_label": domestic_media_label(data),
         "meeting_date": chinese_date(meeting_date),
         "agenda": agenda,
         "generated_at": str(data.get("generated_at") or ""),

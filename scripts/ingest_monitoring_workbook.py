@@ -197,7 +197,8 @@ def parse_trend_sheet(ws: Any | None) -> dict[str, Any]:
         totals["wechat_public"] = 0
         totals["weibo"] = 0
         totals["video_account"] = 0
-    return {"title": title, "daily": daily, "totals": totals, "detail_headers": list(detail_columns.values())}
+    return {"title": title, "daily": daily, "totals": totals, "detail_headers": list(detail_columns.values()),
+            "channel_labels": {"domestic_media": str(ws.cell(header_row, 2).value or "").strip()}}
 
 
 def parse_topic_summary(ws: Any | None) -> list[dict[str, Any]]:
@@ -404,6 +405,7 @@ def ingest_workbook(path: str | Path) -> dict[str, Any]:
         "topics": topics,
         "monitoring_period": {"start": min(dates) if dates else "", "end": max(dates) if dates else ""},
         "overall": overall,
+        "channel_labels": overall.get("channel_labels") or {},
         "subevents": subevents,
         "overseas_reports": parse_overseas(find_sheet(wb, "外媒报道列表"), len(topics)),
         "hotwords": parse_hotwords(find_sheet(wb, "词云")),

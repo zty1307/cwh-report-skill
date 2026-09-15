@@ -1623,6 +1623,12 @@ def validate_declared_topic_mapping(metadata: dict[str, Any]) -> None:
                             '不能按议程顺序、文件排序或传播量大小推断，亦不能将正文拆分用于改名原始统计组。')
 
 
+def channel_display_labels(config: dict[str, Any]) -> dict[str, str]:
+    domestic_label = ("境内新闻" if config["total_groups"].get("domestic_mainstream") == ["domestic_news"]
+                      and config["child_groups"].get("domestic_mainstream") == ["domestic_news"] else "境内媒体")
+    return {"domestic_mainstream": domestic_label}
+
+
 def build_normalized_bundle(
     inputs: InputBundle,
     config: dict[str, Any],
@@ -1679,6 +1685,7 @@ def build_normalized_bundle(
         review=hotword_review,
     )
 
+    channel_labels = channel_display_labels(config)
     children = []
     for index, rows in child_daily.items():
         summary = summarize_daily(rows, config["child_groups"])
@@ -1687,6 +1694,7 @@ def build_normalized_bundle(
                 "index": index,
                 "title": topic_titles[index - 1],
                 "aliases": topic_aliases[index - 1],
+                "channel_labels": dict(channel_labels),
                 "source_file": str(inputs.child_heat[index]),
                 "daily": rows,
                 "summary": summary,
@@ -1721,6 +1729,7 @@ def build_normalized_bundle(
             "total_groups": config["total_groups"],
             "child_groups": config["child_groups"],
         },
+        "channel_labels": channel_labels,
         "quality_gate": {
             "ready_for_formal_report": (
                 overseas.get("status") == "ai_review_complete"

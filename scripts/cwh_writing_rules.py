@@ -34,6 +34,15 @@ def chinese_number(value: int) -> str:
     return str(value)
 
 
+def domestic_media_label(data: dict[str, Any]) -> str:
+    """Keep a known input channel scope; legacy inputs retain their explicit frame."""
+    label = str((((data.get("statistics") or {}).get("source_bucket_labels") or {})
+                 .get("domestic_media")) or "").strip()
+    if label in {"境内新闻", "国内新闻", "境内媒体", "境内主流媒体"}:
+        return label
+    return "境内媒体" if label else "境内主流媒体"
+
+
 def ordinal_prefix(value: int) -> str:
     prefixes = writing_rules()["viewpoint"]["cluster_ordinal_prefixes"]
     if value <= 0:

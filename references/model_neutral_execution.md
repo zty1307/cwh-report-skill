@@ -55,3 +55,9 @@ Word and Markdown use the same executable opening, chapter, attribution, numberi
 For token economy, keep accepted artifacts on disk; read only current-stage inputs and required references, reuse source snapshots, and return structured changes instead of redrafting full prose. `scripts/cwh_timing_report.py --job-dir <job>` reports measured command duration separately from wait and other uninstrumented time. It is not an API token meter; old logs without instrumentation remain unknown.
 
 `cwh_viewpoint_gate.py` applies the same density rule before and after rendering. It counts distinct speaker identities and Chinese characters, not URL count or attribution verbs. Accepted `thin_cluster_exception` records appear in `cwh_audit.json` under `quality_summary.viewpoint_density_exceptions`. An exception never authorizes missing source evidence or unsupported claims.
+
+### One-topic requests and effective worker budgets
+
+Both bounded profiles expose a 180-second maximum for one topic's author call and a 45-second reservation per future topic, reduced proportionally when remaining time is short. These are model-neutral request limits, not a per-topic completion promise or permission to mark unread material reviewed. Completed responses remain hash-cached; a failed call keeps the real source packet and is retried only through the controller. Exhaustive retains the existing uncapped request allocation.
+
+The outer AI-worker timeout and task.remaining_budget_seconds must use the same runner-calculated effective budget, already constrained by stage elapsed time, predecessor carry, research cutoff and global clock. Do not hand a worker a larger carried allocation but kill it at the original nominal stage limit. Request limits never enlarge the effective allocation, change saved start times, borrow later delivery budgets or certify a failed test.

@@ -18,7 +18,7 @@
   "propagation": {
     "total_template": "监测期内，相关信息传播总量约{total_text}条。{peak_sentence}",
     "peak_template": "舆情热度于{peak_date}达到峰值。",
-    "domestic_template": "境内主流媒体共有相关报道{count}条。",
+    "domestic_template": "{domestic_label}共有相关报道{count}条。",
     "new_media_template": "新媒体中，微信公众平台相关信息{wechat}条、微博相关信息{weibo}条，视频号相关信息{video}条，新闻客户端、论坛等渠道共有相关信息{other}条。",
     "overseas_template": "境外媒体共有相关报道（含转载）{count}条。{examples}",
     "overseas_examples_template": "其中包括{sources}等，具体报道情况见附表。"

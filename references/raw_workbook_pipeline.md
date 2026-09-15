@@ -25,6 +25,8 @@ Do not trust the worksheet's advertised used range as the row count. Some monito
 
 Use `config/raw_workbook_mapping.json` for filename recognition, sheet aliases, field aliases, channel groups and semantic-filter patterns. Never hard-code a meeting date, topic title or period value into the program.
 
+Preserve channel scope as well as quantities. The default raw `domestic_news` aggregate is labelled 境内新闻, not automatically certified as 境内主流媒体; broader configured groupings use 境内媒体. Keep canonical calculation keys unchanged and pass the explicit channel label through standard-workbook ingestion, formal prose/table and dashboard. A supplied standard workbook explicitly labelled 境内主流媒体 retains that input scope. Do not migrate a numerical difference into APP or another bucket merely to match a benchmark; source-level reclassification needs a separately auditable rule.
+
 ## Metadata
 
 Raw heat-analysis exports do not reliably contain the meeting and child-topic titles. Create one period-specific JSON file outside the reusable program:

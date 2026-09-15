@@ -153,7 +153,7 @@ function buildTotalSheet() {
   sheet.getRange("A2:H2").format = titleFormat;
   sheet.getRange("O2:AB2").format = titleFormat;
 
-  const leftHeaders = ["日期", "境内主流媒体", "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"];
+  const leftHeaders = ["日期", (data.channel_labels?.domestic_mainstream || "境内主流媒体"), "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"];
   sheet.getRange("A3:H3").values = [leftHeaders];
   sheet.getRange("O3:AB3").values = [data.daily_display_headers];
   sheet.getRange("A3:H3").format = headerFormat;
@@ -225,7 +225,7 @@ function buildChildSheet(child) {
   sheet.getRange("H2").formulas = [["=A2"]];
   sheet.getRange("A2:E2").format = titleFormat;
   sheet.getRange("H2:U2").format = titleFormat;
-  sheet.getRange("A3:E3").values = [["日期", "境内主流媒体", "境外媒体", "新媒体", "信息传播量"]];
+  sheet.getRange("A3:E3").values = [["日期", (data.channel_labels?.domestic_mainstream || "境内主流媒体"), "境外媒体", "新媒体", "信息传播量"]];
   sheet.getRange("H3:U3").values = [data.daily_display_headers];
   sheet.getRange("A3:E3").format = headerFormat;
   sheet.getRange("H3:U3").format = rawHeaderFormat;
@@ -280,7 +280,7 @@ function buildChildSummary() {
   sheet.mergeCells("E2:E3");
   sheet.mergeCells("F2:F3");
   sheet.mergeCells("G2:I2");
-  sheet.getRange("A2:F2").values = [["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量"]];
+  sheet.getRange("A2:F2").values = [["序号", "标题", (data.channel_labels?.domestic_mainstream || "境内主流媒体"), "新媒体", "境外媒体", "总量"]];
   sheet.getRange("G2").values = [["网民情感"]];
   sheet.getRange("G3:I3").values = [["正面", "中立", "负面"]];
   sheet.getRange("A2:I3").format = { ...headerFormat, font: { name: "微软雅黑", size: 11, bold: true } };

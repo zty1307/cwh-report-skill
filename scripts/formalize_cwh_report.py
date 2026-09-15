@@ -31,7 +31,7 @@ from report_rules import (
     formal_sentiment_row_ready,
 )
 from source_identity import public_source_family
-from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256
+from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label
 from normalize_cwh_analysis import assemble_cluster_details
 
 
@@ -513,7 +513,7 @@ def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
     examples = frames["overseas_examples_template"].format(sources=overseas_sources) if overseas_sources and overseas > 0 else ""
     return [
         frames["total_template"].format(total_text=total_text, peak_sentence=peak_sentence),
-        frames["domestic_template"].format(count=domestic),
+        frames["domestic_template"].format(count=domestic, domestic_label=domestic_media_label(data)),
         frames["new_media_template"].format(wechat=wechat, weibo=weibo, video=video, other=other_new_media),
         frames["overseas_template"].format(count=overseas, examples=examples),
     ]
@@ -1536,7 +1536,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     lines.extend(total_event_paragraphs(data))
     lines.extend(["", "### （二）子议题传播情况", ""])
     sentiment_visible = formal_sentiment_available(data)
-    topic_headers = ["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量"]
+    topic_headers = ["序号", "标题", domestic_media_label(data), "新媒体", "境外媒体", "总量"]
     if sentiment_visible:
         topic_headers.extend(["正面", "中立", "负面"])
     lines.append(md_table(topic_headers, formal_topic_rows(data, sentiment_visible)))
@@ -1739,18 +1739,19 @@ def add_table(
     return table
 
 
-def add_topic_table(document: Any, rows: list[list[Any]], include_sentiment: bool) -> Any:
+def add_topic_table(document: Any, rows: list[list[Any]], include_sentiment: bool,
+                    domestic_label: str = "境内主流媒体") -> Any:
     if not include_sentiment:
         return add_table(
             document,
-            ["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量"],
+            ["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"],
             rows,
             font_name="微软雅黑",
             size_pt=11,
             widths_pt=[35.5, 132.0, 55.0, 55.0, 50.0, 55.0],
         )
     table = document.add_table(rows=2, cols=9)
-    for idx, text in enumerate(["序号", "标题", "境内主流媒体", "新媒体", "境外媒体", "总量"]):
+    for idx, text in enumerate(["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"]):
         table.cell(0, idx).merge(table.cell(1, idx)).text = text
     table.cell(0, 6).merge(table.cell(0, 8)).text = "网民情感"
     for idx, text in enumerate(["正面", "中立", "负面"], 6):
@@ -2046,7 +2047,7 @@ def write_override_section(
             trend_inserted = True
         add_override_block(document, block)
         if key == "one" and role == "h2" and text.startswith("（二）") and not topic_inserted:
-            add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible)
+            add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible, domestic_media_label(data))
             chart = docx_charts.get("topic_distribution")
             if chart and Path(chart).exists():
                 add_centered_picture(document, chart, width=Inches(5.8), alt_text="各子议题信息传播总量对比图")
@@ -2062,7 +2063,7 @@ def write_override_section(
         if chart and Path(chart).exists():
             add_centered_picture(document, chart, width=Inches(5.8), alt_text="国务院常务会议舆情信息传播量逐日趋势图")
     if key == "one" and not topic_inserted:
-        add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible)
+        add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible, domestic_media_label(data))
         chart = docx_charts.get("topic_distribution")
         if chart and Path(chart).exists():
             add_centered_picture(document, chart, width=Inches(5.8), alt_text="各子议题信息传播总量对比图")
@@ -2106,7 +2107,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
         if chart and Path(chart).exists():
             add_centered_picture(document, chart, width=Inches(5.8), alt_text="国务院常务会议舆情信息传播量逐日趋势图")
         add_docx_heading(document, "（二）子议题传播情况", 2)
-        add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible)
+        add_topic_table(document, formal_topic_rows(data, sentiment_visible), sentiment_visible, domestic_media_label(data))
         chart = docx_charts.get("topic_distribution")
         if chart and Path(chart).exists():
             add_centered_picture(document, chart, width=Inches(5.8), alt_text="各子议题信息传播总量对比图")
