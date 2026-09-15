@@ -58,6 +58,14 @@ def resolve_overseas_spans(packet, result):
                 row.setdefault("transport_exclusions", []).append({
                     "reason": "fixed_body_evidence_unavailable", "original_review": original})
         span = row.get("interpretive_range")
+        if (span == ["", ""] and row.get('interpretive_verified') is False
+                and (row.get('decision') == 'exclude' or row.get('ai_report_category') == '事实性报道')):
+            # Two empty placeholders assert no quote, just like the required [].
+            # Do not interpret, invent or renumber an evidence selection.
+            row['interpretive_range'] = []
+            row.setdefault('transport_repairs', []).append({
+                'reason': 'lossless_empty_segment_pair', 'original_interpretive_range': span})
+            span = []
         if span:
             number, source = sources[row["record_id"]]
             original_span = copy.deepcopy(span)
@@ -372,7 +380,53 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
             except (ValueError, KeyError, TypeError) as exc:
                 atomic_write_json(folder / 'parse_failure.json', {'kind': kind, 'error': str(exc),
                                   'source_sha256': digest, 'log_path': str(log_path)})
-                raise SystemExit(65) from exc
+                # Re-review only this complete batch, once, with the actual error.
+                # Never guess an ID, copy a bad cache or recertify old model output.
+                remaining = deadline - time.monotonic()
+                if remaining < 15:
+                    raise SystemExit(65) from exc
+                original_run = copy.deepcopy(run)
+                session = str(uuid.uuid4())
+                command = [x.replace('{session_id}', session) for x in command_template]
+                payload['reviewer_run_id'] = session
+                repair_prompt = prompt_rules + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+                repair_prompt += ('\n只处理本批items，每个ID恰好一次。上一次真实校验失败：' + str(exc)
+                                  + '\n重新完整审核本批，逐字复制当前输入ID和本条片段编号；不要猜编号、跨条取证或补写原文。')
+                repair_log = folder / f'actual-review-repair.{session}.jsonl'
+                started = time.monotonic()
+                with repair_log.open('w', encoding='utf-8') as log:
+                    try:
+                        code = run_scoped_command(command, cwd=folder, env=os.environ.copy(), stdout=log,
+                            stderr=subprocess.STDOUT, input_text=repair_prompt, timeout=min(45, remaining))
+                    except subprocess.TimeoutExpired:
+                        code = 124
+                repair_text = repair_log.read_text(encoding='utf-8')
+                transport = terminal_transport_error(repair_text)
+                run = {'session_id': session, 'log': str(repair_log),
+                       'seconds': round(time.monotonic() - started, 3),
+                       'exit_code': transport['exit_code'] if transport else code, 'cache_reused': False,
+                       'original_rejected_run': original_run, 'repair_reason': str(exc)}
+                atomic_write_json(folder / 'repair_actual_run.json', run)
+                if run['exit_code']:
+                    if transport:
+                        atomic_write_json(workspace / 'blocker.json', {'blocker': True, 'type': 'model_transport_error', **transport})
+                    raise SystemExit(run['exit_code'])
+                try:
+                    cached = response_object(repair_text)
+                    if cached.get('blocker'):
+                        atomic_write_json(workspace / 'blocker.json', cached)
+                        raise SystemExit(23)
+                    cached = normalize_topic_hit_transport(batch, cached, kind)
+                    if kind == 'overseas':
+                        cached = resolve_overseas_spans(batch, cached)
+                    validate_transport_result(kind, batch, cached)
+                    if cached.get('supplemental_rows'):
+                        raise ValueError('Raw review batch cannot add unrequested supplemental rows')
+                except (ValueError, KeyError, TypeError) as repair_error:
+                    atomic_write_json(folder / 'repair_parse_failure.json', {'kind': kind, 'error': str(repair_error),
+                                      'source_sha256': digest, 'log_path': str(repair_log)})
+                    raise SystemExit(65) from repair_error
+                atomic_write_json(folder / 'actual_run.json', run)
             atomic_write_json(output_path, cached)
             atomic_write_json(cache_path, {'source_sha256': digest, 'output_sha256': sha256_file(output_path), 'actual_run': run})
         rows = copy.deepcopy(cached['items'])

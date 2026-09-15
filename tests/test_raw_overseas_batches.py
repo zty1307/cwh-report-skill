@@ -16,7 +16,7 @@ def packet():
         for i in range(5)]}
 
 
-def install_transport(monkeypatch, calls, *, bad_call=None):
+def install_transport(monkeypatch, calls, *, bad_call=None, bad_calls=()):
     def run(command, **kwargs):
         calls.append(command)
         payload = json.loads(kwargs['input_text'].split('\n只处理本批', 1)[0])
@@ -25,7 +25,7 @@ def install_transport(monkeypatch, calls, *, bad_call=None):
                   'review_reason': '真实第三方条件分析', 'ai_report_category': '解读性报道',
                   'interpretive_range': [f'o{n}/2', f'o{n}/2'], 'interpretive_verified': True}
                  for n, r in enumerate(source, 1)]
-        if bad_call == len(calls):
+        if bad_call == len(calls) or len(calls) in bad_calls:
             items = items[:-1]
         kwargs['stdout'].write(json.dumps({'type': 'result', 'result': json.dumps(
             {'review_method': 'ai_semantic_review', 'items': items}, ensure_ascii=False)}, ensure_ascii=False))
@@ -51,7 +51,7 @@ def test_every_row_once_exact_spans_and_completed_batches_reused(tmp_path, monke
 
 def test_failed_batch_preserves_previous_checkpoint_and_resumes_only_missing(tmp_path, monkeypatch):
     calls = []
-    install_transport(monkeypatch, calls, bad_call=2)
+    install_transport(monkeypatch, calls, bad_calls=(2, 3))
     with pytest.raises(SystemExit) as error:
         worker.review_overseas_batches(packet(), {}, '', ['model', '{session_id}'], tmp_path,
             time.monotonic() + 100, batch_size=2)
@@ -60,8 +60,34 @@ def test_failed_batch_preserves_previous_checkpoint_and_resumes_only_missing(tmp
     install_transport(monkeypatch, calls)
     result = worker.review_overseas_batches(packet(), {}, '', ['model', '{session_id}'], tmp_path,
         time.monotonic() + 100, batch_size=2)
-    assert len(calls) == 4 and len(result['items']) == 5
+    assert len(calls) == 5 and len(result['items']) == 5
     assert result['batch_review_audit']['actual_runs'][0]['cache_reused']
+
+
+def test_invalid_batch_gets_one_fresh_bounded_review_not_guessed_ids(tmp_path, monkeypatch):
+    source, calls, prompts, limits = packet(), [], [], []
+    install_transport(monkeypatch, calls, bad_call=2)
+    transport = worker.run_scoped_command
+
+    def capture(command, **kwargs):
+        prompts.append(kwargs['input_text'])
+        limits.append(kwargs['timeout'])
+        return transport(command, **kwargs)
+
+    monkeypatch.setattr(worker, 'run_scoped_command', capture)
+    result = worker.review_overseas_batches(source, {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, batch_size=2)
+    assert len(calls) == 4
+    repaired = result['batch_review_audit']['actual_runs'][1]
+    assert repaired['session_id'] != repaired['original_rejected_run']['session_id']
+    assert repaired['original_rejected_run']['exit_code'] == 0
+    assert repaired['repair_reason'] == 'review must cover exactly every packet record_id once'
+    assert limits[2] <= 45 and '上一次真实校验失败' in prompts[2]
+    assert result['items'][2]['reviewer_run_id'] == repaired['session_id']
+    assert result['items'][2]['interpretive_excerpt'] == source['items'][2]['content'].split('。')[1] + '。'
+    again = worker.review_overseas_batches(source, {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, batch_size=2)
+    assert len(calls) == 4 and again['batch_review_audit']['actual_runs'][1]['cache_reused']
 
 
 def test_corrupted_cached_output_is_not_trusted(tmp_path, monkeypatch):
@@ -101,6 +127,24 @@ def test_stringified_pair_changes_only_encoding_and_keeps_exact_source(span):
 def test_stringified_range_never_guesses_ids_order_or_source(span):
     with pytest.raises(ValueError):
         worker.resolve_overseas_spans(packet(), {'items': [{'record_id': 'row-0', 'interpretive_range': span}]})
+
+
+@pytest.mark.parametrize('decision,category', [('include', '事实性报道'), ('exclude', '解读性报道')])
+def test_empty_placeholders_are_only_lossless_when_no_quote_is_asserted(decision, category):
+    native = {'items': [{'record_id': 'row-0', 'decision': decision,
+        'ai_report_category': category, 'interpretive_verified': False, 'interpretive_range': ['', '']}]}
+    original = copy.deepcopy(native)
+    row = worker.resolve_overseas_spans(packet(), native)['items'][0]
+    assert row['interpretive_range'] == [] and 'interpretive_excerpt' not in row
+    assert row['transport_repairs'][0]['reason'] == 'lossless_empty_segment_pair'
+    assert native == original
+
+
+@pytest.mark.parametrize('verified,category', [(True, '事实性报道'), (False, '解读性报道'), (None, '事实性报道')])
+def test_empty_pair_never_creates_or_downgrades_interpretive_evidence(verified, category):
+    with pytest.raises(ValueError):
+        worker.resolve_overseas_spans(packet(), {'items': [{'record_id': 'row-0', 'decision': 'include',
+            'ai_report_category': category, 'interpretive_verified': verified, 'interpretive_range': ['', '']}]})
 
 
 @pytest.mark.parametrize('kind', ['public_top', 'overseas'])
