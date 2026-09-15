@@ -7,6 +7,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, terminal_transport_error, collect_topic, HostModelError
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
+from cwh_semantic_compiler import web_metadata_errors
+
+
+def test_web_metadata_precheck_reports_all_fields_and_records():
+    packet = {"period": {"start": "2026-01-01", "end": "2026-01-02"},
+              "items": [{"id": "w1", "origin": "web", "content": "无来源日期"},
+                        {"id": "w2", "origin": "web", "content": "日报 2026-01-02"}]}
+    decision = {"items": [{"id": "w1", "decision": "eligible"},
+                           {"id": "w2", "decision": "eligible", "source": "日报",
+                            "published_at": "2026-01-02", "date_quote": "2026-01-02"}]}
+    assert web_metadata_errors(packet, decision) == [
+        "Web publisher not anchored in original text: w1",
+        "Web publication date not anchored in original text: w1"]
 from cwh_public_reader import check_public_url
 from complete_cwh_evidence_structure import complete_analysis_structure
 from normalize_cwh_analysis import normalize_analysis

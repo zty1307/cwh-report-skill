@@ -27,6 +27,25 @@ def query_domains(query):
     return re.findall(r"site:([A-Za-z0-9.-]+)", query)
 
 
+def web_metadata_errors(packet, decision):
+    choices = {row.get("id"): row for row in decision.get("items") or []}
+    errors = []
+    for item in packet["items"]:
+        choice = choices.get(item["id"], {})
+        if item.get("origin") != "web" or choice.get("decision") != "eligible":
+            continue
+        content = item.get("content") or ""
+        if not choice.get("source") or choice["source"] not in content:
+            errors.append(f'Web publisher not anchored in original text: {item["id"]}')
+        quote, date = choice.get("date_quote") or "", choice.get("published_at") or ""
+        tokens, parts = re.findall(r"\d+", quote), re.findall(r"\d+", date)
+        if (not quote or quote not in content or len(parts) != 3
+                or [int(x) for x in tokens[:3]] != [int(x) for x in parts]
+                or not packet["period"]["start"][:10] <= date <= packet["period"]["end"][:10]):
+            errors.append(f'Web publication date not anchored in original text: {item["id"]}')
+    return errors
+
+
 def domain_matches(url, domains):
     host = (urlsplit(url).hostname or "").lower()
     return not domains or any(host == domain.lower() or host.endswith("." + domain.lower()) for domain in domains)

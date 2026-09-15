@@ -11,6 +11,7 @@ from cwh_pipeline_runtime import atomic_write_json, utc_now
 from cwh_host_research import collect_topic, semantic_json, HostModelError
 from cwh_public_reader import read_public_pages
 from cwh_semantic_compiler import AUTHOR_PROMPT, make_packet, compile_topic
+from cwh_semantic_compiler import web_metadata_errors
 from run_cwh_batched_viewpoints import merge_topic_bundles
 from cwh_source_spans import source_segments, selected_quote
 from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_repairs, complete_decisions
@@ -149,6 +150,10 @@ def author(task, deadline):
     compilation_errors = []
     for position, (packet, topic_plan, observations) in enumerate(zip(packets, topic_plans, observed)):
         decision = next(d for d in decisions if d["topic"] == packet["topic"])
+        metadata_errors = web_metadata_errors(packet, decision)
+        if metadata_errors:
+            compilation_errors.extend(f'[{packet["topic"]}] {error}' for error in metadata_errors)
+            continue
         try:
             part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
         except (ValueError, KeyError, TypeError) as exc:
