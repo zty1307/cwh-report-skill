@@ -58,6 +58,8 @@ def enrich_viewpoint_titles(data: dict[str, Any]) -> None:
             viewpoint['heading'] = viewpoint['topic']
             continue
         viewpoint['heading'] = display.get((ti, None), judgment_heading(viewpoint.get('heading')))
+        if (ti, None) in display:
+            viewpoint['_reviewed_display_heading'] = viewpoint['heading']
         for ci, cluster in enumerate(clusters):
             cluster['summary'] = display.get((ti, ci), judgment_heading(cluster.get('summary')))
         title_by_person: dict[str, str] = {}

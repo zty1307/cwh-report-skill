@@ -225,6 +225,8 @@ Use the default zero-sample sentence only after a completed non-dry-run foreign 
 
 ### （一）外媒报道列表（部分）
 
+For relevance, distinguish policy-focused reporting from incidental mentions. A story may focus on the meeting itself or a concrete decision and its direct policy effects. A market roundup whose main subject is price movements or unrelated news is not eligible merely because it cites one meeting decision as a catalyst. Conversely, finance reporting is not categorically excluded when its full-text main line genuinely concerns that decision. The review reason must state this relationship; genre, keyword hits and historical appendix inclusion alone are not proof of eligibility.
+
 Required columns:
 
 - 序号

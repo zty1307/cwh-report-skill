@@ -277,6 +277,8 @@ def comment_stance_heading(text: Any) -> str:
 
 def topic_heading(item: dict[str, Any]) -> str:
     heading = clean_sentence(item.get("heading"))
+    if heading and item.get('_reviewed_display_heading') == heading:
+        return heading
     reviewed = stance_heading(heading)
     if reviewed:
         return reviewed
