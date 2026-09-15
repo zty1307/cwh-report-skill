@@ -142,6 +142,21 @@ def test_unexpanded_meeting_reference_cannot_be_certified_by_keyword_matching() 
     assert not any(row['code'] == 'ambiguous_meeting_reference' for row in draft['issues'])
 
 
+def test_relative_meeting_predicates_cannot_receive_final_keyword_certificate() -> None:
+    for prefix in ('会议在相关制度基础上新增安排。', '会议首次重点提及制度改革。'):
+        bundle = valid_bundle()
+        cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+        ev = cluster['evidence'][0]
+        old = ev['formal_claim']
+        ev['formal_claim'] = prefix + old
+        cluster['details'] = cluster['details'].replace(old, ev['formal_claim'])
+        ev['semantic_review']['propositions'][0]['text'] = ev['formal_claim']
+        assert any(row['code'] == 'ambiguous_meeting_reference'
+                   for row in validate_analysis_mapping(bundle)['issues'])
+        assert not any(row['code'] == 'ambiguous_meeting_reference'
+                       for row in validate_analysis_mapping(bundle, require_semantic_review=False)['issues'])
+
+
 def test_merged_speakers_and_unsupported_number_are_blocked() -> None:
     bundle = valid_bundle()
     evidence = bundle["viewpoints"]["by_topic"][0]["clusters"][0]["evidence"][0]

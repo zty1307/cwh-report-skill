@@ -329,6 +329,7 @@ def author(task, deadline):
                                           deadline, topic=indexed['topic'])
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
+        packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
         atomic_write_json(workspace / "source_packet.json", packet)
         packets.append(packet)
         topic_plans.append(topic_plan)
@@ -395,6 +396,7 @@ def author(task, deadline):
     merged = merge_topic_bundles(parts, [row["topic"] for row in index["topics"]], index["candidate_count"], author_id)
     merged["metadata"].update(execution_profile=task["execution_profile"],
         monitoring_start=plan["monitoring_period"]["start"], monitoring_end=plan["monitoring_period"]["end"],
+        report_agenda=(plan.get('input_contract') or {}).get('agenda') or '',
         authoring_batch_run_ids=[r['session_id'] for r in run.get('topic_runs') or [run]],
         transport="host_compiled_semantic_v1")
     output(task, merged)
@@ -409,6 +411,7 @@ REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原�
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
 REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
 REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
+REVIEW_PROMPT += '\nreport_agenda是用户声明的报告会议，仅用于对象消歧，不能当作原文论据。相关背景会议的真实判断可保留，但“会议在……新增”“会议首次重点提及”等必须展开成原文实际对象；确认属背景会议也不意味着可以不写明名称，不能把背景会议定调冒充本报告会议的新部署。'
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']
 REVIEW_PROMPT += '\ncross_topic_exact_duplicates是脚本发现的同一声明主体、职务及原始URL的完全相同判断跨题重用，不预设去向。结合全部agenda_topics和实际对象保留在最直接对应的一个议题；其他重复条按本题正式选材资格判unsupported或uncertain并解释，文字原文支持不自动证明本题归属。不要把同一判断稍改措辞后重复保留，也不合并同名但职务不同的人或同主体的不同判断。'
@@ -497,6 +500,7 @@ def independent_packet(analysis):
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
+            "report_agenda": (analysis.get('metadata') or {}).get('report_agenda') or '',
             "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']],
             "cross_topic_exact_duplicates": cross_topic_exact_duplicate_groups(analysis)}
 

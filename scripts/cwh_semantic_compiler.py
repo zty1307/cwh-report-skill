@@ -33,6 +33,7 @@ AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["selection_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["claim_composition_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["cluster_structure_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["heading_support_rule"]
+AUTHOR_PROMPT += '\nreport_agenda是用户声明的本报告会议，不是原文中所有“会议”的统一名称。相关背景解读可以保留，但必须写明原文实际会议、政策对象；未声明报告会议时不猜测日期或会议名称。'
 AUTHOR_PROMPT += '\n网页date_quote须是原文连续的完整年、月、日，且对应发布日期；只有月日和时分不足，不能从URL、会议年份或正文事件年份补齐。找不到完整发布日期就excluded并保留具体原因，不反复改写日期凑校验。'
 AUTHOR_PROMPT += '\n没有segments完整正文的网页，只能排除为未读取或访问失败；不能据搜索摘要断言整篇没有独立解读，也不能将全部发现链接数说成已读全文数。缺口理由须区分发现、读取和合格声音三个范围。'
 

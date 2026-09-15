@@ -182,11 +182,16 @@ def test_generic_deployment_and_sentence_initial_meeting_references_need_expansi
     assert has_ambiguous_meeting_reference('风险变化，会议将产业安全列为重点。')
     assert has_ambiguous_meeting_reference('会议审议相关实施方案。')
     assert has_ambiguous_meeting_reference('会议释放政策调整信号。')
+    assert has_ambiguous_meeting_reference('会议在技术应用基础上新增长期稳定支持。')
+    assert has_ambiguous_meeting_reference('会议首次重点提及资本市场投融资改革。')
+    assert has_ambiguous_meeting_reference('需求变化，会议进一步明确提出完善服务。')
     assert not has_ambiguous_meeting_reference('按照中央政治局会议部署解决供需错配。')
     assert not has_ambiguous_meeting_reference('国务院常务会议提出完善公共服务机制。')
     assert not has_ambiguous_meeting_reference('国务院常务会议把安全要求置于重要位置。')
     assert not has_ambiguous_meeting_reference('中央政治局会议将产业安全列为重点。')
     assert not has_ambiguous_meeting_reference('完善会议制度和会议记录管理。')
+    assert not has_ambiguous_meeting_reference('中央政治局会议在技术应用基础上新增长期稳定支持。')
+    assert not has_ambiguous_meeting_reference('国务院常务会议首次重点提及制度改革。')
 
 
 def test_packet_sends_complete_source_once_and_ranges_compile_exactly():
@@ -353,6 +358,27 @@ def test_reference_expansion_flag_is_textual_not_a_guessed_meeting_identity():
     assert independent_packet(bundle)['claims'][0]['reference_expansion_required'] is True
     ev['formal_claim'] = ev['formal_claim'].replace('本次会议', '另一场工作会议')
     assert independent_packet(bundle)['claims'][0]['reference_expansion_required'] is False
+
+
+@pytest.mark.parametrize('claim', [
+    '会议在技术应用基础上新增长期稳定支持。',
+    '会议首次重点提及制度改革。',
+])
+def test_relative_meeting_predicates_are_flagged_without_rewriting_evidence(claim):
+    bundle = compiled()
+    bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]['formal_claim'] = claim
+    original = copy.deepcopy(bundle)
+    assert independent_packet(bundle)['claims'][0]['reference_expansion_required'] is True
+    assert bundle == original
+
+
+def test_independent_packet_carries_only_declared_report_agenda():
+    bundle = compiled()
+    assert independent_packet(bundle)['report_agenda'] == ''
+    bundle['metadata']['report_agenda'] = '某日国务院常务会议'
+    original = copy.deepcopy(bundle)
+    assert independent_packet(bundle)['report_agenda'] == '某日国务院常务会议'
+    assert bundle == original
 
 
 def test_review_range_extracts_frozen_text_without_certifying_support():
