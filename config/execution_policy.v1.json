@@ -74,6 +74,7 @@
     },
     "bounded_60m": {
       "formal": true,
+      "carry_forward_unused_budget": true,
       "wall_clock_budget_seconds": 3600,
       "research_deadline_seconds": 2700,
       "reserved_delivery_buffer_seconds": 675,

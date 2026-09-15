@@ -175,6 +175,37 @@ class PipelineRuntimeTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_stage_exceeding_budget_cannot_report_success(self) -> None:
+
+        self._assert_legacy_stage_expiry()
+
+    def test_saved_predecessor_time_can_extend_research_without_borrowing_future(self) -> None:
+        specs = [MODULE.StageSpec(key, key) for key in ("prepare", "review", "render")]
+        runner = MODULE.PipelineRunner(self.root, specs, {s.stage_id: lambda *_: None for s in specs},
+            pipeline_name="carry", input_contract={"wall_clock_budget_seconds": 120,
+            "research_deadline_seconds": 100, "carry_forward_unused_budget": True,
+            "stage_timeouts_seconds": {"prepare": 40, "review": 30, "render": 20}})
+        runner.state["budget_started_epoch"] = 1000
+        runner.stage_state("prepare").update(status="succeeded", budget_started_epoch=1000)
+        runner.stage_state("review")["budget_started_epoch"] = 1010
+        self.assertEqual(60, runner.effective_stage_budget_seconds("review"))
+        with mock.patch.object(MODULE.time, "time", return_value=1015), mock.patch.object(MODULE, "run_scoped_command", return_value=0) as run:
+            self.assertEqual(55, runner.remaining_budget_seconds("review"))
+            self.assertEqual(0, runner.run_command("review", ["unused"])[0])
+            self.assertEqual(55, run.call_args.kwargs["timeout"])
+        with mock.patch.object(MODULE.time, "time", return_value=1095):
+            self.assertLess(runner.remaining_budget_seconds("review"), 0)
+            runner.input_contract["stage_timeouts_seconds"]["review"] = 1000
+            self.assertEqual(5, runner.remaining_budget_seconds("review"))
+        runner.input_contract["stage_timeouts_seconds"]["review"] = 30
+        runner.stage_state("prepare")["status"] = "waiting_ai"
+        self.assertEqual(30, runner.effective_stage_budget_seconds("review"))
+        runner.stage_state("prepare")["status"] = "succeeded"
+        runner.input_contract["carry_forward_unused_budget"] = False
+        self.assertEqual(30, runner.effective_stage_budget_seconds("review"))
+        self.assertEqual(1010, runner.stage_state("review")["budget_started_epoch"])
+        self.assertEqual(1000, runner.state["budget_started_epoch"])
+
+    def _assert_legacy_stage_expiry(self) -> None:
         clock = [1000]
         spec = MODULE.StageSpec("review", "Review")
 

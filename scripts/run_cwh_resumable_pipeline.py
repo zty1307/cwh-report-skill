@@ -1742,6 +1742,7 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "execution_profile": profile_name,
         "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
         "research_deadline_seconds": int(profile.get("research_deadline_seconds") or 0),
+        "carry_forward_unused_budget": bool(profile.get("carry_forward_unused_budget")),
         "stage_timeouts_seconds": resolved_stage_budgets(profile, input_mode),
         "budget_input_mode": input_mode,
         "agenda": str(args.agenda or "").strip(),

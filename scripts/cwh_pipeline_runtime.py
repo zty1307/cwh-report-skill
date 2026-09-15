@@ -375,6 +375,25 @@ class PipelineRunner:
             ), 3)
         atomic_write_json(self.state_path, self.state)
 
+    def effective_stage_budget_seconds(self, stage_id: str) -> float:
+        budgets = self.input_contract.get("stage_timeouts_seconds") or {}
+        base = float(budgets.get(stage_id) or 0)
+        if not base or not self.input_contract.get("carry_forward_unused_budget"):
+            return base
+        pipeline_started = self.state.get("budget_started_epoch")
+        stage_started = self.stage_state(stage_id).get("budget_started_epoch")
+        if pipeline_started is None or stage_started is None:
+            return base
+        previous_allocation = 0.0
+        for spec in self.specs:
+            if spec.stage_id == stage_id:
+                break
+            if self.stage_state(spec.stage_id).get("status") not in TERMINAL_STAGE_STATUSES:
+                return base
+            previous_allocation += float(budgets.get(spec.stage_id) or 0)
+        prior_wall_time = max(0.0, float(stage_started) - float(pipeline_started))
+        return base + max(0.0, previous_allocation - prior_wall_time)
+
     def remaining_budget_seconds(self, stage_id: str = "") -> float | None:
         limits: list[float] = []
         now = time.time()
@@ -387,7 +406,7 @@ class PipelineRunner:
             if research_deadline and started is not None and stage_id not in {"render", "delivery_gate"}:
                 limits.append(research_deadline - max(0.0, now - float(started)))
             row = self.stage_state(stage_id)
-            stage_budget = float((self.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id) or 0)
+            stage_budget = self.effective_stage_budget_seconds(stage_id)
             stage_started = row.get("budget_started_epoch")
             if stage_budget and stage_started is not None:
                 limits.append(stage_budget - max(0.0, now - float(stage_started)))
@@ -506,9 +525,10 @@ class PipelineRunner:
         timeout_seconds: float | None = None,
     ) -> tuple[int, Path]:
         row = self.stage_state(stage_id)
+        row["effective_time_budget_seconds"] = self.effective_stage_budget_seconds(stage_id)
         if timeout_seconds is None:
-            configured = (self.input_contract.get("stage_timeouts_seconds") or {}).get(stage_id)
-            timeout_seconds = int(configured) if configured not in (None, "", 0) else None
+            configured = self.effective_stage_budget_seconds(stage_id)
+            timeout_seconds = configured or None
         attempt = int(row.get("total_attempts") or row.get("attempts") or 1)
         row["command_count"] = int(row.get("command_count") or 0) + 1
         command_count = row["command_count"]

@@ -26,7 +26,10 @@ The controller resolves stage budgets from the input mode at intake. A standard 
 
 In bounded delivery, the hotword count is a quality target, not a reason to withhold every artifact. Retain only genuinely supported terms after the required second pass, record configured versus actual counts, and continue with a shorter nonempty list. Never manufacture words to reach 36. An empty or unreviewed list remains a real missing-evidence state. The explicit 40-minute raw-input profile reserves up to 480 seconds for normalization; the global 2400-second clock is unchanged, and per-stage maxima cannot all be consumed at once.
 
+The 60-minute profile carries forward unused predecessor allocations into the current node. It subtracts actual prior wall-clock time (including waits), never future-node budgets. The global 3600-second limit and 2700-second research cutoff remain unchanged. Existing job contracts retain their original flag and clocks; enable this only when starting a new job. A faster normalization therefore leaves more room for evidence work without stealing downstream delivery time.
+
 Run the preflight before expensive model work:
+
 
 ```powershell
 python scripts/cwh_preflight.py --skill-root .
