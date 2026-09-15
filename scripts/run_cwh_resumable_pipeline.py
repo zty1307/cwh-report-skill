@@ -28,6 +28,7 @@ from cwh_model_contract import build_task_payload, execution_profile, stage_budg
 from normalize_cwh_analysis import normalize_analysis
 from complete_cwh_evidence_structure import complete_analysis_structure
 from cwh_viewpoint_gate import cluster_density_result
+from cwh_available_delivery import DELIVERY_POLICY, available_delivery, prepare_available_delivery, valid_gap
 from report_rules import domestic_viewpoint_quality_issues
 
 
@@ -640,6 +641,8 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             continue
         clusters = item.get("clusters") or []
         if not clusters:
+            if available_delivery(data) and valid_gap(item) and not eligible_candidates:
+                continue
             problems.append(f"子议题没有观点簇：{topic}")
             continue
         if len(clusters) < 2:
@@ -1272,6 +1275,9 @@ class CwhPipeline:
                     from prepare_cwh_corpus_index import complete_corpus_deferrals
                     draft = complete_corpus_deferrals(draft, corpus, topics)
                 normalized = normalize_analysis(complete_analysis_structure(draft, corpus))
+                _, delivery_profile = execution_profile(self.contract.get("execution_profile") or "")
+                if (delivery_profile.get("model_contract") or {}).get("on_missing_evidence") == DELIVERY_POLICY:
+                    normalized = prepare_available_delivery(normalized)
             except (ValueError, TypeError, AttributeError) as exc:
                 return [f"analysis_bundle.json无法解析或结构无效：{type(exc).__name__}: {exc}"]
             atomic_write_json(target, normalized)
@@ -1315,7 +1321,7 @@ class CwhPipeline:
                 "每条入选证据保留candidate_id、evidence_id、单一speaker_name、连续source_excerpt及字符位置、45至120汉字的formal_claim；不得增强原文结论。",
                 "bounded限时档每议题选择6至12个、最多12个代表性独立声音，其余有效候选设formal_use=reserve并写reserve_reason；不足4个时须写含reason、search_evidence、reviewed_by的evidence_shortfall。exhaustive才全部成文。",
                 "本节点不填写semantic_review，也不写最终正文；脚本将从formal_claim机械生成cluster.details，独立下一节点再逐命题复核。",
-                "只有证据不足或平台真实受阻时才返回结构化blocker；不得编造链接、引文、人物、ID、快照或状态。",
+                "证据不足时返回现有可用观点和缺口，不因缺少声音中止交付；真实访问阻断须保留。不得编造链接、引文、人物、ID、快照或状态。",
             ],
         )
         worker_failure = maybe_run_ai_worker(runner, spec, task, target)
@@ -1664,13 +1670,15 @@ class CwhPipeline:
         else:
             audit = read_json(audit_path)
         acceptance = audit.get("acceptance") or {}
-        if not acceptance.get("ready_for_formal_delivery"):
-            problems.extend(str(item) for item in acceptance.get("blockers") or ["正式交付门禁未通过"])
+        quality_warnings = [str(item) for item in acceptance.get("blockers") or []]
         try:
             report_data = read_json(report_data_path)
         except Exception as exc:
             report_data = {}
             problems.append(f"report_data.json无法解析：{exc}")
+        deliver_available = available_delivery(report_data.get("analysis_bundle") or {})
+        if not acceptance.get("ready_for_formal_delivery") and not deliver_available:
+            problems.extend(quality_warnings or ["正式交付门禁未通过"])
         data_workbook_path = self.report / "cwh_data_workbook.xlsx"
         if report_data:
             problems.extend(validate_data_workbook(data_workbook_path, report_data))
@@ -1692,7 +1700,9 @@ class CwhPipeline:
             if value and not Path(value).exists():
                 problems.append(f"report_data中的{name}路径不存在")
         payload = {
-            "status": "passed" if not problems else "blocked",
+            "status": ("delivered_with_gaps" if deliver_available and quality_warnings else "passed") if not problems else "blocked",
+            "ready_for_formal_delivery": bool(acceptance.get("ready_for_formal_delivery")),
+            "quality_warnings": quality_warnings,
             "problems": list(dict.fromkeys(problems)),
             "checked_artifacts": [
                 str(self.report / "cwh_formal_report.docx"),
@@ -1713,7 +1723,7 @@ class CwhPipeline:
                 details={"problems": payload["problems"]},
             )
         return StageOutcome.succeeded(
-            "全部成品与质量门禁通过，可以归档交付。",
+            "现有可用内容已输出，缺口详见审计，不再因样本不足阻断交付。" if payload["status"] == "delivered_with_gaps" else "全部成品与质量门禁通过，可以归档交付。",
             artifacts={
                 "delivery_audit": str(target),
                 "release_mapping_audit": str(self.report / "domestic_evidence_mapping_audit.json"),

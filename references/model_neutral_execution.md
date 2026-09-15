@@ -1,5 +1,7 @@
 # Model-neutral execution contract
 
+Bounded missing-evidence delivery now uses `deliver_available_with_gaps`: return usable evidence plus honest gaps, independently review existing claims and continue all output stages. Quantity targets must not stop Word/Excel/HTML delivery. The final audit may say `delivered_with_gaps` while preserving `ready_for_formal_delivery=false`; no claim of complete coverage is required for users to receive files. Source integrity and cross-output consistency still apply. Earlier references to missing-evidence blockers below describe hard access/structural failures, not a requirement to withhold all available content.
+
 The default formal profile is `bounded_60m`, with a 3600-second limit and a 2700-second research cutoff that preserves delivery time. `bounded_40m` remains an explicit tighter option and `exhaustive` keeps uncapped research. These are engineering budgets, not evidence that every model can complete within them or permission to bypass a failed gate.
 
 ## Division of work

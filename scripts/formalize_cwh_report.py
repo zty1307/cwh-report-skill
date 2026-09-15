@@ -1525,7 +1525,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
         clusters = item.get("clusters") or []
         if not clusters:
             lines.append(f"{topic_idx}.{topic_heading(item)}")
-            lines.append("当前公开样本密度不足，尚未形成可稳定归纳的媒体自媒体观点。")
+            lines.append((item.get("evidence_gap") or {}).get("notice") or "当前公开样本密度不足，尚未形成可稳定归纳的媒体自媒体观点。")
             lines.append("")
             continue
         if len(clusters) == 1:
@@ -2100,7 +2100,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
             clusters = item.get("clusters") or []
             if not clusters:
                 add_docx_heading(document, f"{topic_idx}.{topic_heading(item)}", 3)
-                document.add_paragraph("当前公开样本密度不足，尚未形成可稳定归纳的媒体自媒体观点。")
+                document.add_paragraph((item.get("evidence_gap") or {}).get("notice") or "当前公开样本密度不足，尚未形成可稳定归纳的媒体自媒体观点。")
                 continue
             if len(clusters) == 1:
                 add_single_topic_paragraph(document, topic_idx, item, clusters[0])

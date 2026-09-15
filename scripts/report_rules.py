@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from cwh_writing_rules import unsupported_padding_issues, writing_rules
+from cwh_available_delivery import available_delivery, valid_gap
 
 
 ROLE_PATTERN = (
@@ -243,6 +244,10 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
     viewpoint_rules = writing_rules()["viewpoint"]
 
     for viewpoint in _topic_viewpoints(data):
+        if available_delivery(data) and valid_gap(viewpoint):
+            issues.append({"code": "domestic_interpretation_gap", "severity": "warning", "topic": viewpoint.get("topic"),
+                           "message": viewpoint["evidence_gap"]["notice"]})
+            continue
         topic = str(viewpoint.get("topic") or viewpoint.get("heading") or "未命名子议题")
         heading = str(viewpoint.get("heading") or "").strip().rstrip("。")
         reviewed_heading = re.sub(r"^(?:舆论|媒体|专家|机构)(?:普遍)?", "", heading).strip()
@@ -353,7 +358,9 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                 attribution = str(evidence.get("attribution") or "").strip()
                 status = str(evidence.get("attribution_status") or "").lower()
                 source = str(evidence.get("source") or "").strip()
-                voice = attribution if status in {"named_person", "media_only", "media_voice"} else source
+                # Monitoring exports may call every independent account
+                # "公众号". A channel label is not a speaking subject.
+                voice = str(evidence.get("speaker_name") or attribution or source).strip()
                 if not voice or voice in GENERIC_VOICES:
                     continue
                 key = f"evidence:{_voice_key(voice)}"

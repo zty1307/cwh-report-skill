@@ -91,6 +91,30 @@ def cached_public_pages(workspace, urls, timeout=8):
     return pages
 
 
+def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache):
+    """Sequential small contexts; one model, no concurrent agents or token overlap."""
+    decisions, runs = [], []
+    for number, packet in enumerate(packets, 1):
+        if deadline - time.monotonic() < 15:
+            raise TimeoutError("No remaining single-topic semantic budget")
+        ids = [row['id'] for row in packet['items']]
+        contract = ('\n本次只审核一个议题，顶层直接返回items、heading、clusters（不是topics数组）。'
+                    '所有输入ID恰好一次，排除项也保留reason和claims:[]；不得串用其他议题。'
+                    '输入议题：' + packet['topic'] + '；ID清单：' + json.dumps(ids, ensure_ascii=False))
+        result, run = semantic_json(semantic_packet(packet), prompt + contract, command, workspace,
+                                   f"author-topic-{number}", deadline - time.monotonic(), reuse_cache=reuse_cache)
+        if result.get('topic') not in (None, packet['topic']):
+            raise ValueError('Single-topic response changed the requested topic')
+        returned = [row.get('id') for row in result.get('items') or []]
+        if len(returned) != len(set(returned)) or set(returned) != set(ids):
+            raise ValueError(f"[{packet['topic']}] Single-topic response must review every item exactly once")
+        decisions.append({**result, 'topic': packet['topic']})
+        runs.append(run)
+    return decisions, {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
+                       'transport': 'sequential_single_topic_semantic', 'topic_runs': runs,
+                       'seconds': sum(r.get('seconds', 0) for r in runs)}
+
+
 def author(task, deadline):
     inputs = task["inputs"]
     plan, index, registry = (read(inputs[k]) for k in ("research_plan", "public_corpus_index", "source_registry"))
@@ -114,9 +138,7 @@ def author(task, deadline):
         packets.append(packet)
         topic_plans.append(topic_plan)
         observed.append(observations)
-    prompt = ('这是一次多议题批量语义审核。输入topics每项是独立议题，ID只在本议题内唯一。'
-              '返回JSON顶层topics数组，每项带原topic及下述单议题契约的全部字段。'
-              '跨议题不能串用材料或漏审。只返回各议题审核及观点，不复制输入。\n' + AUTHOR_PROMPT)
+    prompt = AUTHOR_PROMPT
     feedback = inputs.get("validation_problems") or []
     blocker_path = Path(task["stage_workspace"]) / "compiled_blocker.json"
     if blocker_path.is_file():
@@ -125,7 +147,6 @@ def author(task, deadline):
             feedback = [*feedback, str(blocker.get("blocker"))]
     if feedback:
         prompt += "\n上次门禁反馈（首次缺文件不是内容错误），只修复真实错误，不改变已正确原文身份：" + json.dumps(feedback, ensure_ascii=False)
-    prompt += batch_author_contract(packets)
     packet = {"topics": [semantic_packet(p) for p in packets]}
     packet_hash = hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     checkpoint = Path(task["stage_workspace"]) / "author_decisions.json"
@@ -141,9 +162,8 @@ def author(task, deadline):
             "author-selected-repair", deadline - time.monotonic(), reuse_cache=False)
         decisions = apply_semantic_repairs(prior["decisions"], request, result)
     else:
-        result, run = semantic_json(packet, prompt, command, Path(task["stage_workspace"]),
-            "author-all-topics", deadline - time.monotonic(), reuse_cache=not actual_feedback)
-        decisions = result.get("topics") or []
+        decisions, run = author_topic_decisions(packets, prompt, command, Path(task["stage_workspace"]),
+                                                deadline, reuse_cache=not actual_feedback)
     decisions = normalize_excluded_claims(decisions)
     if len(decisions) != len(packets) or {d.get("topic") for d in decisions} != {p["topic"] for p in packets}:
         raise ValueError("Each requested topic requires exactly one semantic decision bundle")
@@ -172,7 +192,8 @@ def author(task, deadline):
     merged = merge_topic_bundles(parts, [row["topic"] for row in index["topics"]], index["candidate_count"], author_id)
     merged["metadata"].update(execution_profile=task["execution_profile"],
         monitoring_start=plan["monitoring_period"]["start"], monitoring_end=plan["monitoring_period"]["end"],
-        authoring_batch_run_ids=[run["session_id"]], transport="host_compiled_semantic_v1")
+        authoring_batch_run_ids=[r['session_id'] for r in run.get('topic_runs') or [run]],
+        transport="host_compiled_semantic_v1")
     output(task, merged)
 
 

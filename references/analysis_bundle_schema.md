@@ -182,6 +182,8 @@ The user never supplies this file. The CWH skill creates it after reading the mo
 
 Rules:
 
+- Bounded profiles use `metadata.delivery_policy=deliver_available_with_gaps`. Controllers may remove empty clusters and record count-based density exceptions using actual research executions; these are not semantic certification. A zero-usable-voice topic has `clusters=[]` and `evidence_gap` with status `no_usable_interpretation_in_reviewed_material`, notice, search_evidence and recorded_by. Only reviewed material is covered; deferred records are not proof of absence. A zero-voice exception is invalid if an eligible candidate has been left unmapped. Continue the remaining stages and output available Word, Excel, JSON and HTML rather than returning only a blocker. Independent verification still applies to every existing claim.
+
 - The author submits semantic fields and actual source facts, not full report prose or dashboard code. Before draft validation, the controller calls `complete_cwh_evidence_structure.py` to fill missing deterministic IDs, full-text hashes and unique exact excerpt offsets. It preserves existing values, does not guess ambiguous matches, and never edits frozen verified bundles. Query-result snapshots and their candidate references still need consistent identifiers; this helper does not manufacture collection history. Independent review supplies certification only in the next stage.
 
 - Topic names must exactly match workbook topics.

@@ -27,7 +27,7 @@
         "allow_pipeline_state_mutation": false,
         "allow_validator_mutation": false,
         "allow_manual_artifact_hashes": false,
-        "on_missing_evidence": "return_structured_blocker",
+        "on_missing_evidence": "deliver_available_with_gaps",
         "on_validation_error": "repair_only_reported_fields"
       },
       "research": {
@@ -98,7 +98,7 @@
         "allow_pipeline_state_mutation": false,
         "allow_validator_mutation": false,
         "allow_manual_artifact_hashes": false,
-        "on_missing_evidence": "return_structured_blocker",
+        "on_missing_evidence": "deliver_available_with_gaps",
         "on_validation_error": "repair_only_reported_fields"
       },
       "research": {

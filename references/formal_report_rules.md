@@ -261,6 +261,8 @@ The table must consume the audited `公众TOP` result, not reconstruct relevance
 
 ## Separation of formal report and audit
 
+For bounded available-content delivery, a genuinely empty reviewed topic uses the fixed notice `本轮在监测期内未取得可引用的独立解读，保留该议题的传播数据；这不代表没有相关讨论。` beneath its original topic heading. No fabricated analytical heading or empty `一是` cluster is allowed. Preserve missing-comment/sentiment notices without claiming a zero-result collection when access failed. Keep all existing verified content and the fixed chapter layout. Quantity targets and unfilled sections are audit warnings, not reasons to withhold Word or the workbench; source failures remain auditable and unverified claims never become conclusions.
+
 The formal report body should not contain engineering status blocks such as:
 
 - `正式交付状态`

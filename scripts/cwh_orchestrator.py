@@ -3489,11 +3489,17 @@ def write_outputs(data: dict[str, Any], out_dir: Path) -> None:
     audit_path = out_dir / "cwh_audit.json"
     data["artifacts"]["report_data"] = str(data_path)
     data["artifacts"]["audit"] = str(audit_path)
-    if not formal_delivery_ready(data):
+    from cwh_available_delivery import available_delivery
+    deliver_available = available_delivery(data.get("analysis_bundle") or {})
+    if not formal_delivery_ready(data) and not deliver_available:
         data["artifacts"]["formal_report_status"] = "blocked_by_acceptance_gate"
         data_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         audit_path.write_text(json.dumps(data["audit"], ensure_ascii=False, indent=2), encoding="utf-8")
         return
+
+    if not formal_delivery_ready(data):
+        data["delivery_class"] = "available_with_gaps"
+        data["artifacts"]["formal_report_status"] = "generated_with_evidence_gaps"
 
     report = render_report(data)
     report_path = out_dir / "cwh_report.md"

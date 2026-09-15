@@ -152,7 +152,7 @@ def build_task_payload(
         },
         "completion_contract": (
             "Write final JSON/CSV artifacts only to declared_outputs; store collection seeds, raw responses, temporary batches and helper outputs only under stage_workspace. Do not edit code, pipeline state, validators, hashes or prior accepted artifacts. "
-            "The deterministic validator is the sole authority for completion. If evidence is insufficient, return a structured "
-            "blocker instead of fabricating or padding."
+            "The deterministic validator checks source integrity. If evidence is insufficient, return the available "
+            "content plus structured gaps so the controller can continue delivery; never fabricate or pad."
         ),
     }

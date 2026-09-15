@@ -1056,6 +1056,8 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
     title = f"{title_date}国务院常务会议舆情情况" if title_date else "国务院常务会议舆情情况"
     if data.get("delivery_class") == "review_draft":
         title += " 待审核稿 未通过正式交付"
+    elif data.get("delivery_class") == "available_with_gaps":
+        title += " 现有内容交付 缺口已标注"
     report_sections = split_formal_report(data)
     report_path = path_from((data.get("artifacts") or {}).get("formal_report"))
     blocks = build_report_blocks(data, report_path)

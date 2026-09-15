@@ -16,6 +16,8 @@ Do not ask the user to prepare analysis JSON, comments, charts, or a third input
 
 ## Default execution contract
 
+In bounded profiles, deliver all available content even when a topic has no usable interpretation or comments. Controllers record real search/review coverage and explicit gaps, remove empty clusters, independently verify the claims that do exist, and continue Word/Excel/Markdown/HTML generation. Quantity/density targets must not withhold all outputs. `delivered_with_gaps` is a completed available-content delivery, not proof of absent discussion or certified full coverage. Source integrity, exact excerpts, numerical consistency and artifact existence remain enforced. Never fill gaps with fabricated voices, quotes or ratios.
+
 Use the model-neutral `bounded_60m` profile in `config/execution_policy.v1.json` by default. Its wall-clock limit is 3600 seconds; research stops taking time after 2700 seconds, preserving delivery time. Time starts at the first `run` and includes worker waits and retries; `run` and `invalidate` do not reset it. An exhausted budget records `time_budget_exhausted`; use a new job directory for a new timed test. `bounded_40m` remains a tighter explicit option. Use `exhaustive` only when the user prefers uncapped research. Budgets are limits, not proof that a model has completed a report within them.
 
 Before a full run, read [references/model_neutral_execution.md](references/model_neutral_execution.md) and [references/resumable_pipeline.md](references/resumable_pipeline.md). The machine-readable policy, generated task contract, and validators override narrative examples when they differ.
