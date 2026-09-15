@@ -135,7 +135,7 @@ def author(task, deadline):
         and prior.get("decisions_sha256") == decisions_hash and complete_decisions(packets, prior.get("decisions"))):
         request = repair_packet(packets, prior["decisions"], actual_feedback, semantic_packet)
     if request and request["topics"]:
-        result, run = semantic_json(request, REPAIR_PROMPT, command, Path(task["stage_workspace"]),
+        result, run = semantic_json(request, REPAIR_PROMPT + batch_author_contract(request["topics"]), command, Path(task["stage_workspace"]),
             "author-selected-repair", deadline - time.monotonic(), reuse_cache=False)
         decisions = apply_semantic_repairs(prior["decisions"], request, result)
     else:
