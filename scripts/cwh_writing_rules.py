@@ -91,6 +91,11 @@ def formal_attribution(row: dict[str, Any]) -> str:
         or row.get("platform")
         or ""
     ).strip()
+    role = str(row.get('speaker_role') or '').strip()
+    speaker = str(row.get('speaker_name') or '').strip()
+    if role and speaker.startswith(role) and subject == role + speaker:
+        # Exact duplicated prefix only; the frozen identity fields remain intact.
+        subject = speaker
     if status != "self_media" or not subject:
         return subject
     if re.match(r"^(?:微信公众号|头条号|百家号|微博账号|自媒体账号)[“\"]", subject):

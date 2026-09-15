@@ -153,6 +153,23 @@ QUOTE_PROMPT = '''从已分类的真实评论中选择正式引用，资料不�
 只能使用输入id，每个id最多一次；topic_headings按所选id已有议题填写，不能造样本、改原话或补不存在的父帖正文。没有合适引用可不选，但不能冒充完成正式评论交付。'''
 
 
+QUOTE_CONSTRAINT_PROMPT = '''\n每条输入的formal_quote_allowed是脚本按正文既有长度与格式规则计算的候选资格：false不得选作正式引用，但不能因此改变情绪分类或从分母排除；不截短、不改写原话去绕过限制。true仅表示格式可用，仍需判断是否有实质政策意见。具体的政策适用、执行或含义疑问也可代表公众信息需求，即使分类neutral，也不要只因态度不明而忽略；不把疑问改成反对、不把一般性困惑强行写成政策批评。不选纯地理介绍或空泛赞词，不为凑数量造样本。'''
+PROMPT += QUOTE_CONSTRAINT_PROMPT
+COMPACT_PROMPT += QUOTE_CONSTRAINT_PROMPT
+QUOTE_PROMPT += QUOTE_CONSTRAINT_PROMPT
+QUOTE_HEADING_PROMPT = '\n正式引用的heading及topic_headings须以有原话支持的支持、肯定、期待、建议、担忧、认为、询问或希望明确等动词起头，每个标题只留一个中心判断。中性政策疑问用询问/希望明确及具体问题表述，不写成政策本身关系不明的客观定性，不用公众普遍关注等由单条样本推导的范围判断。'
+PROMPT += QUOTE_HEADING_PROMPT
+COMPACT_PROMPT += QUOTE_HEADING_PROMPT
+QUOTE_PROMPT += QUOTE_HEADING_PROMPT
+
+
+def quote_constraints(text):
+    # Share the final renderer's exact rule rather than maintaining two limits.
+    from formalize_cwh_report import clean_formal_comment, comment_is_report_quote_suitable
+    return {'formal_quote_allowed': comment_is_report_quote_suitable(text),
+            'formal_quote_chars': len(clean_formal_comment(text))}
+
+
 def label_decisions(capture, topics, result, run):
     rows = result.get('rows') or []
     required = {'id', 'topic', 'label', 'reason'}
@@ -220,7 +237,8 @@ def review_packet(capture, topics):
     used = {r['parent_post_id'] for r in rows}
     return {'topics': {str(n): t for n, t in enumerate(topics, 1)},
             'posts': [{**{k: p[k] for k in ('id', 'text', 'source', 'published_at')}, 'context_kind': p.get('context_kind', 'full_parent_text')} for p in capture['posts'] if p['id'] in used],
-            'rows': [{'id': n, 'text': r['text'], 'post_id': r['parent_post_id'], 'parent_comment_id': r.get('parent_comment_id', '')}
+            'rows': [{'id': n, 'text': r['text'], 'post_id': r['parent_post_id'], 'parent_comment_id': r.get('parent_comment_id', ''),
+                      'like_count': r.get('like_count', 0), **quote_constraints(r['text'])}
                      for n, r in enumerate(rows, 1)]}
 
 
@@ -262,7 +280,7 @@ def compact_review_packet(capture, topics, collection_audit):
             'rows': [{'id': n, 'topic': routes[row['parent_post_id']], 'text': row['text'],
                       'parent_title': posts[row['parent_post_id']]['text'],
                       'parent_context_kind': posts[row['parent_post_id']].get('context_kind', 'full_parent_text'),
-                      'like_count': row.get('like_count', 0)}
+                      'like_count': row.get('like_count', 0), **quote_constraints(row['text'])}
                      for n, row in enumerate(rows, 1)]}
 
 

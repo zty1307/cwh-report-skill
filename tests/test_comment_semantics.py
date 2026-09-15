@@ -57,6 +57,23 @@ def test_parent_title_is_not_misrepresented_as_full_body():
     assert review_packet(capture, ['topic'])['posts'][0]['context_kind'] == 'api_parent_title_only'
 
 
+def test_quote_candidate_limits_match_renderer_without_changing_original_comments():
+    from cwh_comment_semantics import quote_constraints, QUOTE_PROMPT
+    from formalize_cwh_report import comment_is_report_quote_suitable
+    long_text = '希望明确政策适用条件' * 25
+    assert quote_constraints(long_text)['formal_quote_allowed'] is False
+    inquiry = '这项核准决定何时可以开工，是否还需办理其他手续？'
+    assert quote_constraints(inquiry)['formal_quote_allowed'] == comment_is_report_quote_suitable(inquiry)
+    assert '不要只因态度不明而忽略' in QUOTE_PROMPT
+    assert long_text == '希望明确政策适用条件' * 25
+
+
+def test_concrete_inquiry_heading_is_preserved_as_inquiry_not_added_opposition():
+    from formalize_cwh_report import comment_stance_heading
+    assert comment_stance_heading('询问核准后的项目能否直接开工') == '询问核准后的项目能否直接开工'
+    assert comment_stance_heading('希望明确实施手续及适用范围') == '希望明确实施手续及适用范围'
+
+
 def test_label_checkpoint_is_not_a_formal_quote_decision():
     capture = {'rows': [{'sample_id': 'a'}, {'sample_id': 'b'}]}
     result = {'rows': [{'id': 1, 'topic': 1, 'label': 'neutral', 'reason': 'unit opinion'},
@@ -97,7 +114,8 @@ def test_compact_packet_freezes_topic_from_collection_audit():
         'source_id': 'toutiao_public_comments', 'queries_or_seed_urls': ['https://post/1']}]}]}
     packet = compact_review_packet(capture, ['公共服务'], audit)
     assert packet['rows'] == [{'id': 1, 'topic': 1, 'text': '希望政策落实', 'parent_title': '父帖标题',
-                               'parent_context_kind': 'api_parent_title_only', 'like_count': 9}]
+                               'parent_context_kind': 'api_parent_title_only', 'like_count': 9,
+                               'formal_quote_allowed': True, 'formal_quote_chars': 6}]
 
 
 def test_unused_cross_topic_seed_does_not_block_unambiguous_capture():

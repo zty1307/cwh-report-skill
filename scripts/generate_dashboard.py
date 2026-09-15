@@ -11,6 +11,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+from cwh_writing_rules import formal_attribution
+from normalize_cwh_analysis import assemble_cluster_details
 
 from report_rules import (
     cluster_needs_attribution_review,
@@ -258,6 +260,8 @@ def evidence_attribution(
     status_key = status.strip().lower()
     unresolved_statuses = {"media_only", "media", "source_only", "missing", "pending", "unresolved"}
     if attribution and status_key not in unresolved_statuses:
+        if status_key == 'named_person':
+            attribution = formal_attribution({**evidence, 'attribution': attribution})
         return {"attribution": attribution, "attribution_status": status or "identified"}
     evidence_text = " ".join(
         first_text(row, key)
@@ -959,6 +963,9 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
     for item in (data.get("viewpoints") or {}).get("by_topic") or []:
         clusters = []
         for cluster in item.get("clusters") or []:
+            cluster_details = (assemble_cluster_details(cluster)
+                if any(isinstance(r, dict) and r.get('formal_claim') for r in cluster.get('evidence') or [])
+                else cluster.get('details') or cluster.get('analysis') or '')
             evidence_rows = []
             for evidence in cluster.get("evidence") or []:
                 url = str(evidence.get("url") or "#")
@@ -971,7 +978,7 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
                     origin_row,
                 )
                 context_text = "。".join(
-                    str(cluster.get(key) or "") for key in ("summary", "details", "analysis")
+                    [str(cluster.get('summary') or ''), cluster_details]
                 )
                 direct_evidence_text = " ".join(
                     str(row.get(key) or "")
@@ -984,7 +991,7 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
                     attribution,
                 )
                 expanded_claims = expand_multi_voice_claims(
-                    cluster.get("details") or cluster.get("analysis"),
+                    cluster_details,
                     attribution,
                     evidence.get("formal_claim")
                     or evidence.get("claim")
@@ -1018,13 +1025,13 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
             if evidence_rows:
                 normalized_cluster = {
                     **cluster,
-                    "details": str(cluster.get("details") or cluster.get("analysis") or ""),
+                    "details": str(cluster_details),
                     "evidence": evidence_rows,
                 }
                 clusters.append(
                     {
                         "summary": str(cluster.get("summary") or ""),
-                        "details": str(cluster.get("details") or cluster.get("analysis") or ""),
+                        "details": str(cluster_details),
                         "evidence": evidence_rows,
                         "needs_attribution_review": cluster_needs_attribution_review(normalized_cluster),
                     }

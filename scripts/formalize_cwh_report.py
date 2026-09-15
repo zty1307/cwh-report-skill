@@ -32,6 +32,7 @@ from report_rules import (
 )
 from source_identity import public_source_family
 from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256
+from normalize_cwh_analysis import assemble_cluster_details
 
 
 @lru_cache(maxsize=1)
@@ -232,9 +233,16 @@ def evidence_text(evidence: list[dict[str, Any]]) -> str:
     return "。".join(parts)
 
 
+def display_cluster_details(cluster: dict[str, Any]) -> str:
+    """Render current atomic evidence, never a stale preassembled paragraph."""
+    if any(isinstance(row, dict) and row.get('formal_claim') for row in cluster.get('evidence') or []):
+        return assemble_cluster_details(cluster)
+    return cluster.get('details') or cluster.get('analysis') or ''
+
+
 def cluster_wording(cluster: dict[str, Any]) -> str:
     summary = clean_sentence(cluster.get("summary"))
-    details = clean_sentence(cluster.get("details") or cluster.get("analysis"))
+    details = clean_sentence(display_cluster_details(cluster))
     warning = attribution_review_marker(cluster)
     if details:
         return f"{summary}。{details}。{warning}"
@@ -265,7 +273,8 @@ def comment_stance_heading(text: Any) -> str:
     """Normalize a concrete reviewed comment claim into report heading grammar."""
     value = clean_sentence(text)
     value = re.sub(r"^(?:舆论|媒体|专家|机构|网民)(?:普遍)?", "", value).strip()
-    if value.startswith(STANCE_HEADING_PREFIXES):
+    prefixes = STANCE_HEADING_PREFIXES + tuple(writing_rules()['comments']['additional_heading_verbs'])
+    if value.startswith(prefixes):
         return value
     # Domestic models often return a valid policy proposition instead of an
     # attribution verb. Preserve the proposition and add the neutral report
@@ -612,7 +621,7 @@ def comment_is_report_quote_suitable(text: str) -> bool:
     value = clean_formal_comment(text)
     if not value:
         return False
-    if len(value) > 180:
+    if len(value) > writing_rules()['comments']['quote_max_chars']:
         return False
     enumerations = len(re.findall(r"(?:^|[\s；;。])(?:[1-9][.、]|[一二三四五六七八九十]是)", value))
     if enumerations >= 2 and re.search(r"(?:省流|核心(?:调整|变化)|分为|包括)", value):
@@ -651,7 +660,6 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         for row in data.get("topic_stats") or []
     }
     ordered_topics = sorted(by_topic, key=lambda topic: topic_totals.get(topic, 0), reverse=True)
-    rank_phrases = frames["paragraph_rank_phrases"]
     focus_by_topic: dict[str, str] = {}
     for item in (data.get("viewpoints") or {}).get("by_topic") or []:
         display = topic_display(str(item.get("topic") or ""))
@@ -667,14 +675,14 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         if not selected:
             continue
         quoted = "、".join(f"“{word}”" for word in selected)
-        rank = rank_phrases[min(index, len(rank_phrases) - 1)]
         focus = focus_by_topic.get(topic)
         if focus and focus.startswith(STANCE_HEADING_PREFIXES):
-            focus_clause = "，舆论" + focus
+            focus_clause = "，" + frames['stance_focus_subject'] + focus
         else:
             focus_clause = ("，" + focus_phrases[index % len(focus_phrases)] + focus) if focus else ""
         lead = "" if index < 4 else "此外，" if index == 4 else "同时，"
-        chunks.append(f"{lead}{quoted}等词{rank}{focus_clause}")
+        word_group = frames['word_group_template'].format(quoted=quoted, topic=topic)
+        chunks.append(f"{lead}{word_group}{focus_clause}")
     if not chunks:
         return "从热词分布来看，当前批次样本不足，尚未形成稳定热词分布。"
     return frames["opening"] + "。".join(chunks) + "。"
@@ -1539,7 +1547,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             lines.append("")
             continue
         if len(clusters) == 1:
-            details = clean_sentence(clusters[0].get("details") or clusters[0].get("analysis"))
+            details = clean_sentence(display_cluster_details(clusters[0]))
             body = details or clean_sentence(clusters[0].get("summary"))
             warning = ATTRIBUTION_REVIEW_TEXT if cluster_needs_attribution_review(clusters[0]) else ""
             lines.append(f"{topic_idx}.{topic_heading(item)}。{body}。{warning}")
@@ -1849,7 +1857,7 @@ def add_cluster_paragraph(document: Any, prefix: str, cluster: dict[str, Any]) -
     summary = clean_sentence(cluster.get("summary"))
     lead = paragraph.add_run(f"{prefix}{summary}。")
     lead.bold = True
-    details = clean_sentence(cluster.get("details") or cluster.get("analysis"))
+    details = clean_sentence(display_cluster_details(cluster))
     if details:
         add_emphasized_details(paragraph, f"{details}。")
     else:
@@ -1867,7 +1875,7 @@ def add_single_topic_paragraph(document: Any, index: int, item: dict[str, Any], 
     paragraph = document.add_paragraph()
     lead = paragraph.add_run(f"{index}.{topic_heading(item)}。")
     lead.bold = True
-    details = clean_sentence(cluster.get("details") or cluster.get("analysis"))
+    details = clean_sentence(display_cluster_details(cluster))
     if details:
         add_emphasized_details(paragraph, f"{details}。")
     else:

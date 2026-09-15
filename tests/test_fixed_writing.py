@@ -49,6 +49,33 @@ def test_mentioning_subject_inside_claim_does_not_erase_attribution():
     assert evidence_sentence({"speaker_name": "甲机构", "formal_claim": "该措施涉及甲机构的职责。"}).startswith("甲机构认为，")
 
 
+def test_exact_duplicated_institution_prefix_is_display_only_not_identity_rewrite():
+    from cwh_writing_rules import formal_attribution
+    row = {'speaker_name': '某主管部门有关负责人', 'speaker_role': '某主管部门',
+           'attribution': '某主管部门某主管部门有关负责人', 'attribution_status': 'named_person'}
+    original = copy.deepcopy(row)
+    assert formal_attribution(row) == '某主管部门有关负责人'
+    assert row == original
+    row.update(speaker_name='张某', attribution='某主管部门张某')
+    assert formal_attribution(row) == '某主管部门张某'
+
+
+def test_final_renderer_rebuilds_stale_attribution_from_unchanged_atomic_evidence():
+    row = {'speaker_name': '某主管部门有关负责人', 'speaker_role': '某主管部门',
+           'attribution': '某主管部门某主管部门有关负责人', 'attribution_status': 'named_person',
+           'formal_claim': '应明确实施条件并公布具体程序。', 'attribution_verb': '表示'}
+    cluster = {'summary': '建议明确实施条件', 'evidence': [row],
+               'details': '某主管部门某主管部门有关负责人表示，旧的预组装正文。'}
+    original = copy.deepcopy(cluster)
+    text = formal.cluster_wording(cluster)
+    assert '某主管部门有关负责人表示' in text
+    assert '某主管部门某主管部门' not in text and '旧的预组装正文' not in text
+    assert cluster == original
+    from generate_dashboard import evidence_attribution
+    assert evidence_attribution(row, row)['attribution'] == '某主管部门有关负责人'
+    assert cluster == original
+
+
 def test_chair_name_requires_explicit_current_source():
     generic = opening_paragraph({}, "1月2日", "研究公共服务工作")
     assert "李强" not in generic
@@ -143,8 +170,16 @@ def test_hotword_focus_with_stance_does_not_render_focus_thinks():
         "viewpoints": {"by_topic": [{"topic": "研究公共服务工作", "clusters": [{"summary": "认为应完善基层服务机制"}]}]},
     }
     text = formal.hotword_paragraph(data)
-    assert "舆论认为应完善基层服务机制" in text
+    assert "相关观点认为应完善基层服务机制" in text
     assert "聚焦认为" not in text
+
+
+def test_topic_volume_order_does_not_invent_word_frequency_or_temporal_heat():
+    data = {'hotwords': [{'topic': '公共服务', 'word': '制度覆盖面', 'count': 1}],
+            'topic_stats': [{'topic': '公共服务', 'spread_count': 99999}]}
+    text = formal.hotword_paragraph(data)
+    assert '制度覆盖面' in text and '公共服务' in text
+    assert all(phrase not in text for phrase in ('位居前列', '热度较高', '持续热传'))
 
 
 def test_weak_self_media_promotion_is_blocked_and_repeated_heading_verb_is_warned():

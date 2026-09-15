@@ -85,12 +85,16 @@
     "one_group_per_topic": true,
     "quotes_per_ready_topic": [2, 3],
     "lead_summary_max_cjk": 22,
+    "quote_max_chars": 180,
+    "additional_heading_verbs": ["询问", "希望明确"],
     "heading_must_express": ["stance", "expectation", "criticism", "reason", "specific_suggestion"],
     "reject_reaction_only": true,
     "procedural_only_texts": ["转发了", "转发微博", "已转发", "分享了", "收藏了", "已收藏", "点赞了", "关注了", "已关注"]
   },
   "hotwords": {
     "opening": "从热词分布来看，",
+    "word_group_template": "{quoted}等词主要涉及{topic}",
+    "stance_focus_subject": "相关观点",
     "words_per_topic_in_prose": 3,
     "paragraph_rank_phrases": ["位居前列", "热度较高", "持续热传", "受到关注"],
     "focus_phrases": ["相关讨论主要聚焦", "讨论内容集中于", "讨论重点进一步延伸至", "相关观点主要讨论", "相关观点多涉及"],
