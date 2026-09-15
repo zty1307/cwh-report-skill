@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import zipfile
+from xml.etree import ElementTree as ET
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -2215,6 +2216,48 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     end_run.font.size = Pt(1)
     remove_nonprinting_pagination_controls(document)
     document.save(out_path)
+def audit_formal_comment_quotes(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
+    """Check actual domestic Word prose, not JSON approvals or appendix text."""
+    approved = [row for row in (data.get('comments', {}).get('selected') or [])
+                if row.get('ai_formal_include') is True and is_actual_comment_row(row)]
+    if section_override(data, 'two'):
+        return {'applicable': False, 'reason': 'explicit_domestic_section_override',
+                'approved_row_count': len(approved)}
+    texts = [clean_formal_comment(row.get('content') or row.get('title')) for row in approved]
+    expected = list(dict.fromkeys(text for text in texts if text))
+    groups = comment_groups(data.get('comments', {}).get('selected') or [])
+    grouped = {clean_formal_comment(row.get('content') or row.get('title')) for _, rows in groups for row in rows}
+    cap = writing_rules()['comments']['quotes_per_ready_topic'][1]
+    displayed = {clean_formal_comment(row.get('content') or row.get('title'))
+                 for _, rows in groups for row in rows[:cap]}
+    reserved = [text for text in expected if text in grouped and text not in displayed]
+    start, end = writing_rules()['document']['domestic_subsections'][1:3]
+    root = ET.fromstring(document_xml)
+    paragraphs = [''.join(node.text or '' for node in paragraph.iter(qn('w:t')))
+                  for paragraph in root.iter(qn('w:p'))]
+    content, active, found = [], False, False
+    for paragraph in paragraphs:
+        if paragraph.strip() == start:
+            active, found = True, True
+            continue
+        if active and paragraph.strip() == end:
+            break
+        if active:
+            content.append(paragraph)
+    body = '\n'.join(content)
+    missing_grouped = [text for text in expected if text not in grouped]
+    missing_word = [text for text in expected if text not in reserved and text not in body]
+    empty_approved = sum(not text for text in texts)
+    return {'applicable': True,
+            'passed': not missing_grouped and not missing_word and not empty_approved,
+            'approved_row_count': len(approved), 'unique_approved_quote_count': len(expected),
+            'grouped_unique_quote_count': len(grouped), 'domestic_section_found': found,
+            'missing_from_grouping': missing_grouped, 'missing_from_word': missing_word,
+            'not_displayed_due_to_template_cap': reserved,
+            'empty_approved_quote_count': empty_approved,
+            'scope': 'Actual Word domestic prose coverage only; not semantic or physical-pagination approval'}
+
+
 def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     with zipfile.ZipFile(docx_path) as archive:
         names = archive.namelist()
@@ -2234,6 +2277,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     table_count = document_xml.count(b"<w:tbl>")
     hyperlink_count = document_xml.count(b"<w:hyperlink")
     image_count = sum(1 for name in names if name.startswith("word/media/"))
+    comment_quote_audit = audit_formal_comment_quotes(data, document_xml)
     checks = {
         "uses_monitoring_system_assets": (
             (data.get("artifacts") or {}).get("chart_authority")
@@ -2243,6 +2287,8 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
         "three_required_tables": table_count == 3,
         "three_required_images": image_count >= 3,
         "appendix_hyperlinks_present": hyperlink_count >= 10,
+        "approved_domestic_comment_quotes_present": (not comment_quote_audit['applicable']
+                                                     or comment_quote_audit['passed']),
     }
     return {
         "passed": all(checks.values()),
@@ -2251,6 +2297,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
         "image_count": image_count,
         "hyperlink_count": hyperlink_count,
         "system_asset_hash_matches": chart_matches,
+        "domestic_comment_quotes": comment_quote_audit,
     }
 
 
@@ -2270,7 +2317,7 @@ def formalize_report(data: dict[str, Any], out_dir: Path) -> dict[str, str]:
     if not docx_audit["passed"]:
         acceptance = data.setdefault("audit", {}).setdefault("acceptance", {})
         acceptance["ready_for_formal_delivery"] = False
-        acceptance.setdefault("blockers", []).append("Word成品未通过图表、表格或超链接结构校验。")
+        acceptance.setdefault("blockers", []).append("Word成品未通过评论呈现、图表、表格或超链接结构校验。")
     data.setdefault("artifacts", {})["formal_report"] = str(formal_md)
     data.setdefault("artifacts", {})["formal_docx"] = str(formal_docx)
     data.setdefault("artifacts", {})["formal_docx_audit"] = str(docx_audit_path)

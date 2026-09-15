@@ -14,6 +14,8 @@ For a nonempty single-topic author response that omits at most 12 known IDs, the
 
 Raw public and overseas review transport defaults to 12 complete rows per batch. A host may explicitly set process-local `CWH_RAW_REVIEW_BATCH_SIZE` to an integer 1–12 for a slower provider. This changes neither source text nor evidence requirements, does not increase the stage budget, and may increase total latency; smaller batches are not a completion guarantee. Thinking/effort settings belong to the isolated host adapter, not model-specific Skill rules. A client accepting a setting does not establish that the provider honored it.
 
+Word structural audit also checks unique native-approved domestic comment quotes against actual domestic Word paragraphs, not just JSON or appendix text. Invalid grouping must not hide an approval, and template-cap omissions are explicitly accounted for without changing original decisions. An explicit user domestic-section override is marked not applicable rather than falsely certified. This coverage check neither validates semantics nor substitutes for physical pagination/rendering inspection.
+
 ## Execution budgets
 
 For `bounded_60m`, allocate time where each input mode actually performs the work. Raw normalization already includes public-article ranking review, overseas source/category review and hotword semantic selection; its later overseas and hotword stages still perform their required handoffs and bounded collection, without treating missing evidence as zero. Their shorter allocations do not waive source gates or authorize unreviewed material. Standard input retains the longer downstream research allocations.
