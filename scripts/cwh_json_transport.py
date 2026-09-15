@@ -86,13 +86,14 @@ def insert_single_missing_member_comma(text):
 
 
 def escape_cjk_internal_quotes(text):
-    """Escape only quotes sandwiched by CJK text inside value strings.
+    """Escape CJK internal quotes, including one at the start of a value.
 
     Never repair keys, missing separators or truncated strings. Decoded text
     retains the original quote characters; downstream source gates still run.
     """
     output, stack, positions = [], [], []
     quoted = escaped = is_key = False
+    string_start = -1
     previous = ''
     for i, character in enumerate(text):
         if quoted:
@@ -107,7 +108,7 @@ def escape_cjk_internal_quotes(text):
                 if closing:
                     quoted = False
                 elif (not is_key and i > 0 and i+1 < len(text)
-                      and '\u4e00' <= text[i-1] <= '\u9fff'
+                      and ('\u4e00' <= text[i-1] <= '\u9fff' or i == string_start + 1)
                       and '\u4e00' <= text[i+1] <= '\u9fff'):
                     output.append('\\')
                     positions.append(i)
@@ -115,6 +116,7 @@ def escape_cjk_internal_quotes(text):
                     return None
         elif character == '"':
             quoted = True
+            string_start = i
             is_key = bool(stack and stack[-1] == '{' and previous != ':')
         elif character in '[{':
             stack.append(character)

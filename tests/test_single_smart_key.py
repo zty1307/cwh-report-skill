@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_json_transport import normalize_single_smart_quoted_member_key
+from cwh_json_transport import escape_cjk_internal_quotes
 from run_cwh_inline_review import response_object
 
 
@@ -27,6 +28,26 @@ def test_nested_single_member_key_keeps_container_shape_and_source_text():
     raw = '{"items":[{“source_id”:"real-9","content":"原文“判断”不能改"}]}'
     parsed = normalize_single_smart_quoted_member_key(raw)
     assert parsed['items'] == [{'source_id': 'real-9', 'content': '原文“判断”不能改'}]
+
+
+def test_unescaped_cjk_quote_at_prose_value_start_preserves_literal_quote_characters():
+    intended = {'items': [{'record_id': 'real-3', 'review_reason': '"新闻早报"式合集，会议仅背景提及。'}]}
+    raw = json.dumps(intended, ensure_ascii=False).replace('\\"', '"')
+    repaired = escape_cjk_internal_quotes(raw)
+    assert repaired.pop('transport_repairs')[0]['kind'] == 'escaped_cjk_internal_quotes'
+    assert repaired == intended
+    parsed = response_object(json.dumps({'type': 'result', 'is_error': False, 'result': raw}))
+    assert parsed['items'] == intended['items']
+
+
+@pytest.mark.parametrize('raw', [
+    '{"items":[{"review_reason":""未完成}',
+    '{"items":[{"review_reason":""标题"式合集。" "id":"real-3"}]}',
+    '{""items":[]}',
+    '{"items":[],"review_reason":""ASCII"式合集。"}',
+])
+def test_value_start_quote_extension_does_not_fix_truncation_separators_keys_or_ascii(raw):
+    assert escape_cjk_internal_quotes(raw) is None
 
 
 @pytest.mark.parametrize('raw', [
