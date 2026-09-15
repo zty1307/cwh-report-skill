@@ -157,6 +157,7 @@ def author(task, deadline):
         urls = balanced_fetch_urls(observations)
         pages = cached_public_pages(workspace, urls, timeout=8)
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
+        packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         atomic_write_json(workspace / "source_packet.json", packet)
         packets.append(packet)
         topic_plans.append(topic_plan)

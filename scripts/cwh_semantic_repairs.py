@@ -7,6 +7,16 @@ def normalize_excluded_claims(decisions):
     result = copy.deepcopy(decisions)
     for topic in result:
         for item in topic.get("items") or []:
+            if item.get('decision') == 'eligible' and isinstance(item.get('claims'), list):
+                factual = [c for c in item['claims'] if isinstance(c, dict) and c.get('claim_kind') == 'meeting_action_fact']
+                if factual:
+                    item.setdefault('transport_exclusions', []).append({
+                        'reason': 'explicitly_classified_meeting_action_facts_not_independent_interpretation',
+                        'original_claims': copy.deepcopy(factual)})
+                    item['claims'] = [c for c in item['claims'] if c not in factual]
+                    if not item['claims']:
+                        item['decision'] = 'excluded'
+                        item['reason'] = '仅复述会议动作事实，不作为独立解读；原文及模型分类保留。'
             if item.get("decision") in {"excluded", "duplicate"} and item.get("claims"):
                 item.setdefault("transport_exclusions", []).append({
                     "reason": "claims_removed_from_model_excluded_item",
