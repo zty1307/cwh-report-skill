@@ -82,3 +82,18 @@ def test_no_budget_never_calls_vendor(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as error:
         worker.review_overseas_batches(packet(), {}, '', ['model'], tmp_path, time.monotonic() + 5)
     assert error.value.code == 124 and not calls
+
+
+def test_public_top_expansion_reuses_unchanged_complete_batches(tmp_path, monkeypatch):
+    calls = []
+    install_transport(monkeypatch, calls)
+    source = packet()
+    first = worker.review_overseas_batches(source, {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, batch_size=2, kind='public_top')
+    source['items'].append({'record_id': 'row-5', 'content': 'Original added candidate'})
+    second = worker.review_overseas_batches(source, {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, batch_size=2, kind='public_top')
+    assert len(calls) == 4 and len(second['items']) == 6
+    assert all(run['cache_reused'] for run in second['batch_review_audit']['actual_runs'][:2])
+    assert first['items'][0]['reviewer_run_id'] == second['items'][0]['reviewer_run_id']
+    assert (tmp_path / 'public_top_batch_runs.json').is_file()

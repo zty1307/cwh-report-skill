@@ -276,16 +276,18 @@ def merge_hotword_supplement(result: dict, supplement: dict, allowed: set[str], 
     return result
 
 
-def review_overseas_batches(packet, shape, prompt_rules, command_template, workspace, deadline, *, feedback='', batch_size=12):
+def review_overseas_batches(packet, shape, prompt_rules, command_template, workspace, deadline, *, feedback='', batch_size=12, kind='overseas'):
     """Sequential complete-row review with hash-checked partial checkpoints."""
     inputs = packet.get('items') or []
+    if kind not in {'overseas', 'public_top'}:
+        raise ValueError('Unsupported raw review kind')
     if batch_size < 1:
         raise ValueError('Review batch size must be positive')
     merged, runs = [], []
     for offset in range(0, len(inputs), batch_size):
         batch = copy.deepcopy(packet)
         batch['items'] = copy.deepcopy(inputs[offset:offset + batch_size])
-        folder = workspace / f'overseas-batch-{offset // batch_size + 1}'
+        folder = workspace / f'{kind}-batch-{offset // batch_size + 1}'
         folder.mkdir(parents=True, exist_ok=True)
         source = {'packet': batch, 'rules': prompt_rules, 'feedback': feedback, 'command': command_template}
         digest = hashlib.sha256(json.dumps(source, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -296,15 +298,15 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                 stamp = json.loads(cache_path.read_text(encoding='utf-8'))
                 if stamp['source_sha256'] == digest and stamp['output_sha256'] == sha256_file(output_path):
                     cached = json.loads(output_path.read_text(encoding='utf-8'))
-                    validate_transport_result('overseas', batch, cached)
+                    validate_transport_result(kind, batch, cached)
                     run = {**stamp['actual_run'], 'cache_reused': True}
             except (ValueError, KeyError, TypeError):
                 cached = None
         if cached is None:
             session = str(uuid.uuid4())
             command = [x.replace('{session_id}', session) for x in command_template]
-            payload = {'kind': 'overseas', 'reviewer_run_id': session, 'output_shape': shape,
-                       'packet': overseas_span_packet(batch)}
+            payload = {'kind': kind, 'reviewer_run_id': session, 'output_shape': shape,
+                       'packet': overseas_span_packet(batch) if kind == 'overseas' else batch}
             prompt = prompt_rules + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
             prompt += '\n只处理本批items，每个ID恰好一次；事实性报道summary_cn_simplified留空，不重复项目清单或会议部署。不要中途重新开始JSON，不返回额外补充报道。'
             if feedback:
@@ -334,13 +336,14 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                 if cached.get('blocker'):
                     atomic_write_json(workspace / 'blocker.json', cached)
                     raise SystemExit(23)
-                cached = normalize_topic_hit_transport(batch, cached, 'overseas')
-                cached = resolve_overseas_spans(batch, cached)
-                validate_transport_result('overseas', batch, cached)
+                cached = normalize_topic_hit_transport(batch, cached, kind)
+                if kind == 'overseas':
+                    cached = resolve_overseas_spans(batch, cached)
+                validate_transport_result(kind, batch, cached)
                 if cached.get('supplemental_rows'):
                     raise ValueError('Raw review batch cannot add unrequested supplemental rows')
             except (ValueError, KeyError, TypeError) as exc:
-                atomic_write_json(folder / 'parse_failure.json', {'kind': 'overseas', 'error': str(exc),
+                atomic_write_json(folder / 'parse_failure.json', {'kind': kind, 'error': str(exc),
                                   'source_sha256': digest, 'log_path': str(log_path)})
                 raise SystemExit(65) from exc
             atomic_write_json(output_path, cached)
@@ -349,16 +352,16 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
         for row in rows:
             row['reviewer_run_id'] = run['session_id']
             row['review_batch_index'] = offset // batch_size + 1
-            if row.get('interpretive_range'):
+            if kind == 'overseas' and row.get('interpretive_range'):
                 row['batch_original_range'] = copy.deepcopy(row['interpretive_range'])
                 row['interpretive_range'] = [re.sub(r'^o(\d+)/', lambda m: f'o{offset + int(m.group(1))}/', seg)
                                              for seg in row['interpretive_range']]
         merged.extend(rows)
         runs.append(run)
-        atomic_write_json(workspace / 'overseas_batch_runs.json', runs)
+        atomic_write_json(workspace / f'{kind}_batch_runs.json', runs)
     result = {'review_method': 'ai_semantic_review', 'items': merged, 'supplemental_rows': [],
               'batch_review_audit': {'mode': 'sequential_complete_row_batches', 'batch_size': batch_size, 'actual_runs': runs}}
-    validate_transport_result('overseas', packet, result)
+    validate_transport_result(kind, packet, result)
     return result
 
 
@@ -418,9 +421,9 @@ def main():
                   +
                   "不得把来源名当作另一家媒体，也不得把负面立场本身当作歪曲的证据。\n"
                   "直接返回符合output_shape的对象，不返回kind、packet或output_shape包装层。\n")
-        if kind == 'overseas' and len(packet.get('items') or []) > 12:
+        if kind in {'overseas', 'public_top'} and len(packet.get('items') or []) > 12:
             result = review_overseas_batches(packet, shape, prompt_rules, command_template, workspace, deadline,
-                                             feedback=last_error if repair_required else '')
+                                             feedback=last_error if repair_required else '', kind=kind)
             atomic_write_json(target, result)
             atomic_write_json(cache, {'source_sha256': digest, 'output_sha256': sha256_file(target)})
             continue

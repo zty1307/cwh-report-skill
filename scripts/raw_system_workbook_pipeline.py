@@ -1292,6 +1292,20 @@ def filter_public_top(
     review_batch = [row for row in ranked_raw if row.get("read_count") == ceiling]
     if len({normalized_account(row) for row in review_batch}) < top_n:
         review_batch = ranked_raw[: max(top_n * 3, 30)]
+    def review_id(row: dict[str, Any]) -> str:
+        return f"public:{row.get('source_row')}:{hashlib.sha1((str(row.get('url') or '') + str(row.get('title') or '')).encode('utf-8')).hexdigest()[:12]}"
+
+    # A later pass may contain a larger, contiguous ranked prefix. Preserve its
+    # real decisions instead of reverting forever to the original 30 rows.
+    if review:
+        prior_ids = {str(item.get('record_id') or '') for item in review.get('items') or []}
+        prefix = []
+        for row in ranked_raw:
+            if review_id(row) not in prior_ids:
+                break
+            prefix.append(row)
+        if len(prefix) > len(review_batch):
+            review_batch = prefix
     review_packet = {
         "schema_version": 1,
         "review_type": "cwh_public_top_semantic_review",
@@ -1307,7 +1321,7 @@ def filter_public_top(
         "items": [
             {
                 **row,
-                "record_id": f"public:{row.get('source_row')}:{hashlib.sha1((str(row.get('url') or '') + str(row.get('title') or '')).encode('utf-8')).hexdigest()[:12]}",
+                "record_id": review_id(row),
                 "preliminary_topic_hits": topic_hits(normalize_text(f"{row.get('title', '')}{row.get('content', '')}"), aliases),
             }
             for row in review_batch
@@ -1387,8 +1401,26 @@ def filter_public_top(
         account_best.setdefault(normalized_account(row) or f"__row_{row.get('source_row')}", row)
     selected = list(account_best.values())[:top_n]
     status = "ai_review_complete" if len(selected) >= top_n else "ai_review_expand_required"
+    max_candidates = max(len(review_batch), int(config.get('public_top_review_max_candidates', 90)))
+    expansion_end = min(len(ranked_raw), max_candidates, len(review_batch) + 30)
+    shortfall = None
+    if len(selected) < top_n:
+        if expansion_end > len(review_batch):
+            review_packet['items'] = [
+                {**row, 'record_id': review_id(row),
+                 'preliminary_topic_hits': topic_hits(normalize_text(f"{row.get('title', '')}{row.get('content', '')}"), aliases)}
+                for row in ranked_raw[:expansion_end]
+            ]
+        else:
+            # Review completion is not TOP-N quality completion. No unreviewed
+            # candidate is accepted, and the deficit remains explicit.
+            status = 'ai_review_complete'
+            shortfall = {'required': top_n, 'actual': len(selected),
+                         'reviewed_candidates': len(review_batch), 'available_candidates': len(ranked_raw),
+                         'reason': 'candidate_limit_reached' if len(review_batch) < len(ranked_raw) else 'candidates_exhausted'}
     return {
         "status": status,
+        "evidence_shortfall": shortfall,
         "review_method": review.get("review_method"),
         "selected": selected,
         "decisions": ai_decisions,
@@ -1735,7 +1767,10 @@ def build_normalized_bundle(
                 overseas.get("status") == "ai_review_complete"
                 and hotwords.get("status") == "ai_review_complete"
                 and public_top.get("status") == "ai_review_complete"
+                and not public_top.get('evidence_shortfall')
             ),
+            "warnings": (["公众号TOP来源不足，保留实际审核结果，不代表完整TOP排名"]
+                         if public_top.get('evidence_shortfall') else []),
             "blockers": [
                 *(
                     []
@@ -1836,6 +1871,11 @@ def write_audit(
     baseline_path: Path | None,
 ) -> None:
     verification = load_json(verification_path)
+    public_audit_path = output_path.parent / 'run' / 'public_top_audit.json'
+    if public_audit_path.is_file() and output_path.is_file():
+        public_audit = load_json(public_audit_path)
+        public_audit['workbook_sha256'] = hashlib.sha256(output_path.read_bytes()).hexdigest()
+        public_audit_path.write_text(json.dumps(public_audit, ensure_ascii=False, indent=2), encoding='utf-8')
     chart_verification = verification.get("chart_finalizer") or {}
     baseline_differences: dict[str, list[dict[str, Any]]] = {}
     if baseline_path:
@@ -1999,7 +2039,7 @@ def write_audit(
             "",
             f"- 原始样本{len(normalized['public_top']['decisions'])}条；相关候选{public_selection_summary.get('relevant_candidate_count', '未知')}条，去重后有效来源{public_selection_summary.get('distinct_source_count', '未知')}个，最终保留{len(public_selected)}条。",
             "- 固定顺序：先完成语义筛选，再按规范化账号及显式配置的发布主体账号族分组，每个主体仅保留阅读量最高的一篇；最后对不同主体重新按阅读量排序并取TOP10。不得先截取10篇再去重，也不得用模糊相似度合并账号。",
-            "- 只有相关候选中的不同有效发布主体不足10个时，结果才允许少于10条。",
+            "- 不足10个来源时每次补审后续30条真实候选；候选耗尽或固定审阅上限后保留实际结果，并明确缺口，不宣称完整TOP排名。",
             "- 阅读量等于系统封顶值100000时，以`100000+`展示；排序仍使用原始数值100000。",
             "",
             "| 排除原因 | 数量 |",

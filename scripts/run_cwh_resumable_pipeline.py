@@ -1161,6 +1161,9 @@ class CwhPipeline:
             raw_hotword_audit = packet_dir / "hotword_audit.json"
             if raw_hotword_audit.exists():
                 shutil.copy2(raw_hotword_audit, self.artifacts / "hotword_audit.json")
+            raw_public_audit = packet_dir / 'public_top_audit.json'
+            if raw_public_audit.exists():
+                shutil.copy2(raw_public_audit, self.artifacts / 'public_top_audit.json')
             return StageOutcome.succeeded(
                 "原始监测表已经AI审核、汇总并生成标准总表。",
                 details={"log_path": str(log_path), "audit": str(audit)},
@@ -1171,7 +1174,13 @@ class CwhPipeline:
             "public_top": packet_dir / "public_top_review_packet.json",
         }
         if any(path.exists() for path in packets.values()):
-            if review_applied:
+            public_audit = read_json(packet_dir / 'public_top_audit.json') if (packet_dir / 'public_top_audit.json').exists() else {}
+            expanding = False
+            if public_audit.get('status') == 'ai_review_expand_required' and public_review.exists() and packets['public_top'].exists():
+                next_ids = {str(row.get('record_id') or '') for row in read_json(packets['public_top']).get('items') or []}
+                reviewed_ids = {str(row.get('record_id') or '') for row in read_json(public_review).get('items') or []}
+                expanding = bool(reviewed_ids and reviewed_ids < next_ids)
+            if review_applied and not expanding:
                 return StageOutcome.failed(
                     f"审核结果未被原始表处理器接受，详见{log_path}",
                     retryable=True, error_code="raw_review_rejected",
@@ -1681,6 +1690,11 @@ class CwhPipeline:
             audit = read_json(audit_path)
         acceptance = audit.get("acceptance") or {}
         quality_warnings = [str(item) for item in acceptance.get("blockers") or []]
+        public_audit_path = self.artifacts / 'public_top_audit.json'
+        public_shortfall = (read_json(public_audit_path).get('evidence_shortfall') or {}) if public_audit_path.exists() else {}
+        if public_shortfall:
+            quality_warnings.append(f"公众号TOP仅保留{public_shortfall['actual']}个已审核来源，目标{public_shortfall['required']}个；候选读取已达上限或耗尽。")
+            acceptance = {**acceptance, 'ready_for_formal_delivery': False}
         try:
             report_data = read_json(report_data_path)
         except Exception as exc:

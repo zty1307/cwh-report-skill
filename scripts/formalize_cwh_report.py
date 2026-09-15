@@ -171,6 +171,31 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
     data.setdefault("artifacts", {})["hotword_audit"] = str(audit_path.resolve())
 
 
+def apply_raw_public_top_audit(data: dict[str, Any]) -> None:
+    """Carry a hash-bound raw ranking deficit into all synchronized outputs."""
+    value = str((data.get('collection') or {}).get('system_workbook') or '').strip()
+    if not value:
+        return
+    workbook = Path(value)
+    sidecar = workbook.parent / 'run' / 'public_top_audit.json'
+    if not workbook.is_file() or not sidecar.is_file():
+        return
+    payload = json.loads(sidecar.read_text(encoding='utf-8'))
+    if payload.get('workbook_sha256') != hashlib.sha256(workbook.read_bytes()).hexdigest():
+        return
+    shortfall = payload.get('evidence_shortfall') or {}
+    if not shortfall:
+        return
+    notice = f"公众号TOP仅取得{shortfall['actual']}个已审核来源，目标{shortfall['required']}个；候选审阅已达上限或耗尽，不代表完整TOP排名。"
+    audit = data.setdefault('audit', {})
+    audit['raw_public_top_review'] = {'path': str(sidecar.resolve()), 'workbook_sha256': payload['workbook_sha256'],
+                                    'evidence_shortfall': shortfall}
+    audit['data_gaps'] = list(dict.fromkeys([*(audit.get('data_gaps') or []), notice]))
+    acceptance = audit.setdefault('acceptance', {})
+    acceptance['blockers'] = list(dict.fromkeys([*(acceptance.get('blockers') or []), notice]))
+    acceptance['ready_for_formal_delivery'] = False
+
+
 def metric(data: dict[str, Any], key: str, default: int = 0) -> int:
     try:
         return int(data.get(key, default) or default)
@@ -2231,6 +2256,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
 
 def formalize_report(data: dict[str, Any], out_dir: Path) -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    apply_raw_public_top_audit(data)
     enrich_viewpoint_titles(data)
     data.setdefault("audit", {})["writing_rules_sha256"] = writing_rules_sha256()
     formal_md = out_dir / "cwh_formal_report.md"
