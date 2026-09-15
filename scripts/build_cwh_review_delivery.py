@@ -39,6 +39,19 @@ def build_review_delivery(job: Path) -> dict:
     system = ingest_workbook(workbook) if workbook else {}
     verified = accepted_path(job, state, "domestic_evidence_verification", "analysis_bundle_verified")
     bundle = json.loads(verified.read_text(encoding="utf-8")) if verified else {}
+    # Deliver source artifacts too, but never silently promote them to prose.
+    registered = {str(path.resolve()): row.get('stage_id')
+                  for row in state.get('stages', [])
+                  for key in (row.get('artifacts') or {})
+                  if (path := accepted_path(job, state, row['stage_id'], key))}
+    source_paths = list((job / 'artifacts').glob('*'))
+    source_paths += list((job / 'worker/domestic_viewpoints').glob('author-topic-*.cache.json'))
+    source_artifacts = [{"path": str(path.resolve()), "name": path.name,
+                         "sha256": sha256_file(path),
+                         "accepted_stage": registered.get(str(path.resolve())),
+                         "status": "stage_hash_verified" if str(path.resolve()) in registered else "unaccepted_source_not_report_conclusion"}
+                        for path in sorted(set(source_paths)) if path.is_file()
+                        and path.suffix.lower() in {'.json', '.md', '.png', '.xlsx', '.docx'}]
     topic_rows = []
     for row in system.get("subevents", []):
         totals = row.get("totals") or {}
@@ -72,6 +85,11 @@ def build_review_delivery(job: Path) -> dict:
                        ("Normal", "当前为未完成交付，评论情感和境外解读尚未纳入本待审核稿。已采集原始材料保留在任务目录，不能把缺失视为零结果。"),
                        ("Heading 1", "四、待完成事项")])
     paragraphs.extend(("Normal", item) for item in blocked)
+    if source_artifacts:
+        paragraphs.append(("Heading 1", "附：现有过程产物"))
+        paragraphs.append(("Normal", "以下文件一并保留。阶段校验一致不等于全部内容复核通过；未验收模型草稿仅供查看，不能作为报告结论。"))
+        paragraphs.extend(("Normal", f"{item['name']}（{'阶段文件校验一致' if item['accepted_stage'] else '未验收过程材料'}）：{item['path']}")
+                          for item in source_artifacts)
     doc = Document()
     section = doc.sections[0]
     section.page_width, section.page_height = Cm(21), Cm(29.7)
@@ -105,6 +123,7 @@ def build_review_delivery(job: Path) -> dict:
     atomic_write_json(out / "cwh_audit.json", data["audit"])
     manifest = {"delivery_class": "review_draft", "ready_for_formal_delivery": False,
                 "pipeline_status": state.get("status"), "pending": blocked,
+                "available_source_artifacts": source_artifacts,
                 "artifacts": {Path(value).name: sha256_file(Path(value)) for value in data["artifacts"].values() if Path(value).is_file()}}
     atomic_write_json(out / "manifest.json", manifest)
     return {"status": "review_draft", "manifest": str(out / "manifest.json"), "word": str(word), "dashboard": str(dashboard)}

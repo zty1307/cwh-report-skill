@@ -36,6 +36,23 @@ def test_modified_or_unaccepted_workbook_is_not_trusted(tmp_path):
     assert accepted_path(tmp_path, state, "workbook", "workbook") is None
 
 
+def test_fallback_lists_available_drafts_without_promoting_them_to_conclusions(tmp_path):
+    artifacts = tmp_path / 'artifacts'
+    artifacts.mkdir()
+    draft = artifacts / 'analysis_bundle.json'
+    draft.write_text('{"unverified_claim":"不能进入结论"}', encoding='utf-8')
+    (tmp_path / 'pipeline_state.json').write_text(json.dumps({'status': 'failed', 'stages': []}), encoding='utf-8')
+    result = build_review_delivery(tmp_path)
+    manifest = json.loads((tmp_path / 'review_delivery/manifest.json').read_text(encoding='utf-8'))
+    source = manifest['available_source_artifacts'][0]
+    assert source['path'] == str(draft.resolve())
+    assert source['status'] == 'unaccepted_source_not_report_conclusion'
+    assert source['sha256'] == sha256_file(draft)
+    text = '\n'.join(p.text for p in Document(result['word']).paragraphs)
+    assert 'analysis_bundle.json' in text and '未验收过程材料' in text
+    assert '不能进入结论' not in text
+
+
 def test_hotword_compaction_keeps_candidates_and_only_exact_source_windows():
     text = "前文" * 100 + "政策工具" + "后文" * 200
     packet = {"candidates": [{"term": "政策工具"}, {"term": "无证据"}],
