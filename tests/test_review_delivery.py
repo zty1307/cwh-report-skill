@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build_cwh_review_delivery import accepted_path, build_review_delivery
 from cwh_pipeline_runtime import sha256_file
-from run_cwh_inline_review import compact_hotword_packet, response_object, normalize_hotword_transport, normalize_topic_hit_transport, validate_transport_result
+from run_cwh_inline_review import compact_hotword_packet, hotword_shortfall_packet, response_object, normalize_hotword_transport, normalize_topic_hit_transport, validate_transport_result
 from docx import Document
 
 
@@ -86,3 +86,18 @@ def test_topic_hit_transport_rejects_ambiguous_or_unknown_labels():
     packet = {"topic_titles": ["议题一", "议题二"], "topic_aliases": [["共同词"], ["共同词"]]}
     with pytest.raises(ValueError, match="unknown or ambiguous"):
         normalize_topic_hit_transport(packet, {"items": [{"topic_hits": ["共同词"]}]}, "overseas")
+
+
+def test_hotword_shortfall_packet_only_sends_unselected_valid_evidence_candidates():
+    packet = {
+        "topic_titles": ["议题一"], "minimum_term_count": 2, "target_term_count": 3,
+        "candidates": [{"term": "城市更新"}, {"term": "政策工具"}, {"term": "召开"}, {"term": "无窗口"}],
+        "candidate_source_windows": [
+            {"term": "城市更新", "source_windows": [{"excerpt": "城市更新"}]},
+            {"term": "政策工具", "source_windows": [{"excerpt": "政策工具"}]},
+            {"term": "召开", "source_windows": [{"excerpt": "召开"}]},
+        ],
+    }
+    result = hotword_shortfall_packet(packet, {"selected": [{"term": "城市更新"}]})
+    assert [row["term"] for row in result["remaining_candidates"]] == ["政策工具"]
+    assert result["already_selected_terms"] == ["城市更新"]

@@ -165,6 +165,29 @@ def normalize_topic_hit_transport(packet: dict, result: dict, kind: str) -> dict
     return result
 
 
+def hotword_shortfall_packet(packet: dict, result: dict, limit: int = 72) -> dict:
+    """Build a small evidence-backed packet for a model-selected hotword top-up."""
+    selected = {str(row.get("term") or "").strip() for row in result.get("selected", [])}
+    windows = {str(row.get("term") or ""): row.get("source_windows") or []
+               for row in packet.get("candidate_source_windows", [])}
+    remaining = []
+    for candidate in packet.get("candidates", []):
+        term = str(candidate.get("term") or "").strip()
+        if not term or term in selected or not valid_candidate(term) or not windows.get(term):
+            continue
+        remaining.append({**candidate, "source_windows": windows[term]})
+        if len(remaining) >= limit:
+            break
+    return {
+        "topic_titles": packet.get("topic_titles") or [],
+        "topic_aliases": packet.get("topic_aliases") or [],
+        "minimum_term_count": packet.get("minimum_term_count"),
+        "target_term_count": packet.get("target_term_count"),
+        "already_selected_terms": sorted(selected),
+        "remaining_candidates": remaining,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
@@ -255,6 +278,55 @@ def main():
                 result = normalize_topic_hit_transport(packet, result, kind)
             if kind == "hotword" and not result.get("blocker"):
                 result = normalize_hotword_transport(result)
+                minimum = int(packet.get("minimum_term_count") or 36)
+                if len(result.get("selected", [])) < minimum:
+                    supplement_packet = hotword_shortfall_packet(packet, result)
+                    supplement_session = str(uuid.uuid4())
+                    supplement_command = [x.replace("{session_id}", supplement_session) for x in command_template]
+                    supplement_prompt = (
+                        "仅返回新增热词审核JSON，不调用工具、不写文件。已有入选词不足最低数量；"
+                        "只能从remaining_candidates中补选有原文窗口支撑且单独可指向具体议题的词，不得重复already_selected_terms。"
+                        "至少补足minimum_term_count，尽量达到target_term_count；确实无足够合格词才返回blocker。"
+                        "topic_hits只能是从1开始且对应topic_titles顺序的整数数组。返回形状："
+                        '{"review_method":"ai_semantic_review","selected":[{"term":"候选原词",'
+                        '"topic_hits":[1],"evidence_tier":"core或supporting","semantic_type":"具体语义类型",'
+                        '"standalone_topic_label":true,"evidence_aliases":["原文依据"],'
+                        '"selection_reason":"简短理由","ai_representativeness":"高或中"}]}\n'
+                        + json.dumps(supplement_packet, ensure_ascii=False, separators=(",", ":"))
+                    )
+                    supplement_log = workspace / f"hotword-supplement.{supplement_session}.jsonl"
+                    supplement_started = time.monotonic()
+                    supplement_remaining = deadline - supplement_started
+                    if supplement_remaining <= 0:
+                        raise SystemExit(124)
+                    with supplement_log.open("w", encoding="utf-8") as log:
+                        try:
+                            supplement_code = run_scoped_command(
+                                supplement_command, cwd=workspace, env=os.environ.copy(), stdout=log,
+                                stderr=subprocess.STDOUT, input_text=supplement_prompt, timeout=supplement_remaining)
+                        except subprocess.TimeoutExpired:
+                            supplement_code = 124
+                    supplement_text = supplement_log.read_text(encoding="utf-8")
+                    records.append({"kind": "hotword_supplement", "session_id": supplement_session,
+                                    "prompt_characters": len(supplement_prompt),
+                                    "elapsed_seconds": round(time.monotonic() - supplement_started, 3),
+                                    "exit_code": supplement_code})
+                    atomic_write_json(workspace / "inline_runs.json", records)
+                    if supplement_code:
+                        raise SystemExit(supplement_code)
+                    supplement = response_object(supplement_text)
+                    if supplement.get("blocker"):
+                        result = supplement
+                    else:
+                        supplement = normalize_topic_hit_transport(packet, supplement, "hotword")
+                        supplement = normalize_hotword_transport(supplement)
+                        known = {str(row.get("term") or "").strip() for row in result.get("selected", [])}
+                        allowed = {str(row.get("term") or "").strip()
+                                   for row in supplement_packet["remaining_candidates"]}
+                        additions = [row for row in supplement.get("selected", [])
+                                     if str(row.get("term") or "").strip() in allowed
+                                     and str(row.get("term") or "").strip() not in known]
+                        result["selected"].extend(additions)
             if not result.get("blocker"):
                 validate_transport_result(kind, packet, result)
         except (ValueError, TypeError, KeyError) as exc:
