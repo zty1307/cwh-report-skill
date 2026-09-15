@@ -45,6 +45,8 @@ def build_review_delivery(job: Path) -> dict:
                   for key in (row.get('artifacts') or {})
                   if (path := accepted_path(job, state, row['stage_id'], key))}
     source_paths = list((job / 'artifacts').glob('*'))
+    source_paths += list((job / 'artifacts/run').glob('*'))
+    source_paths += list((job / 'artifacts/previews').glob('*.png'))
     source_paths += list((job / 'worker/domestic_viewpoints').glob('author-topic-*.cache.json'))
     source_artifacts = [{"path": str(path.resolve()), "name": path.name,
                          "sha256": sha256_file(path),

@@ -53,6 +53,17 @@ def test_fallback_lists_available_drafts_without_promoting_them_to_conclusions(t
     assert '不能进入结论' not in text
 
 
+def test_fallback_keeps_existing_nested_builder_images_available(tmp_path):
+    run = tmp_path / 'artifacts/run'
+    run.mkdir(parents=True)
+    picture = run / 'cwh_wordcloud.png'
+    picture.write_bytes(b'unit index fixture, not rendered picture')
+    (tmp_path / 'pipeline_state.json').write_text(json.dumps({'status': 'failed', 'stages': []}), encoding='utf-8')
+    build_review_delivery(tmp_path)
+    manifest = json.loads((tmp_path / 'review_delivery/manifest.json').read_text(encoding='utf-8'))
+    assert any(item['path'] == str(picture.resolve()) for item in manifest['available_source_artifacts'])
+
+
 def test_hotword_compaction_keeps_candidates_and_only_exact_source_windows():
     text = "前文" * 100 + "政策工具" + "后文" * 200
     packet = {"candidates": [{"term": "政策工具"}, {"term": "无证据"}],
