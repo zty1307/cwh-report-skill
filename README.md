@@ -95,7 +95,9 @@ The With runtime uses pipeline mode. Connect a model-specific stage worker throu
 
 ## Fonts
 
-The public repository bundles Noto Sans CJK SC under the SIL Open Font License 1.1. An organization-specific approved font may be supplied at runtime through `CWH_CJK_FONT`. The internal Tencent font used by one reviewed deployment is not redistributed here because no public redistribution license was established.
+The package bundles `assets/fonts/TencentFont.otf` (TTTGB Medium) as the default wordcloud font. It is loaded relative to the Skill directory: users do not need to install a system font or configure an absolute path. Generated wordcloud PNGs carry the rendered glyphs into Word and HTML, so viewers do not need the font either. The project owner confirmed permission to distribute this font with the Skill on 2026-09-15; see `assets/fonts/TENCENT-FONT-NOTICE.md` for the recorded scope and documentation status.
+
+Noto Sans CJK SC remains bundled under the SIL Open Font License 1.1 as a fallback. An explicitly selected approved font may override the default through run metadata `wordcloud.font_path` or the process-local `CWH_CJK_FONT`.
 
 ## External capabilities
 
