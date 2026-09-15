@@ -3391,7 +3391,8 @@ def build_system_audit(
         "viewpoints": viewpoints, "metadata": analysis_metadata or {},
     })
     viewpoint_quality_errors = [
-        item for item in viewpoint_quality_issues if item.get("severity") == "error"
+        item for item in viewpoint_quality_issues
+        if item.get("severity") == "error" or item.get("strict_severity") == "error"
     ]
     blockers.extend(str(item.get("message") or "") for item in viewpoint_quality_errors)
     if comments and not system_sentiment_final:

@@ -7,6 +7,7 @@ from cwh_available_delivery import prepare_available_delivery, valid_gap, availa
 from domestic_evidence_mapping import validate_analysis_mapping
 from report_rules import domestic_viewpoint_quality_issues
 from cwh_orchestrator import build_system_audit
+import pytest
 
 
 def material():
@@ -82,6 +83,9 @@ def test_available_delivery_keeps_editorial_preferences_advisory():
     assert any(i['code'] == 'viewpoint_heading_lacks_stance' and i['severity'] == 'warning'
                and i['strict_severity'] == 'error' for i in available)
     assert not any(i['code'] == 'viewpoint_cluster_heading_lacks_stance' and i['severity'] == 'error' for i in available)
+    audit = build_system_audit({}, [], [], data['viewpoints'], data['metadata'])
+    assert any('没有表达明确态度' in problem for problem in audit['acceptance']['blockers'])
+    assert audit['acceptance']['ready_for_formal_delivery'] is False
 
 
 def test_available_delivery_does_not_excuse_unsupported_rhetorical_padding():
@@ -97,3 +101,40 @@ def test_available_delivery_does_not_excuse_unsupported_rhetorical_padding():
     assert unsupported_padding_issues(evidence)
     assert any(i['code'] == 'unsupported_rhetorical_padding' and i['severity'] == 'error'
                for i in domestic_viewpoint_quality_issues(data))
+
+
+@pytest.mark.parametrize('available', [False, True])
+def test_output_dispatch_continues_with_gaps_without_self_certification(monkeypatch, tmp_path, available):
+    import cwh_orchestrator as orchestrator
+    import formalize_cwh_report
+    import generate_dashboard
+    calls = []
+    monkeypatch.setattr(orchestrator, 'write_sentiment_handoff', lambda *a: {})
+    monkeypatch.setattr(orchestrator, 'render_report', lambda *a: 'unit dispatch check')
+    monkeypatch.setattr(orchestrator, 'write_bar_svg', lambda *a: None)
+    monkeypatch.setattr(orchestrator, 'write_cwh_data_workbook', lambda *a: calls.append('excel'))
+    monkeypatch.setattr(formalize_cwh_report, 'formalize_report', lambda *a: calls.append('word'))
+    monkeypatch.setattr(generate_dashboard, 'generate_dashboard', lambda *a: calls.append('html'))
+    data = {'artifacts': {}, 'analysis_bundle': {'metadata': {'delivery_policy':
+            'deliver_available_with_gaps' if available else 'strict'}},
+            'audit': {'acceptance': {'ready_for_formal_delivery': False, 'blockers': ['real gap']}},
+            'statistics': {'by_platform': {}, 'by_topic': {}, 'by_date': {}},
+            'hotwords': [], 'appendices': {}}
+    orchestrator.write_outputs(data, tmp_path)
+    assert calls == (['excel', 'word', 'html'] if available else [])
+    saved = json.loads((tmp_path / 'report_data.json').read_text(encoding='utf-8'))
+    assert saved['audit']['acceptance']['ready_for_formal_delivery'] is False
+    assert saved['audit']['acceptance']['blockers'] == ['real gap']
+    if available:
+        assert saved['delivery_class'] == 'available_with_gaps'
+
+
+@pytest.mark.parametrize('profile,bounded', [('bounded_40m', True), ('bounded_60m', True), ('exhaustive', False)])
+def test_generic_worker_uses_missing_evidence_policy_not_vendor_special_case(tmp_path, profile, bounded):
+    from run_cwh_model_worker import build_prompt
+    path = tmp_path / 'task.json'
+    path.write_text(json.dumps({'execution_profile': profile, 'inputs': {}}), encoding='utf-8')
+    prompt = build_prompt(path, 'actual-session')
+    assert ('不要仅因这些缺口返回blocker' in prompt) is bounded
+    assert '禁止编造访问、原文、评论或审核通过' in prompt
+    assert '不得修改其他文件' in prompt

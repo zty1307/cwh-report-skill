@@ -59,6 +59,14 @@ def build_prompt(task_path: Path, session_id: str) -> str:
             path = Path(raw)
             if path.is_file() and path.stat().st_size <= 180000:
                 references[key] = path.read_text(encoding="utf-8-sig")
+    gap_instruction = (
+        "解读或评论数量不足、部分网页不可用时，保留可用证据及真实检索/访问记录，"
+        "按当前任务契约写出带明确缺口的最终JSON，不要仅因这些缺口返回blocker。"
+        "不能补造观点、引用或情感比例；已有命题仍须忠实原文。"
+        "只有权限/输入损坏等导致当前任务根本无法执行时才写blocker.json并结束。\n"
+        if task.get("execution_profile") in {"bounded_40m", "bounded_60m"}
+        else "遇到真实证据或访问不足，将 blocker.json 写入 stage_workspace 并结束，勿自行绕过门禁。\n"
+    )
     return (
         "你是一个只负责当前节点的语义工作器。控制器负责脚本、计时、重试、排版和最终门禁。\n"
         f"本次独立运行标识：{session_id}。任务文件：{task_path}\n"
@@ -68,7 +76,7 @@ def build_prompt(task_path: Path, session_id: str) -> str:
         "若是独立语义复核，只读本次冻结证据和待复核命题，reviewer_run_id 使用本次运行标识。\n"
         "只修复 validation_problems 指定的问题，保留已经接受的证据；完整JSON必须落盘，"
         "不能用结束回复代替文件。不需要替控制器运行或续跑管线。\n"
-        "遇到真实证据或访问不足，将 blocker.json 写入 stage_workspace 并结束，勿自行绕过门禁。\n"
+        + gap_instruction
         + json.dumps(task, ensure_ascii=False)
         + "\n宿主已读取的本节点规范，不必再次打开同一文件：\n" + json.dumps(references, ensure_ascii=False)
     )
