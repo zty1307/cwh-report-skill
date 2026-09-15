@@ -39,7 +39,9 @@ def stable_hash(value: Any) -> str:
 
 def atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    # Keep same-directory atomic replacement without appending a second copy
+    # of an already long model-log/checkpoint name (Windows MAX_PATH).
+    temporary = path.with_name(f".{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         # Windows readers/indexers can briefly deny replacement. Never truncate
@@ -388,6 +390,7 @@ class PipelineRunner:
         for spec in self.specs:
             if spec.stage_id == stage_id:
                 break
+            # Never borrow allocations from a not-yet-completed predecessor.
             if self.stage_state(spec.stage_id).get("status") not in TERMINAL_STAGE_STATUSES:
                 return base
             previous_allocation += float(budgets.get(spec.stage_id) or 0)

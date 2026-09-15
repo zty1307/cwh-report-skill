@@ -13,6 +13,7 @@ from cwh_model_transport import terminal_transport_error
 from cwh_scoped_process import run_scoped_command
 from run_cwh_inline_review import response_object
 from cwh_worker_observations import permission_denials
+from build_research_plan import policy_search_subject
 
 
 class HostModelError(RuntimeError):
@@ -126,11 +127,12 @@ def invoke(command_template, prompt, workspace, label, timeout):
 
 
 def topic_search_tasks(plan, period):
+    subject = policy_search_subject(plan['topic'])
     tasks = [{"source_id": row["source_id"], "query": row["query"],
               "route": "public_platform" if row.get("tier") == "public_platform" else "stable_registry"}
              for row in plan["stable_source_tasks"] if row.get("must_check")]
-    tasks.append({"source_id": "open_web", "query": f'{period["start"]} 国务院常务会议 {plan["topic"]} 专家 解读', "route": "open_web"})
-    tasks.append({"source_id": "open_web", "query": f'{period["start"]} {plan["topic"]} 国常会 建议 评论 分析', "route": "open_web"})
+    tasks.append({"source_id": "open_web", "query": f'{period["start"]} 国务院常务会议 {subject} 专家 解读', "route": "open_web"})
+    tasks.append({"source_id": "open_web", "query": f'{period["start"]} {subject} 国常会 (建议 OR 评论 OR 分析)', "route": "open_web"})
     # Planned discovery lanes must reach the real observed search transport.
     academic = (plan.get("queries") or {}).get("academic_and_think_tank_viewpoints") or []
     if academic:
@@ -138,7 +140,7 @@ def topic_search_tasks(plan, period):
                       "route": "open_web"})
     if plan.get("queries"):
         tasks.append({"source_id": "public_platform_supplement", "route": "public_platform",
-                      "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {plan["topic"]} (解读 OR 评论 OR 建议 OR 分析)'})
+                      "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {subject} (解读 OR 评论 OR 建议 OR 分析)'})
     limit = int(plan.get("query_execution_limit") or 0)
     if limit > 0:
         tasks = tasks[:limit]

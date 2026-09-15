@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ def stable_source_tasks(
     profile_name: str = "exhaustive",
 ) -> list[dict[str, Any]]:
     subject = clean_topic(topic)
+    policy_subject = policy_search_subject(topic)
     tasks = []
     for source in sources:
         domains = [str(value).strip() for value in source.get("domains") or [] if str(value).strip()]
@@ -38,7 +40,7 @@ def stable_source_tasks(
         if platform_specific:
             query_families.extend(
                 [
-                    f"({query}) {subject} 释放什么信号 影响" if query else f"{subject} 释放什么信号 影响",
+                    f"({query}) {policy_subject} (解读 OR 评论 OR 政策影响 OR 建议)" if query else f"{policy_subject} (解读 OR 评论 OR 政策影响 OR 建议)",
                     f"({query}) {subject} 认为 认可 建议 期待" if query else f"{subject} 认为 认可 建议 期待",
                     f'({query}) "{source["name"]}" {subject}' if query else f'{source["name"]} {subject}',
                 ]
@@ -84,7 +86,7 @@ def stable_source_tasks(
         domain_query = " OR ".join(f"site:{domain}" for domain in domains)
         lane_query = (f"({domain_query}) {meeting_date} 国务院常务会议 {subject}"
                       if lane_id == 'lane_authoritative' else
-                      f"({domain_query}) {meeting_date} {subject} (解读 OR 专家 OR 评论 OR 建议)")
+                      f"({domain_query}) {meeting_date} {policy_subject} (解读 OR 专家 OR 评论 OR 建议)")
         grouped.append(
             {
                 "source_id": lane_id,
@@ -118,11 +120,20 @@ def clean_topic(value: str) -> str:
     return value.strip().strip("，。；")
 
 
+def policy_search_subject(topic: str) -> str:
+    """Shorten agenda wrappers for discovery only; retain the policy's full name."""
+    original = clean_topic(topic)
+    value = re.sub(r'^(?:听取|研究|讨论|审议通过|审议|部署)(?:关于)?', '', original)
+    value = re.sub(r'(?:进展情况汇报|进展汇报|情况汇报|工作汇报|有关工作|相关工作)$', '', value)
+    value = value.strip().strip('，。；')
+    return value if len(value) >= 3 else original
+
+
 def research_queries(topic: str, meeting_date: str) -> dict[str, list[str]]:
-    subject = clean_topic(topic)
+    subject = policy_search_subject(topic)
     return {
         "official_confirmation": [
-            f"{meeting_date} 国务院常务会议 {subject}",
+            f"{meeting_date} 国务院常务会议 {clean_topic(topic)}",
         ],
         "media_and_expert_viewpoints": [
             f"{meeting_date} 国务院常务会议 {subject} 专家 解读",
@@ -205,6 +216,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
         "topics": [
             {
                 "topic": topic,
+                "search_subject": policy_search_subject(topic),
                 "queries": research_queries(topic, meeting_date),
                 "query_execution_limit": int(research_policy.get("max_query_executions_per_topic") or 0),
                 "stable_source_tasks": stable_source_tasks(

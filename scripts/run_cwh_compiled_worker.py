@@ -60,6 +60,15 @@ def batch_author_contract(packets):
     )
 
 
+def discovery_title_key(item):
+    """Reading-order hint, never story deduplication or a relevance verdict."""
+    title = str(item.get('title') or '').strip()
+    # Search titles often append a publisher after underscores. Keep the
+    # observed original title/URL untouched and normalize only this hint.
+    title = title.split('_', 1)[0]
+    return re.sub(r'[^\u4e00-\u9fffA-Za-z0-9]', '', title).lower()
+
+
 def balanced_fetch_urls(observations, limit=4, *, topic=''):
     """Spend bounded fetch slots across observed queries, not only query one."""
     queues = []
@@ -73,13 +82,25 @@ def balanced_fetch_urls(observations, limit=4, *, topic=''):
                 -sum(gram in str(item.get('title') or '') for gram in policy_grams),
                 -bool(re.search('解读|评论|观察|深度|论谈|为什么|如何', str(item.get('title') or '')))))
         queues.append(results)
-    urls = []
+    urls, delayed, seen_urls, title_keys = [], [], set(), set()
     while any(queues) and len(urls) < limit:
         for queue in queues:
-            while queue and queue[0]["url"] in urls:
-                queue.pop(0)
-            if queue and len(urls) < limit:
-                urls.append(queue.pop(0)["url"])
+            while queue and len(urls) < limit:
+                item = queue.pop(0)
+                if item['url'] in seen_urls:
+                    continue
+                seen_urls.add(item['url'])
+                key = discovery_title_key(item)
+                if key and key in title_keys:
+                    delayed.append(item['url'])
+                    continue
+                urls.append(item['url'])
+                if key:
+                    title_keys.add(key)
+                break
+    # Identical headlines may still contain distinct interviews. They are
+    # merely delayed, never discarded or reported as duplicates without text.
+    urls.extend(delayed[:max(0, limit - len(urls))])
     return urls
 
 

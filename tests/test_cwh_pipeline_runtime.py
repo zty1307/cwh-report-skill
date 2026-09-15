@@ -108,6 +108,24 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assertFalse(list(self.root.glob("*.tmp")))
 
+    def test_atomic_checkpoint_does_not_extend_a_long_target_filename(self) -> None:
+        target = self.root / ('checkpoint-' + 'x' * 150 + '.json')
+        replace = MODULE.os.replace
+        observed = []
+
+        def bounded_temporary(source, destination):
+            observed.append(source)
+            self.assertEqual(source.parent, destination.parent)
+            self.assertLessEqual(len(source.name), 40)
+            return replace(source, destination)
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=bounded_temporary):
+            MODULE.atomic_write_json(target, {'version': 1})
+            MODULE.atomic_write_json(target, {'version': 2})
+        self.assertNotEqual(observed[0], observed[1])
+        self.assertEqual(json.loads(target.read_text('utf-8')), {'version': 2})
+        self.assertFalse(list(self.root.glob('*.tmp')))
+
     def test_checkpoint_failure_after_success_event_can_resume(self) -> None:
         spec = MODULE.StageSpec("prepare", "Prepare", artifacts=(MODULE.ArtifactSpec("result", "result.json"),))
 

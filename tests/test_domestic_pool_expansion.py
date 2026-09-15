@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from build_research_plan import load_source_registry, research_queries, stable_source_tasks
+from build_research_plan import load_source_registry, research_queries, stable_source_tasks, policy_search_subject
 from cwh_host_research import topic_search_tasks
 
 
@@ -13,6 +13,32 @@ def test_academic_discovery_uses_alternative_source_types_not_all_types_at_once(
     assert '(研究院 OR 智库 OR 学者 OR 协会 OR 学会)' in query
     assert '(解读 OR 分析 OR 建议 OR 评论)' in query
     assert '公共服务政策' in query and '2026-07-31' in query
+
+
+def test_discovery_strips_agenda_wrappers_without_changing_policy_names_or_ids():
+    cases = {
+        '听取现代流通体系建设进展情况汇报': '现代流通体系建设',
+        '研究自然资源保护利用有关工作': '自然资源保护利用',
+        '审议通过《甲条例》和《乙条例》': '《甲条例》和《乙条例》',
+        '审议《全民健身计划（2026—2030年）》': '《全民健身计划（2026—2030年）》',
+        '听取新型电网、物流网建设情况汇报': '新型电网、物流网建设',
+        '公共服务改革': '公共服务改革',
+        '研究有关工作': '研究有关工作',
+    }
+    for topic, subject in cases.items():
+        assert policy_search_subject(topic) == subject
+        queries = research_queries(topic, '2026-07-10')
+        assert topic in queries['official_confirmation'][0]
+        lanes = stable_source_tasks(topic, '2026-07-10', load_source_registry()['sources'],
+                                    profile_name='bounded_60m')
+        plan = {'topic': topic, 'queries': queries, 'query_execution_limit': 10,
+                'stable_source_tasks': lanes}
+        tasks = topic_search_tasks(plan, {'start': '2026-07-10'})
+        assert plan['topic'] == topic
+        assert len(tasks) == 10
+        assert topic in next(t['query'] for t in tasks if t['source_id'] == 'lane_authoritative')
+        assert all(subject in t['query'] for t in tasks)
+        assert '(解读 OR 评论 OR 政策影响 OR 建议)' in next(t['query'] for t in tasks if t['source_id'] == 'wechat_public')
 
 
 def test_cross_sector_professional_sources_reach_real_bounded_lane_without_more_queries():
@@ -80,6 +106,21 @@ def test_larger_reading_index_preserves_all_ids_and_full_original_articles(tmp_p
 def test_ten_page_slots_cover_ten_observed_queries_before_second_results():
     obs = {'queries': [{'results': [{'url': f'a{i}'}, {'url': f'b{i}'}]} for i in range(10)]}
     assert balanced_fetch_urls(obs, 10) == [f'a{i}' for i in range(10)]
+
+
+def test_mirror_headlines_are_delayed_not_excluded_from_discovery():
+    import copy
+    obs = {'queries': [
+        {'results': [{'url': 'https://a.test/story', 'title': '政策专家解读_甲媒体'},
+                     {'url': 'https://a.test/different', 'title': '政策落实的条件'}]},
+        {'results': [{'url': 'https://b.test/mirror', 'title': '政策专家解读_乙媒体'},
+                     {'url': 'https://b.test/interview', 'title': '产业协会谈政策成本'}]},
+    ]}
+    original = copy.deepcopy(obs)
+    assert balanced_fetch_urls(obs, 2) == ['https://a.test/story', 'https://b.test/interview']
+    assert balanced_fetch_urls(obs, 4) == ['https://a.test/story', 'https://b.test/interview',
+                                         'https://a.test/different', 'https://b.test/mirror']
+    assert obs == original
 
 
 def test_page_reading_prefers_actual_site_hits_and_policy_interpretation_without_editing_results():
