@@ -12,6 +12,18 @@ from complete_cwh_evidence_structure import complete_analysis_structure
 from normalize_cwh_analysis import normalize_analysis
 from domestic_evidence_mapping import validate_analysis_mapping
 from run_cwh_compiled_worker import compile_review, balanced_fetch_urls, cached_public_pages, semantic_packet, independent_packet
+from run_cwh_compiled_worker import batch_author_contract
+
+
+def test_batch_contract_names_all_topics_and_item_ids_without_source_text():
+    packets = [{"topic": "议题甲", "items": [{"id": "r1", "content": "不重复原文"}]},
+               {"topic": "议题乙", "items": [{"id": "r1"}, {"id": "w2"}]}]
+    prompt = batch_author_contract(packets)
+    manifest = json.loads(prompt.split("清单：", 1)[1])
+    assert manifest == [{"topic": "议题甲", "required_item_ids": ["r1"]},
+                        {"topic": "议题乙", "required_item_ids": ["r1", "w2"]}]
+    assert "不重复原文" not in prompt
+    assert '"topics":' in prompt
 
 
 def fixture():

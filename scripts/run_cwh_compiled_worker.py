@@ -37,6 +37,19 @@ def semantic_packet(packet):
     return {**packet, "items": rows}
 
 
+def batch_author_contract(packets):
+    manifest = [{"topic": p["topic"], "required_item_ids": [row["id"] for row in p["items"]]}
+                for p in packets]
+    return (
+        '\n批量最终返回契约（单议题JSON形状只用作topics数组元素，不作为顶层）：'
+        '{"topics":[{"topic":"输入原议题","items":[],"heading":"中心判断","clusters":[]}]}。'
+        'topics必须覆盖以下全部议题，每项items必须覆盖本议题required_item_ids恰好一次；'
+        '排除及重复项也必须返回id、decision、reason、relevant及claims:[]，不能只返回入选项。'
+        '提交前按清单逐项核对，不复制原文。清单：'
+        + json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 def balanced_fetch_urls(observations, limit=4):
     """Spend bounded fetch slots across observed queries, not only query one."""
     queues = [list(row.get("results") or []) for row in observations["queries"]]
@@ -108,6 +121,7 @@ def author(task, deadline):
             feedback = [*feedback, str(blocker.get("blocker"))]
     if feedback:
         prompt += "\n上次门禁反馈（首次缺文件不是内容错误），只修复真实错误，不改变已正确原文身份：" + json.dumps(feedback, ensure_ascii=False)
+    prompt += batch_author_contract(packets)
     packet = {"topics": [semantic_packet(p) for p in packets]}
     packet_hash = hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     checkpoint = Path(task["stage_workspace"]) / "author_decisions.json"
@@ -132,7 +146,10 @@ def author(task, deadline):
         "decisions_sha256": hashlib.sha256(json.dumps(decisions, ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
     for position, (packet, topic_plan, observations) in enumerate(zip(packets, topic_plans, observed)):
         decision = next(d for d in decisions if d["topic"] == packet["topic"])
-        part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
+        try:
+            part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f'[{packet["topic"]}] {exc}') from exc
         workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
         atomic_write_json(workspace / "compiled_unvalidated.json", part)
         parts.append(part)
