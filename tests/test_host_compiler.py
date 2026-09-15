@@ -9,6 +9,15 @@ from cwh_host_research import observed_tools, search_rows, semantic_json, stream
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import labeled_publication_date, exclude_certain_period_misses
+from cwh_semantic_compiler import duplicate_voice_errors
+
+
+def test_duplicate_voice_feedback_names_all_conflicting_items_and_clusters():
+    result = duplicate_voice_errors({"items": [
+        {"id": "r1", "decision": "eligible", "claims": [{"speaker": "同一专家", "cluster": "k1"}]},
+        {"id": "r2", "decision": "eligible", "claims": [{"speaker": "同一专家", "cluster": "k2"}]}]})
+    assert len(result) == 1
+    assert all(value in result[0] for value in ("同一专家", "r1", "r2", "k1", "k2"))
 
 
 def test_explicit_outside_publication_date_is_excluded_with_verbatim_audit():

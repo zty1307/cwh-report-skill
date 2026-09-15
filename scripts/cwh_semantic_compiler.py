@@ -47,6 +47,26 @@ def web_metadata_errors(packet, decision):
     return errors
 
 
+def duplicate_voice_errors(decision):
+    voices = {}
+    for item in decision.get("items") or []:
+        if item.get("decision") != "eligible":
+            continue
+        for claim in item.get("claims") or []:
+            speaker = str(claim.get("speaker") or "")
+            key = re.sub(r"\s+", "", speaker).casefold()
+            if not key:
+                continue
+            entry = voices.setdefault(key, {"speaker": speaker, "clusters": set(), "ids": set()})
+            entry["clusters"].add(str(claim.get("cluster") or ""))
+            entry["ids"].add(str(item.get("id") or ""))
+    return [
+        f'One speaker {row["speaker"]} assigned to different clusters {sorted(row["clusters"])} '
+        f'in items {sorted(row["ids"])} needs semantic consolidation; retain this speaker only once'
+        for row in voices.values() if len(row["clusters"]) > 1
+    ]
+
+
 def labeled_publication_date(content):
     pattern = (r"(?:发布日期|发布时间|发布于|Publication Date|Published on)\s*[:：]\s*"
                r"(\d{4})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})(?:日)?")
