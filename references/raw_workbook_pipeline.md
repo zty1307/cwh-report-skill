@@ -42,6 +42,8 @@ Require the number of `topic_titles` and `topic_aliases` groups to equal the num
 
 Record `topic_mapping_basis` for the identity of each original statistical group. A meeting agenda lists decisions, not the identities of numbered monitoring queries: never infer a child query title solely from agenda order, filename sorting or similar totals. Preserve combined statistical groups even when prose discusses their mechanisms separately; do not omit an agenda because another group was split. If the basis explicitly says inferred/assumed/推断/猜测 or `topic_mapping_status` is unconfirmed, obtain actual source identity or user confirmation before rendering factual labels. The host rejects known-unconfirmed mappings early (`topic_mapping_requires_confirmation`); after genuine confirmation record `topic_mapping_confirmed: true`, a confirmed status and the actual basis. Legacy explicit title metadata remains compatible but is not independently certified. Historical baseline numbers are acceptance references, not a way to manufacture missing query identities or channel counts.
 
+When post-generation review exposes a wrongly prepared test mapping and the user-provided current baseline explicitly identifies those statistical groups, a separate benchmark-assisted correction run may use only that stated group identity/order. Record the baseline path/hash, exact identity-only scope and `topic_mapping_status: baseline_cross_checked`; do not label it user-confirmed or blind evaluation. Do not import baseline counts, sentiment, viewpoints, comments or overseas evidence. This development correction is not an identity-inference method for production without a baseline; retain the original failed/mislabeled run unchanged.
+
 ## Standalone Execution
 
 ```powershell

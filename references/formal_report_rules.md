@@ -290,3 +290,7 @@ The formal report body should not contain engineering status blocks such as:
 - internal crawler failure logs
 
 Those belong in `cwh_audit.json` and, if needed, a separate review note.
+
+### 解读资格与原文支持分别核查
+
+纯转述会议要求、既有规划条文、实施安排或统计数据，即使出处真实、细节完整，也不自动构成媒体自身解读。选材必须找到实际发言主体针对本次决策的独立判断、建议或评价；背景事实只支持原文已有判断，不能由模型补出因果或意义。无独立判断时排除并保留缺口，不能收窄成一个事实句后宣称解读通过。原文支持审核和标题审核均不能代替这一选材资格判断。共同规则由config/formal_writing_rules.v1.json的viewpoint.interpretation_eligibility_rule提供，并传入作者提示和各模型任务契约。

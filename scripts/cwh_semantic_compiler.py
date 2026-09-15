@@ -27,6 +27,7 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 网页有完整正文时才可考虑选用，另在item给出source（原文真实媒体名称，必须能在本页segments正文中逐字找到，不能只凭域名、搜索标题或常识猜测）、published_at（YYYY-MM-DD）、date_quote（正文中连续的完整发布日期原文）；没有可定位媒体名称或确切期内日期就排除。
 上述date_quote只要求origin=web。origin=raw_monitoring的日期由监测导出published_at提供，不要因正文未重复日期而排除；也不能自行改动监测日期。
 只输出必要JSON，不输出分析过程、长篇逐条说明或原文全文。'''
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility_rule"]
 
 
 def query_domains(query):

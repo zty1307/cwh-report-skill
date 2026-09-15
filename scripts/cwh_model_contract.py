@@ -130,6 +130,7 @@ def build_task_payload(
             "script_fields": ["source_order", "details", "opening", "propagation_prose", "numbering", "comment_lead", "hotword_prose", "overseas_frames", "Word/Markdown layout"],
             "instruction": "Submit only the semantic fields required by this stage. Do not draft whole report sections or polish script-generated paragraphs. Preserve the source meaning and all qualifications.",
             "claim_cjk_range": writing_rules()["viewpoint"]["claim_cjk_range"],
+            "interpretation_eligibility_rule": writing_rules()["viewpoint"]["interpretation_eligibility_rule"],
             "prohibited_padding": writing_rules()["viewpoint"]["prohibited_padding"],
         },
         "mechanical_completion": {

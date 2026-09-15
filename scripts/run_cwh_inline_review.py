@@ -24,7 +24,8 @@ from raw_system_workbook_pipeline import normalize_text as normalize_raw_text
 def overseas_span_packet(packet):
     result = copy.deepcopy(packet)
     result["instructions"] = [
-        ("解读性报道须明确interpretive_verified=true并填写本条interpretive_segments的连续范围interpretive_range；"
+        ("解读性报道须明确interpretive_verified=true并填写本条interpretive_segments的连续范围interpretive_range，"
+         "格式为[起始片段ID,结束片段ID]，单片段也写两个相同ID；"
          "不要输出摘录正文，宿主按片段范围逐字提取interpretive_excerpt，不能跨条引用。")
         if "interpretive_excerpt" in instruction else instruction
         for instruction in result.get("instructions", [])
@@ -55,7 +56,16 @@ def resolve_overseas_spans(packet, result):
         span = row.get("interpretive_range")
         if span:
             number, source = sources[row["record_id"]]
+            original_span = copy.deepcopy(span)
+            if isinstance(span, str):
+                span = [span, span]
+            elif isinstance(span, list) and len(span) == 1:
+                span = [span[0], span[0]]
             quote, start, end = selected_quote(source.get("content", ""), span, f"o{number}", "sentence_v2")
+            if span != original_span:
+                row["interpretive_range"] = span
+                row.setdefault("transport_repairs", []).append({
+                    "reason": "lossless_single_segment_range", "original_interpretive_range": original_span})
             row["interpretive_excerpt"] = quote
             row["interpretive_source_span"] = {"start": start, "end": end, "scheme": "sentence_v2"}
     return result
