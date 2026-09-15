@@ -463,6 +463,17 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                 ),
             }
         )
+    if available_delivery(data):
+        # Editorial preferences are not evidence-integrity failures. Keep the
+        # issue visible without withholding independently supported content.
+        advisory_codes = {
+            "viewpoint_heading_lacks_stance", "viewpoint_cluster_heading_lacks_stance",
+            "attributed_claim_too_short",
+        }
+        for issue in issues:
+            if issue["code"] in advisory_codes and issue["severity"] == "error":
+                issue["strict_severity"] = "error"
+                issue["severity"] = "warning"
     return issues
 
 

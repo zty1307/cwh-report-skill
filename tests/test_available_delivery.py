@@ -70,3 +70,30 @@ def test_channel_label_does_not_merge_independent_accounts():
     assert not any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
     data['viewpoints']['by_topic'][0]['clusters'][1]['evidence'][0]['speaker_name'] = '账号甲'
     assert any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
+
+
+def test_available_delivery_keeps_editorial_preferences_advisory():
+    data = {"viewpoints": {"by_topic": [{"topic": "动态议题", "heading": "公共服务覆盖范围", "clusters": [
+        {"summary": "公共服务供给", "details": "真实媒体认为，应扩大覆盖。", "evidence": []}]}]}}
+    strict = domestic_viewpoint_quality_issues(data)
+    assert any(i['code'] == 'viewpoint_heading_lacks_stance' and i['severity'] == 'error' for i in strict)
+    data['metadata'] = {'delivery_policy': 'deliver_available_with_gaps'}
+    available = domestic_viewpoint_quality_issues(data)
+    assert any(i['code'] == 'viewpoint_heading_lacks_stance' and i['severity'] == 'warning'
+               and i['strict_severity'] == 'error' for i in available)
+    assert not any(i['code'] == 'viewpoint_cluster_heading_lacks_stance' and i['severity'] == 'error' for i in available)
+
+
+def test_available_delivery_does_not_excuse_unsupported_rhetorical_padding():
+    data = {'metadata': {'delivery_policy': 'deliver_available_with_gaps'}, 'viewpoints': {'by_topic': [
+        {'topic': '动态议题', 'heading': '建议优化公共服务覆盖范围', 'clusters': [
+            {'summary': '建议完善公共服务供给', 'evidence': [
+                {'formal_claim': '这为下一步工作指明方向', 'source_excerpt': '应扩大覆盖'}]}]}]}}
+    from report_rules import unsupported_padding_issues
+    evidence = data['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    # Use a configured unsupported phrase rather than relying on paraphrase detection.
+    phrase = '具有重要意义'
+    evidence['formal_claim'] = phrase
+    assert unsupported_padding_issues(evidence)
+    assert any(i['code'] == 'unsupported_rhetorical_padding' and i['severity'] == 'error'
+               for i in domestic_viewpoint_quality_issues(data))
