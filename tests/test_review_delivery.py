@@ -116,3 +116,14 @@ def test_hotword_supplement_is_capped_and_overflow_is_audited():
     assert result["transport_exclusions"][0]["term"] == "越界词"
     assert result["transport_exclusions"][0]["reason"] == "fixed_target_cap"
     assert len(original["selected"]) == 1
+
+
+def test_hotword_shortfall_preserves_semantic_contract_and_topic_mapping():
+    packet = {"topics": [{"index": 1, "title": "议题一", "aliases": ["别名"]}],
+              "instructions": ["不得凑数"], "allowed_semantic_types": ["policy_tool"],
+              "accepted_style_patterns": ["完整短语"], "rejected_style_patterns": ["泛词"]}
+    result = hotword_shortfall_packet(packet, {"selected": []})
+    assert result["topic_titles"] == ["议题一"]
+    assert result["topic_aliases"] == [["别名"]]
+    for key in ("instructions", "allowed_semantic_types", "accepted_style_patterns", "rejected_style_patterns"):
+        assert result[key] == packet[key]

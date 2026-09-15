@@ -189,8 +189,12 @@ def hotword_shortfall_packet(packet: dict, result: dict, limit: int = 72) -> dic
         if len(remaining) >= limit:
             break
     return {
-        "topic_titles": packet.get("topic_titles") or [],
-        "topic_aliases": packet.get("topic_aliases") or [],
+        "topic_titles": packet.get("topic_titles") or [row["title"] for row in packet.get("topics", [])],
+        "topic_aliases": packet.get("topic_aliases") or [row.get("aliases", []) for row in packet.get("topics", [])],
+        "instructions": packet.get("instructions") or [],
+        "allowed_semantic_types": packet.get("allowed_semantic_types") or [],
+        "accepted_style_patterns": packet.get("accepted_style_patterns") or [],
+        "rejected_style_patterns": packet.get("rejected_style_patterns") or [],
         "minimum_term_count": packet.get("minimum_term_count"),
         "target_term_count": packet.get("target_term_count"),
         "already_selected_terms": sorted(selected),
@@ -315,9 +319,10 @@ def main():
                         "仅返回新增热词审核JSON，不调用工具、不写文件。已有入选词不足最低数量；"
                         "只能从remaining_candidates中补选有原文窗口支撑且单独可指向具体议题的词，不得重复already_selected_terms。"
                         "至少补足minimum_term_count，尽量达到target_term_count；确实无足够合格词才返回blocker。"
+                        "遵守instructions及风格规则；semantic_type只能从allowed_semantic_types原样选择，不得自创类型。"
                         "topic_hits只能是从1开始且对应topic_titles顺序的整数数组。返回形状："
                         '{"review_method":"ai_semantic_review","selected":[{"term":"候选原词",'
-                        '"topic_hits":[1],"evidence_tier":"core或supporting","semantic_type":"具体语义类型",'
+                        '"topic_hits":[1],"evidence_tier":"supporting","semantic_type":"policy_tool",'
                         '"standalone_topic_label":true,"evidence_aliases":["原文依据"],'
                         '"selection_reason":"简短理由","ai_representativeness":"高或中"}]}\n'
                         + json.dumps(supplement_packet, ensure_ascii=False, separators=(",", ":"))
