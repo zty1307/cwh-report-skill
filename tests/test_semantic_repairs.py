@@ -62,3 +62,17 @@ def test_incomplete_prior_decisions_cannot_use_selected_only_repair():
     decisions[0]['items'].pop()
     assert not complete_decisions(packets, decisions)
     assert not complete_decisions(packets, [{'topic': '甲'}, {'topic': '甲'}])
+
+
+def test_only_reported_unvalidated_web_metadata_is_repairable():
+    packets, decisions = fixture()
+    packets[0]['items'][0]['origin'] = 'web'
+    request = repair_packet(packets, decisions, ['[甲] Web publisher not anchored in original text: r1'], lambda p: p)
+    assert request['topics'][0]['prior_selected'][0]['repairable_source_fields'] == ['source']
+    patch = {'topics': [{'topic': '甲', 'items': [
+        {'id': 'r1', 'decision': 'eligible', 'reason': '原文校正', 'claims': [],
+         'source': '正文媒体', 'published_at': '2000-01-01'}]}]}
+    result = apply_semantic_repairs(decisions, request, patch)
+    assert result[0]['items'][0]['source'] == '正文媒体'
+    assert result[0]['items'][0]['published_at'] == decisions[0]['items'][0]['published_at']
+    assert result[0]['items'][0]['transport_metadata_repairs'][0]['previous'] == '真实媒体'

@@ -146,15 +146,19 @@ def author(task, deadline):
         raise ValueError("Each requested topic requires exactly one semantic decision bundle")
     atomic_write_json(checkpoint, {"source_packet_sha256": packet_hash, "decisions": decisions, "run": run,
         "decisions_sha256": hashlib.sha256(json.dumps(decisions, ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
+    compilation_errors = []
     for position, (packet, topic_plan, observations) in enumerate(zip(packets, topic_plans, observed)):
         decision = next(d for d in decisions if d["topic"] == packet["topic"])
         try:
             part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
         except (ValueError, KeyError, TypeError) as exc:
-            raise ValueError(f'[{packet["topic"]}] {exc}') from exc
+            compilation_errors.append(f'[{packet["topic"]}] {exc}')
+            continue
         workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
         atomic_write_json(workspace / "compiled_unvalidated.json", part)
         parts.append(part)
+    if compilation_errors:
+        raise ValueError("; ".join(compilation_errors))
     atomic_write_json(Path(task["stage_workspace"]) / "compiled_runs.json", [run])
     merged = merge_topic_bundles(parts, [row["topic"] for row in index["topics"]], index["candidate_count"], author_id)
     merged["metadata"].update(execution_profile=task["execution_profile"],
