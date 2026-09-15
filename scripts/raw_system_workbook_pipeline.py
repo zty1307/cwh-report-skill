@@ -792,7 +792,7 @@ def build_overseas_review_packet(
             "publisher_class只能为overseas_origin_media、mainland_outward_media或not_overseas_media。",
             "每条必须填写review_reason和0至1之间的classification_confidence。",
             "overseas_origin_media与mainland_outward_media均可计入境外媒体总量；仅overseas_origin_media进入正式外媒附录。",
-            "topic_hits允许一条报道命中多个子议题；同一报道只计入总事件一次。",
+            "topic_hits只能填写从1开始的整数编号数组，编号对应topic_titles顺序；允许一条报道命中多个子议题，同一报道只计入总事件一次。",
             "补充检索样本放入supplemental_rows，并执行相同审核、时间窗和去重规则；同URL及同媒体重复行去重，跨媒体转载保留。",
         ],
         "items": items,
@@ -1297,7 +1297,7 @@ def filter_public_top(
             "早餐、早报、多消息合集、行情综述中仅顺带提及会议的文章必须排除。",
             "账号权威性、阅读量高低和标题命中词不能替代正文语义判断。",
             "先按配置中的发布主体账号族合并同源账号，再按阅读量和在看量排序；不得用模糊字符串擅自合并无关账号。",
-            "decision只能为include或exclude；每条填写review_reason、classification_confidence和topic_hits。",
+            "decision只能为include或exclude；每条填写review_reason、classification_confidence和topic_hits；topic_hits只能填写从1开始且对应topic_titles顺序的整数编号数组。",
         ],
         "items": [
             {

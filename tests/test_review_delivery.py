@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build_cwh_review_delivery import accepted_path, build_review_delivery
 from cwh_pipeline_runtime import sha256_file
-from run_cwh_inline_review import compact_hotword_packet, response_object, normalize_hotword_transport, validate_transport_result
+from run_cwh_inline_review import compact_hotword_packet, response_object, normalize_hotword_transport, normalize_topic_hit_transport, validate_transport_result
 from docx import Document
 
 
@@ -64,3 +64,25 @@ def test_fixed_hotword_rejection_is_audited_not_silently_padded():
     import pytest
     with pytest.raises(ValueError, match="below"):
         validate_transport_result("hotword", {"minimum_term_count": 36}, result)
+
+
+def test_topic_hit_transport_accepts_indices_exact_titles_and_unique_aliases():
+    packet = {
+        "topic_titles": ["新型电网建设", "核准四个核电项目"],
+        "topic_aliases": [["新型电网"], ["核电项目"]],
+    }
+    result = {"items": [
+        {"record_id": "a", "topic_hits": ["核电项目", "2", 2]},
+        {"record_id": "b", "topic_hits": ["新型电网建设"]},
+    ]}
+    normalized = normalize_topic_hit_transport(packet, result, "overseas")
+    assert normalized["items"][0]["topic_hits"] == [2]
+    assert normalized["items"][1]["topic_hits"] == [1]
+    assert result["items"][0]["topic_hits"] == ["核电项目", "2", 2]
+
+
+def test_topic_hit_transport_rejects_ambiguous_or_unknown_labels():
+    import pytest
+    packet = {"topic_titles": ["议题一", "议题二"], "topic_aliases": [["共同词"], ["共同词"]]}
+    with pytest.raises(ValueError, match="unknown or ambiguous"):
+        normalize_topic_hit_transport(packet, {"items": [{"topic_hits": ["共同词"]}]}, "overseas")
