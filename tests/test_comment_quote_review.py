@@ -68,3 +68,31 @@ def test_empty_selection_does_not_spend_another_model_call(tmp_path):
         result, audit = review_formal_selection({'rows': []}, original, [], tmp_path, 45)
     call.assert_not_called()
     assert result == original and audit['status'] == 'not_needed'
+
+
+def test_selected_quote_review_preserves_real_parent_title_and_context_kind(tmp_path):
+    original = decisions()
+    original['rows'][1]['formal'] = False
+    packet = {'rows': [{'id': 1, 'post_id': 'post-a', 'text': '原话甲'},
+                       {'id': 2, 'post_id': 'post-b', 'text': '原话乙'}],
+              'posts': [{'id': 'post-a', 'text': '原始单议题父帖标题',
+                         'context_kind': 'api_parent_title_only'},
+                        {'id': 'post-b', 'text': '未选评论父帖'}]}
+    frozen = copy.deepcopy(packet)
+    reply = {'reviews': [{'id': 1, 'verdict': 'reject', 'reason': '抽象表态'}],
+             'topic_headings': {}}
+    with patch('cwh_comment_semantics.semantic_json', return_value=(reply, {'session_id': 'test-only'})) as call:
+        result, audit = review_formal_selection(packet, original, ['configured-host'], tmp_path, 10)
+    outgoing = call.call_args.args[0]
+    assert outgoing['posts'] == [packet['posts'][0]]
+    assert outgoing['rows'][0]['text'] == '原话甲'
+    assert packet == frozen and not result['rows'][0]['formal']
+    assert audit['status'] == 'review_complete'
+
+
+def test_comment_author_and_reviewer_share_context_boundary_rule():
+    import cwh_comment_semantics as comments
+    for prompt in (comments.PROMPT, comments.COMPACT_PROMPT, comments.QUOTE_PROMPT,
+                   comments.QUOTE_REVIEW_PROMPT):
+        assert '不要求评论重复完整政策名称' in prompt
+        assert '抽象积极表态不能靠父帖补成实质观点' in prompt
