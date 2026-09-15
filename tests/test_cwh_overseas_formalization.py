@@ -427,6 +427,16 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         self.assertEqual(2, len(rows))
         self.assertEqual({"9663904", "1234567"}, {FORMALIZE.formal_overseas_story_token(row) for row in rows})
 
+    def test_risk_summary_has_neutral_attribution_without_changing_atomic_source(self) -> None:
+        row = {'formal_include': True, 'meeting_relevance': True, 'source': '境外媒体甲',
+               'title_cn': '公共服务政策的实施条件', 'url': 'https://example.test/risk',
+               'overseas_category': '借题炒作/风险解读',
+               'summary_cn': '政策效果仍取决于地方资金安排。'}
+        original = json.loads(json.dumps(row))
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs({'appendices': {'overseas_reports': [row]}}))
+        self.assertIn('文章《公共服务政策的实施条件》称，政策效果仍取决于地方资金安排', text)
+        self.assertEqual(original, row)
+
 
 if __name__ == "__main__":
     unittest.main()

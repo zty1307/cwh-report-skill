@@ -30,6 +30,7 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["meeting_reference_rule"]
 AUTHOR_PROMPT += '\n网页date_quote须是原文连续的完整年、月、日，且对应发布日期；只有月日和时分不足，不能从URL、会议年份或正文事件年份补齐。找不到完整发布日期就excluded并保留具体原因，不反复改写日期凑校验。'
+AUTHOR_PROMPT += '\n没有segments完整正文的网页，只能排除为未读取或访问失败；不能据搜索摘要断言整篇没有独立解读，也不能将全部发现链接数说成已读全文数。缺口理由须区分发现、读取和合格声音三个范围。'
 
 
 def query_domains(query):
@@ -200,6 +201,14 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         if choice["decision"] != "eligible" and claims:
             raise ValueError("Unselected item cannot contain selected claims")
         raw = item["origin"] == "raw_monitoring"
+        metadata_only = not raw and not item.get('content')
+        model_disposition = None
+        if metadata_only:
+            model_disposition = copy.deepcopy(choice)
+            choice = {**choice, 'decision': 'excluded',
+                      'reason': ('公开网页读取失败，未取得完整正文，不能判断是否含独立解读'
+                                 if item.get('full_text_status') == 'access_failed' else
+                                 '限时阅读名额内未读取完整正文，不能判断是否含独立解读')}
         item_queries = [raw_query] if raw else by_url[item["url"]]
         if raw:
             reviewed.append(item["record_id"])
@@ -219,6 +228,11 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                        "title": item["title"], "url": item["url"], "published_at": item.get("published_at") or choice.get("published_at", ""),
                        "discovery_route": query["route"], "source_type": "expert" if claim and claim["speaker_type"] == "named_person" else "mainstream_media",
                        "source_tier": "monitoring_export" if raw else "public_web", "content_summary": choice["reason"]}
+                row['review_scope'] = 'discovery_metadata_only' if metadata_only else 'full_text_semantic_review'
+                if not raw:
+                    row['full_text_status'] = item.get('full_text_status', 'not_fetched_bounded_budget')
+                if model_disposition is not None:
+                    row['model_disposition'] = model_disposition
                 if raw:
                     row["raw_evidence_record_id"] = item["record_id"]
                 if item.get("content"):
@@ -303,6 +317,21 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         rounds.append({"round": number, "executions": executions, "queries_or_sources": [q["query"] for q in executions],
                        "new_candidates": len(new), "new_independent_viewpoints": len({c["viewpoint_cluster_key"] for c in new})})
     search_evidence = "; ".join(f'{q["query_id"]}: {q["status"]} ({q["result_count"]} URLs)' for q in queries)
+    web_items = [row for row in packet['items'] if row['origin'] == 'web']
+    reading_scope = {
+        'raw_full_text_count': sum(bool(row.get('content')) for row in raw_items),
+        'web_discovered_count': len(web_items),
+        'web_full_text_count': sum(bool(row.get('content')) for row in web_items),
+        'web_access_failed_count': sum(row.get('full_text_status') == 'access_failed' for row in web_items),
+        'web_not_fetched_count': sum(row.get('full_text_status') == 'not_fetched_bounded_budget' for row in web_items),
+        'full_text_item_ids': [row['id'] for row in packet['items'] if row.get('content')],
+        'scope': 'discovery counts are not full-text reads or qualified voice counts',
+    }
+    search_evidence += (f"; reading_scope: raw full text {reading_scope['raw_full_text_count']}; "
+                        f"web discovered {reading_scope['web_discovered_count']}, "
+                        f"web full text {reading_scope['web_full_text_count']}, "
+                        f"access failed {reading_scope['web_access_failed_count']}, "
+                        f"not fetched {reading_scope['web_not_fetched_count']}")
     viewpoint = {"topic": topic, "heading": decision["heading"], "clusters": list(clusters.values())}
     for field, reason_field in (("evidence_shortfall", "shortfall_reason"), ("single_cluster_exception", "single_cluster_reason")):
         if decision.get(reason_field):
@@ -316,7 +345,7 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         "registry_version": registry_version, "execution_profile": profile, "open_search_completed": all(x["status"] in {"completed", "access_failed"} for x in route_coverage),
         "required_source_ids": [t["source_id"] for t in topic_plan["stable_source_tasks"] if t.get("must_check")],
         "coverage_by_topic": [{"topic": topic, "checks": checks}],
-        "candidate_pool_by_topic": [{"topic": topic, "candidates": candidates, "saturation": {
+        "candidate_pool_by_topic": [{"topic": topic, "candidates": candidates, "reading_scope": reading_scope, "saturation": {
             "completed": True, "stop_reason": "coverage_minimum_then_one_zero_new_round_or_budget_exhausted",
             "rounds": rounds, "route_coverage": route_coverage}}],
         "public_article_corpus_review": {"topic_reviews": [{"topic": topic, "reviewed_record_ids": reviewed,

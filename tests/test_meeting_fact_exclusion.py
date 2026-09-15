@@ -30,3 +30,22 @@ def test_topic_manifest_survives_transport_and_prompt_requires_policy_object_dis
     source = {'topic': '制度清理', 'agenda_topics': ['制度清理', '某住房条例修订'], 'items': []}
     assert semantic_packet(source)['agenda_topics'] == source['agenda_topics']
     assert '不为补齐薄弱议题搬用其他议题的成熟解读' in AUTHOR_PROMPT
+
+
+def test_policy_primary_material_is_not_an_independent_media_reaction():
+    primary = {'claim_kind': 'policy_primary_text', 'claim': '制定方阐释政策国情依据和必要性。'}
+    source = [{'items': [{'id': 'p1', 'decision': 'eligible', 'claims': [primary]}]}]
+    before = copy.deepcopy(source)
+    item = normalize_excluded_claims(source)[0]['items'][0]
+    assert item['decision'] == 'excluded' and item['claims'] == []
+    assert item['transport_exclusions'][0]['original_claims'] == [primary] and source == before
+    assert '政策一手材料' in AUTHOR_PROMPT
+    assert '不禁止政府平台刊载的真实第三方解读' in AUTHOR_PROMPT
+
+
+def test_primary_policy_quote_removed_but_real_expert_analysis_kept():
+    primary = {'claim_kind': 'policy_primary_text', 'claim': '政策制定方要求完善公共服务。'}
+    expert = {'claim_kind': 'policy_reasoning', 'claim': '专家分析跨地区服务衔接的具体实施条件。'}
+    source = [{'items': [{'id': 'p1', 'decision': 'eligible', 'claims': [primary, expert]}]}]
+    item = normalize_excluded_claims(source)[0]['items'][0]
+    assert item['decision'] == 'eligible' and item['claims'] == [expert]

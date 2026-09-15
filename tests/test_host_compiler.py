@@ -117,6 +117,45 @@ def test_host_compiler_keeps_source_and_does_not_self_certify():
     assert validate_analysis_mapping(bundle)["status"] == "blocked"
 
 
+def test_unread_webpage_cannot_be_certified_as_having_no_interpretation():
+    packet, decision, observations, plan = fixture()
+    original = copy.deepcopy((packet, decision, observations))
+    decision['items'][1]['reason'] = '全文只有议程复述，没有独立解读'
+    original_decision = copy.deepcopy(decision)
+    part = compile_topic(packet, decision, observations, plan, 'bounded_60m', 'v1', 'author')
+    pool = part['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]
+    row = next(row for row in pool['candidates'] if row['url'] == 'https://wrong.test/a')
+    assert row['decision'] == 'excluded'
+    assert '不能判断是否含独立解读' in row['decision_reason']
+    assert row['review_scope'] == 'discovery_metadata_only'
+    assert row['model_disposition'] == original_decision['items'][1]
+    assert decision == original_decision and packet == original[0] and observations == original[2]
+    scope = pool['reading_scope']
+    assert scope['raw_full_text_count'] == 1 and scope['web_discovered_count'] == 1
+    assert scope['web_full_text_count'] == 0 and scope['web_not_fetched_count'] == 1
+    assert scope['full_text_item_ids'] == ['r1']
+
+
+def test_access_failed_webpage_keeps_actual_failure_not_no_viewpoint_claim():
+    packet, decision, observations, plan = fixture()
+    packet['items'][1]['full_text_status'] = 'access_failed'
+    part = compile_topic(packet, decision, observations, plan, 'bounded_60m', 'v1', 'author')
+    pool = part['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]
+    row = next(row for row in pool['candidates'] if row['url'] == 'https://wrong.test/a')
+    assert '读取失败' in row['decision_reason']
+    assert pool['reading_scope']['web_access_failed_count'] == 1
+    assert pool['reading_scope']['web_not_fetched_count'] == 0
+
+
+def test_generic_deployment_and_sentence_initial_meeting_references_need_expansion():
+    from domestic_evidence_mapping import has_ambiguous_meeting_reference
+    assert has_ambiguous_meeting_reference('按照会议部署解决供需错配。')
+    assert has_ambiguous_meeting_reference('统筹新旧动能，会议既提出技术突破，又强调产业升级。')
+    assert has_ambiguous_meeting_reference('会议提出完善公共服务机制。')
+    assert not has_ambiguous_meeting_reference('按照中央政治局会议部署解决供需错配。')
+    assert not has_ambiguous_meeting_reference('国务院常务会议提出完善公共服务机制。')
+
+
 def test_packet_sends_complete_source_once_and_ranges_compile_exactly():
     packet, decision, observation, plan = fixture()
     outgoing = semantic_packet(packet)
