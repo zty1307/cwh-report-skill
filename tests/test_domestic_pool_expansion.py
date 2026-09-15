@@ -22,6 +22,12 @@ def test_real_registry_plan_searches_academia_and_public_supplement_within_ten_q
     assert {'academic_think_tank', 'public_platform_supplement', 'wechat_public',
             'toutiao_articles', 'baijiahao', 'lane_industry_expert'} <= {row['source_id'] for row in tasks}
     assert len({row['query'] for row in tasks}) == len(tasks)
+    by_source = {row['source_id']: row for row in tasks}
+    assert '国务院常务会议' in by_source['lane_authoritative']['query']
+    for source_id in ['lane_mainstream', 'lane_industry_expert', 'wechat_public', 'toutiao_articles', 'baijiahao']:
+        query = by_source[source_id]['query']
+        assert date in query and topic in query and 'site:' in query
+        assert '国务院常务会议' not in query
     plan['query_execution_limit'] = 8
     assert len(topic_search_tasks(plan, {'start': date})) == 8
 
@@ -55,6 +61,24 @@ def test_larger_reading_index_preserves_all_ids_and_full_original_articles(tmp_p
 def test_ten_page_slots_cover_ten_observed_queries_before_second_results():
     obs = {'queries': [{'results': [{'url': f'a{i}'}, {'url': f'b{i}'}]} for i in range(10)]}
     assert balanced_fetch_urls(obs, 10) == [f'a{i}' for i in range(10)]
+
+
+def test_page_reading_prefers_actual_site_hits_and_policy_interpretation_without_editing_results():
+    import copy
+    obs = {'queries': [
+        {'query': 'site:media.test 健康优先发展战略', 'results': [
+            {'url': 'https://gov.test/a', 'title': '健康优先发展战略解读'},
+            {'url': 'https://media.test/a', 'title': '健康优先发展战略实施安排'}]},
+        {'query': '健康优先发展战略 智库 学者 解读', 'results': [
+            {'url': 'https://school.test/summit', 'title': '共探健康优先全民数智峰会'},
+            {'url': 'https://school.test/gov', 'title': '14位学者解读政府工作报告'},
+            {'url': 'https://school.test/expert', 'title': '教授深度解读健康中国优先发展战略'}]}]}
+    original = copy.deepcopy(obs)
+    assert balanced_fetch_urls(obs, 2, topic='健康优先发展战略') == [
+        'https://media.test/a', 'https://school.test/expert']
+    assert obs == original
+    assert set(balanced_fetch_urls(obs, 10, topic='健康优先发展战略')) == {
+        item['url'] for row in obs['queries'] for item in row['results']}
 
 
 def test_specific_policy_title_is_read_before_generic_weekend_market_analysis(tmp_path):

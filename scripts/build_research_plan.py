@@ -82,6 +82,9 @@ def stable_source_tasks(
         members = [row for row in sources if row.get("must_check") and row.get("tier") in tiers]
         domains = sorted({domain for row in members for domain in row.get("domains") or [] if domain})
         domain_query = " OR ".join(f"site:{domain}" for domain in domains)
+        lane_query = (f"({domain_query}) {meeting_date} 国务院常务会议 {subject}"
+                      if lane_id == 'lane_authoritative' else
+                      f"({domain_query}) {meeting_date} {subject} (解读 OR 专家 OR 评论 OR 建议)")
         grouped.append(
             {
                 "source_id": lane_id,
@@ -90,8 +93,8 @@ def stable_source_tasks(
                 "region": "domestic",
                 "tier": lane_id.removeprefix("lane_"),
                 "must_check": True,
-                "query": f"({domain_query}) {meeting_date} 国务院常务会议 {subject}",
-                "query_families": [f"({domain_query}) {meeting_date} 国务院常务会议 {subject}"],
+                "query": lane_query,
+                "query_families": [lane_query],
                 "execution_mode": "site_restricted_search",
                 "lane": lane_id.removeprefix("lane_"),
                 "bounded": True,
@@ -100,7 +103,9 @@ def stable_source_tasks(
     grouped.extend(
         {
             **row,
-            "query_families": list(row.get("query_families") or [])[:1],
+            "query": f'{meeting_date} {row["query_families"][1]}' if len(row.get('query_families') or []) > 1 else row['query'],
+            "query_families": ([f'{meeting_date} {row["query_families"][1]}']
+                               if len(row.get('query_families') or []) > 1 else [row['query']]),
             "bounded": True,
         }
         for row in tasks

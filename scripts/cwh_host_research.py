@@ -138,7 +138,7 @@ def topic_search_tasks(plan, period):
                       "route": "open_web"})
     if plan.get("queries"):
         tasks.append({"source_id": "public_platform_supplement", "route": "public_platform",
-                      "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {plan["topic"]} 国常会 解读 分析 建议'})
+                      "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {plan["topic"]} (解读 OR 评论 OR 建议 OR 分析)'})
     limit = int(plan.get("query_execution_limit") or 0)
     if limit > 0:
         tasks = tasks[:limit]

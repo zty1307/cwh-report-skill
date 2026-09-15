@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 import uuid
 from cwh_pipeline_runtime import atomic_write_json, utc_now
@@ -15,6 +16,7 @@ from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import normalize_web_publication_dates
 from cwh_semantic_compiler import exclude_certain_period_misses
 from cwh_semantic_compiler import duplicate_voice_errors
+from cwh_semantic_compiler import query_domains, domain_matches
 from run_cwh_batched_viewpoints import merge_topic_bundles
 from cwh_source_spans import source_segments, selected_quote
 from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_repairs, complete_decisions
@@ -57,9 +59,19 @@ def batch_author_contract(packets):
     )
 
 
-def balanced_fetch_urls(observations, limit=4):
+def balanced_fetch_urls(observations, limit=4, *, topic=''):
     """Spend bounded fetch slots across observed queries, not only query one."""
-    queues = [list(row.get("results") or []) for row in observations["queries"]]
+    queues = []
+    policy_grams = {topic[i:i+3] for i in range(max(0, len(topic)-2))}
+    for row in observations['queries']:
+        results = list(row.get('results') or [])
+        if topic:
+            domains = query_domains(row.get('query') or '')
+            results.sort(key=lambda item: (
+                not domain_matches(item['url'], domains) if domains else False,
+                -sum(gram in str(item.get('title') or '') for gram in policy_grams),
+                -bool(re.search('解读|评论|观察|深度|论谈|为什么|如何', str(item.get('title') or '')))))
+        queues.append(results)
     urls = []
     while any(queues) and len(urls) < limit:
         for queue in queues:
@@ -185,7 +197,7 @@ def author(task, deadline):
         source_rows = [read(row["full_text_path"]) for row in indexed["shortlist"][:raw_read_limit]]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      min(65, (deadline - time.monotonic()) * .12))
-        urls = balanced_fetch_urls(observations, page_fetch_limit)
+        urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
         pages = cached_public_pages(workspace, urls, timeout=8)
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
