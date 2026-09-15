@@ -143,3 +143,13 @@ def test_overseas_span_transport_preserves_original_and_rejects_cross_record_ids
     assert "interpretive_excerpt" not in review["items"][0]
     with pytest.raises(ValueError, match="belong"):
         resolve_overseas_spans(packet, {"items": [{"record_id": "a", "interpretive_range": ["o2/1", "o2/1"]}]})
+
+
+def test_missing_or_title_only_overseas_body_is_structurally_excluded_and_audited():
+    from run_cwh_inline_review import resolve_overseas_spans
+    packet = {"items": [{"record_id": "a", "title": "國務院常務會議", "content": "国 务 院 常 务 会 议"}]}
+    review = {"items": [{"record_id": "a", "decision": "include", "review_reason": "模型认为有关"}]}
+    result = resolve_overseas_spans(packet, review)
+    assert result["items"][0]["decision"] == "exclude"
+    assert result["items"][0]["transport_exclusions"][0]["original_review"] == review["items"][0]
+    assert review["items"][0]["decision"] == "include"

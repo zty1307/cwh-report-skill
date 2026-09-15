@@ -18,6 +18,7 @@ from cwh_scoped_process import run_scoped_command
 from cwh_hotword_pipeline import PROCEDURAL_HOTWORD_MARKERS, looks_like_pure_geography, valid_candidate
 from cwh_json_transport import load_framed_json, normalize_authoring_envelope
 from cwh_source_spans import source_segments, selected_quote
+from raw_system_workbook_pipeline import normalize_text as normalize_raw_text
 
 
 def overseas_span_packet(packet):
@@ -41,6 +42,16 @@ def resolve_overseas_spans(packet, result):
     result = copy.deepcopy(result)
     sources = {row["record_id"]: (number, row) for number, row in enumerate(packet.get("items", []), 1)}
     for row in result.get("items", []):
+        if row.get("decision") == "include" and row["record_id"] in sources:
+            _, source = sources[row["record_id"]]
+            body = str(source.get("content") or "").strip()
+            if not body or normalize_raw_text(body) == normalize_raw_text(source.get("title")):
+                original = copy.deepcopy(row)
+                row.update(decision="exclude", interpretive_verified=False,
+                           interpretive_range=[], interpretive_excerpt="",
+                           review_reason="fixed_body_evidence_unavailable:正文缺失或仅重复标题，不判定为与会议无关")
+                row.setdefault("transport_exclusions", []).append({
+                    "reason": "fixed_body_evidence_unavailable", "original_review": original})
         span = row.get("interpretive_range")
         if span:
             number, source = sources[row["record_id"]]
