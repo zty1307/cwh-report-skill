@@ -1,5 +1,6 @@
 """Compile model decisions for a small, traceable comment corpus into all handoffs."""
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -333,6 +334,32 @@ def expand_compact_comment_result(packet, result):
     return {'rows': rows, 'topic_headings': {key: value.strip() for key, value in headings.items()}}
 
 
+def complete_single_comment_heading(result):
+    """Reuse an explicit shared heading only for a single selected comment."""
+    completed = copy.deepcopy(result)
+    headings = completed.get('topic_headings')
+    if not isinstance(headings, dict):
+        return completed
+    selected = {}
+    for row in completed.get('rows') or []:
+        if row.get('formal') is True and type(row.get('topic')) is int:
+            selected.setdefault(row['topic'], []).append(row)
+    repairs = []
+    for topic, rows in selected.items():
+        heading = headings.get(str(topic))
+        if len(rows) != 1 or not isinstance(heading, str) or not heading.strip():
+            continue
+        row = rows[0]
+        if row.get('label') in VALID_LABELS and not str(row.get('heading') or '').strip():
+            row['heading'] = heading.strip()
+            repairs.append({'id': row.get('id'), 'topic': topic,
+                            'method': 'reuse_explicit_shared_heading_for_single_selected_comment',
+                            'heading': row['heading']})
+    if repairs:
+        completed['transport_heading_completions'] = repairs
+    return completed
+
+
 def compile_results(capture, topics, result, run):
     decisions = result.get('rows') or []
     if len(decisions) != len(capture['rows']) or {r.get('id') for r in decisions} != set(range(1, len(capture['rows']) + 1)):
@@ -425,6 +452,7 @@ def main():
         result, run, label_run = split_review(capture, topics, command, args.output_dir, args.timeout)
     else:
         result, run = semantic_json(review_packet(capture, topics), PROMPT, command, args.output_dir, 'comment-review', args.timeout)
+    result = complete_single_comment_heading(result)
     rows = compile_results(capture, topics, result, run)
     if label_run:
         for row in rows:
@@ -448,6 +476,7 @@ def main():
         'label_run': label_run, 'formal_selection_run': run if label_run else None,
         'raw_capture_sha256': hashlib.sha256(args.capture.read_bytes()).hexdigest(), 'blockers': blockers,
         'capture_repair': capture_repair, 'handoff': handoff_audit,
+        'transport_heading_completions': result.get('transport_heading_completions') or [],
         'excluded_capture_rows': len(capture['excluded']), 'classifier_trained': False})
     print(json.dumps({'handoff': handoff_audit, 'summary_status': summary['status'], 'seconds': run['seconds']}, ensure_ascii=False))
     if blockers or handoff_audit['status'] != 'ready':
