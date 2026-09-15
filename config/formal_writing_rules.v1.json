@@ -49,6 +49,7 @@
     "mature_cluster_voice_range": [2, 4],
     "topic_cluster_range": [2, 4],
     "assembly": "one_speaker_one_sentence",
+    "meeting_reference_rule": "正式观点不用裸‘本次会议’‘此次会议’‘这次会议’‘该会议’，按原文明确实际会议名称。相关背景会议可作本期议程背景，但不冒充国务院常务会议的新决定；不按报告标题统一替换，也不删去对象掩盖区别。",
     "source_order": ["named_expert", "authoritative_media", "industry_institution", "public_account", "other_traceable_source"],
     "source_type_classes": {
       "central_media": "authoritative_media", "mainstream_media": "authoritative_media", "official_media": "authoritative_media",
@@ -113,7 +114,7 @@
     "no_comment_evidence_sentence": "本轮检索范围内未取得可核验的境外网民评论，暂不判断其关注程度或态度。",
     "max_interpretive_examples": 3,
     "max_factual_examples": 3,
-    "interpretive_summary_rule": "正式分析摘要只写相对于会议事实新增的政策判断，以及原文支持的机制、条件、影响或风险；不复述议程、股价涨跌，不写报道包含什么、介绍哪些内容或其余无关等文章简介。审核理由单独记录，不代替正式摘要；保留政策实施阶段与不确定性。",
+    "interpretive_summary_rule": "summary_cn_simplified是可直接放入报告正文的观点，不是选材鉴定：直接写原文的政策判断及其机制、条件、影响或风险。不要写‘属会议事实之外新增的分析’‘具有解读性’‘因此纳入’‘而非单纯转述’等审核结论，这些只放review_reason；也不写报道包含什么、介绍哪些内容或其余无关等文章简介，不以议程、股价涨跌填充。保留原文实际讨论对象、政策实施阶段与不确定性；原文没有独立判断就归事实或排除，不能替作者补分析。",
     "category_numbering": false
   },
   "style": {

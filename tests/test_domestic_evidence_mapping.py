@@ -119,6 +119,20 @@ def test_tampered_snapshot_and_excerpt_are_blocked() -> None:
     assert any("连续原文不一致" in message for message in messages)
 
 
+def test_unexpanded_meeting_reference_cannot_be_certified_by_keyword_matching() -> None:
+    bundle = valid_bundle()
+    cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+    ev = cluster['evidence'][0]
+    old = ev['formal_claim']
+    ev['formal_claim'] = '本次会议认为，' + old
+    cluster['details'] = cluster['details'].replace(old, ev['formal_claim'])
+    ev['semantic_review']['propositions'][0]['text'] = ev['formal_claim']
+    final = validate_analysis_mapping(bundle)
+    assert any(row['code'] == 'ambiguous_meeting_reference' for row in final['issues'])
+    draft = validate_analysis_mapping(bundle, require_semantic_review=False)
+    assert not any(row['code'] == 'ambiguous_meeting_reference' for row in draft['issues'])
+
+
 def test_merged_speakers_and_unsupported_number_are_blocked() -> None:
     bundle = valid_bundle()
     evidence = bundle["viewpoints"]["by_topic"][0]["clusters"][0]["evidence"][0]

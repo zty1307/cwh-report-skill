@@ -234,6 +234,8 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
                         issues.append(_issue("speaker_role_not_in_excerpt", "具名专家的机构或职务未出现在对应原文片段中。", **context))
 
                 formal_claim = _text(evidence.get("formal_claim"))
+                if require_semantic_review and re.search(r'(?:本次|这次|此次|该)会议', formal_claim):
+                    issues.append(_issue("ambiguous_meeting_reference", "正式观点含未展开的会议指称；须依据原文明确实际会议名称，不能由宿主猜测替换。", **context))
                 if not formal_claim:
                     issues.append(_issue("formal_claim_missing", "成文观点缺少正式报告表述。", **context))
                 elif _normalized(formal_claim) not in _normalized(details):

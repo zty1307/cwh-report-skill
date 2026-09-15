@@ -274,6 +274,9 @@ REVIEW_PROMPT = '''独立核验每条formal_claim是否被同条excerpt_segments
 判断前须检查观点中的每个事实、因果、效果、程度、数字、限定词、发言主体和职务；任何一部分缺乏支持都不能判fully_supported。媒体自身评论可按source元数据核对媒体名，但不得把其引用人物冒充媒体观点。只允许依据同条excerpt_segments；宿主负责逐字引用、位置、哈希、命题覆盖和时间。'''
 REVIEW_PROMPT += '\n' + HEADING_REVIEW_PROMPT
 REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
+REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
+REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
+REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
 
 
 def compile_review(analysis, result, run, digest):
@@ -342,11 +345,13 @@ def independent_packet(analysis):
                 snapshot = candidate["source_snapshot"]
                 source_key = (snapshot["snapshot_id"], ev.get("source_segment_scheme", "line_v1"), ev.get("source_segment_scope"))
                 short = snapshots.setdefault(source_key, {"id": f"s{len(snapshots)+1}",
-                    "source": candidate["source"], "account": candidate.get("account"), "title": candidate["title"]})["id"]
+                    "source": candidate["source"], "account": candidate.get("account"), "title": candidate["title"],
+                    "reference_context": snapshot['source_text'][:2000]})["id"]
                 claim_id = f'e{len(claims)+1}'
                 if snapshot['source_text'][ev['source_excerpt_start']:ev['source_excerpt_end']] != ev['source_excerpt']:
                     raise ValueError('Frozen source does not contain the exact declared excerpt')
                 claims.append({"id": claim_id, "source_id": short, "topic": topic['topic'],
+                    "reference_expansion_required": bool(re.search(r'(?:本次|这次|此次|该)会议', ev['formal_claim'])),
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
