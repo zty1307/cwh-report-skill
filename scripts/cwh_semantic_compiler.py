@@ -69,7 +69,10 @@ def web_metadata_errors(packet, decision):
         if (not quote or quote not in content or len(parts) != 3
                 or [int(x) for x in tokens[:3]] != [int(x) for x in parts]
                 or not packet["period"]["start"][:10] <= date <= packet["period"]["end"][:10]):
-            errors.append(f'Web publication date not anchored in original text: {item["id"]}')
+            errors.append(f'Web publication date not anchored in original text: {item["id"]} '
+                          '(date_quote must contain the original complete year-month-day matching published_at; '
+                          'month-day plus time is insufficient; do not infer the year from URL, agenda or body facts; '
+                          'exclude with claims:[] if no complete publication date is present)')
     return errors
 
 
