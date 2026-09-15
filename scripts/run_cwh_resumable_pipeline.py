@@ -1389,6 +1389,8 @@ class CwhPipeline:
             )
             if review_issues:
                 return mapping_problem_messages({"issues": review_issues})
+            from cwh_heading_quality import build_heading_audit
+            verified_data.setdefault('research_audit', {})['heading_quality'] = build_heading_audit(verified_data, packet)
             atomic_write_json(verified_path, verified_data)
             mapping_audit = validate_analysis_mapping(verified_data)
             atomic_write_json(audit_path, mapping_audit)

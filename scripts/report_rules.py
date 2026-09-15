@@ -50,14 +50,16 @@ def _topic_viewpoints(data: dict[str, Any]) -> list[dict[str, Any]]:
 def enrich_viewpoint_titles(data: dict[str, Any]) -> None:
     """Reuse a verified title for the same person within one subtopic."""
 
-    for viewpoint in _topic_viewpoints(data):
+    from cwh_heading_quality import reviewed_display_headings
+    display = reviewed_display_headings(data)
+    for ti, viewpoint in enumerate(_topic_viewpoints(data)):
         clusters = list(viewpoint.get("clusters") or [])
         if valid_gap(viewpoint):
             viewpoint['heading'] = viewpoint['topic']
             continue
-        viewpoint['heading'] = judgment_heading(viewpoint.get('heading'))
-        for cluster in clusters:
-            cluster['summary'] = judgment_heading(cluster.get('summary'))
+        viewpoint['heading'] = display.get((ti, None), judgment_heading(viewpoint.get('heading')))
+        for ci, cluster in enumerate(clusters):
+            cluster['summary'] = display.get((ti, ci), judgment_heading(cluster.get('summary')))
         title_by_person: dict[str, str] = {}
 
         for cluster in clusters:
@@ -248,6 +250,9 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
     voice_labels: dict[str, str] = {}
     topic_heading_prefixes: list[str] = []
     viewpoint_rules = writing_rules()["viewpoint"]
+    research = data.get('research_audit') or (data.get('analysis_bundle') or {}).get('research_audit') or {}
+    for warning in (research.get('heading_quality') or {}).get('warnings') or []:
+        issues.append({'code': 'heading_semantic_quality', 'severity': 'warning', 'message': warning})
 
     for viewpoint in _topic_viewpoints(data):
         if available_delivery(data) and valid_gap(viewpoint):
