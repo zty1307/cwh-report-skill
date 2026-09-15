@@ -153,13 +153,20 @@ def test_same_voice_same_cluster_keeps_first_and_preserves_later_claim_as_reserv
     assert "semantic_review" not in reserve
 
 
-def test_same_voice_different_clusters_needs_semantic_resolution():
+def test_same_voice_different_clusters_reserves_later_bounded_voice_without_merging():
     packet, decision, observation, plan = fixture()
     later = copy.deepcopy(decision["items"][0]["claims"][0])
     later["cluster"] = "k2"
     decision["items"][0]["claims"].append(later)
+    decision["clusters"].append({"key": "k2", "heading": "另一个簇"})
+    bounded = compile_topic(packet, decision, observation, plan, "bounded_60m", "v1", "author")
+    pool = bounded["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"][0]["candidates"]
+    reserved = [row for row in pool if row.get("formal_use") == "reserve"]
+    assert len(reserved) == 1
+    assert reserved[0]["semantic_claim"]["cluster"] == "k2"
+    assert "不合并或改写" in reserved[0]["reserve_reason"]
     with pytest.raises(ValueError, match="semantic consolidation"):
-        compile_topic(packet, decision, observation, plan, "bounded_60m", "v1", "author")
+        compile_topic(packet, decision, observation, plan, "exhaustive", "v1", "author")
 
 
 def test_search_snippet_never_becomes_full_source():

@@ -153,7 +153,8 @@ def author(task, deadline):
     compilation_errors = []
     for position, (packet, topic_plan, observations) in enumerate(zip(packets, topic_plans, observed)):
         decision = next(d for d in decisions if d["topic"] == packet["topic"])
-        metadata_errors = [*web_metadata_errors(packet, decision), *duplicate_voice_errors(decision)]
+        duplicate_errors = [] if task["execution_profile"].startswith("bounded_") else duplicate_voice_errors(decision)
+        metadata_errors = [*web_metadata_errors(packet, decision), *duplicate_errors]
         if metadata_errors:
             compilation_errors.extend(f'[{packet["topic"]}] {error}' for error in metadata_errors)
             continue

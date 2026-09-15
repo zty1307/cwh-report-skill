@@ -205,12 +205,15 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                                published_at_verified_from_source=True, viewpoint_cluster_key=claim["cluster"], formal_use="selected")
                     speaker_key = re.sub(r"\s+", "", claim["speaker"]).casefold()
                     if speaker_key in seen_speakers:
-                        if seen_speakers[speaker_key] != claim["cluster"]:
+                        different_cluster = seen_speakers[speaker_key] != claim["cluster"]
+                        if different_cluster and not profile.startswith("bounded_"):
                             raise ValueError("One speaker assigned to different clusters needs semantic consolidation")
                         # Keep one formal voice in the author's supplied order;
                         # preserve later statements without merging or certifying.
                         row.update(formal_use="reserve", reserve_reason="同一主体在同一观点簇已按作者顺序选入；扩展观点保留审核，不重复增加正式声音",
                                    semantic_claim=copy.deepcopy(claim))
+                        if different_cluster:
+                            row["reserve_reason"] = "限时档同一主体已按作者排序选入首个正式声音；跨簇后续观点保留待选审计，不重复成文、不合并或改写观点"
                         candidates.append(row)
                         query["retained_candidate_ids"].append(candidate_id)
                         continue
