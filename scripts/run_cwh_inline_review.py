@@ -132,7 +132,8 @@ def compact_hotword_packet(packet: dict) -> dict:
 
 def response_object(log: str) -> dict:
     from cwh_json_transport import (insert_single_missing_member_comma,
-        normalize_single_smart_quoted_member_key, remove_single_stray_period_before_string_value)
+        normalize_single_smart_quoted_member_key, remove_single_stray_period_before_string_value,
+        single_fenced_json)
     parse_failures = []
     def parse(value):
         if isinstance(value, dict):
@@ -147,6 +148,11 @@ def response_object(log: str) -> dict:
                     return found
         if isinstance(value, str):
             text = value.strip()
+            framed = single_fenced_json(text)
+            if framed is not None:
+                return parse(framed)
+            if text.startswith('```') and (not text.endswith('```') or text.count('```') != 2):
+                return None
             if text.startswith("```") and text.endswith("```"):
                 text = "\n".join(text.splitlines()[1:-1])
             try:
@@ -168,6 +174,12 @@ def response_object(log: str) -> dict:
                                               f"column {exc.colno}, char {exc.pos}; data context={context}")
                 return parse(repaired) if repaired is not None else None
         return None
+    if log.strip().startswith('```'):
+        found = parse(log)
+        if found:
+            return found
+        detail = '; ' + parse_failures[-1] if parse_failures else ''
+        raise ValueError('Ambiguous or invalid fenced review JSON' + detail)
     try:
         found = parse(load_framed_json(log))
         if found:

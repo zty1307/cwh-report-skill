@@ -176,6 +176,34 @@ def escape_cjk_internal_quotes(text):
     return result
 
 
+def single_fenced_json(text):
+    """Decode one intact initial JSON fence; never choose between answers."""
+    stripped = text.strip()
+    match = re.fullmatch(r'```(?:json)?[ \t]*\r?\n(.*?)\r?\n```[ \t]*(?:\r?\n(.*))?',
+                         stripped, re.DOTALL | re.IGNORECASE)
+    if not match or stripped.count('```') != 2:
+        return None
+    outside = match.group(2) or ''
+    if any(char in outside for char in '{}[]`'):
+        return None
+    try:
+        def reject_constant(value):
+            raise ValueError('Non-standard JSON constant')
+        result = json.loads(match.group(1), object_pairs_hook=unique_members,
+                            parse_constant=reject_constant)
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    repairs = result.get('transport_repairs')
+    if repairs is not None and not isinstance(repairs, list):
+        return None
+    result.setdefault('transport_repairs', []).append({
+        'kind': 'decoded_single_complete_json_fence',
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
+    return result
+
+
 def load_framed_json(text: str):
     try:
         return json.loads(text)

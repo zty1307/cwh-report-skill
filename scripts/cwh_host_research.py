@@ -24,6 +24,13 @@ class HostModelError(RuntimeError):
         self.retry_after = retry_after
 
 
+class SemanticResponseError(ValueError):
+    """Completed transport with invalid output, retaining the actual run."""
+    def __init__(self, message, run):
+        super().__init__(message)
+        self.run = run
+
+
 def block_text(value):
     if isinstance(value, str):
         return value
@@ -217,7 +224,10 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
         if category:
             message = f'Model request failed: {category}' + (f'; retry after {retry_after}' if retry_after else '')
         raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after)
-    result = response_object(log)
+    try:
+        result = response_object(log)
+    except ValueError as exc:
+        raise SemanticResponseError(str(exc), run) from exc
     if result.get("blocker"):
         raise HostModelError(str(result["blocker"]), 23)
     result_hash = hashlib.sha256(json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

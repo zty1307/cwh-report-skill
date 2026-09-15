@@ -25,11 +25,10 @@ def test_missing_full_date_gets_one_local_repair_without_inferred_year(monkeypat
     calls = []
     def model(request, prompt, command, workspace, label, timeout, **kwargs):
         calls.append((request, timeout, kwargs))
-        selected = request['topics'][0]['prior_selected']
-        assert selected[0]['repairable_source_fields'] == ['date_quote', 'published_at']
-        patch = copy.deepcopy(decision)
-        patch['items'][0].update(decision='excluded', reason='无原文完整发布日期，留待补取', claims=[])
-        return {'topics': [patch]}, {'session_id': 'actual-local-repair', 'seconds': 1}
+        assert [row['id'] for row in request['items']] == ['w1']
+        assert request['items'][0]['previous_unverified_metadata']['date_quote'] == '01月02日 10:00'
+        assert 'claims' not in request['items'][0]
+        return {'items': [{'id': 'w1', 'decision': 'excluded', 'reason': '无原文完整发布日期，留待补取'}]}, {'session_id': 'actual-local-repair', 'seconds': 1}
     monkeypatch.setattr(worker, 'semantic_json', model)
     result, run = worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 100, 'local')
     assert len(calls) == 1 and calls[0][1] == 45 and not calls[0][2]['reuse_cache']
@@ -42,7 +41,8 @@ def test_missing_full_date_gets_one_local_repair_without_inferred_year(monkeypat
 def test_still_unanchored_date_is_quarantined_not_admitted_after_repair(monkeypatch, tmp_path):
     packet, decision = case()
     monkeypatch.setattr(worker, 'semantic_json', lambda *args, **kwargs:
-                        ({'topics': [copy.deepcopy(decision)]}, {'session_id': 'not-passed'}))
+                        ({'items': [{key: copy.deepcopy(decision['items'][0][key])
+                                     for key in ('id', 'decision', 'reason', 'source', 'published_at', 'date_quote')}]}, {'session_id': 'not-passed'}))
     frozen = copy.deepcopy(decision)
     result, run = worker.repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'local')
     item = result['items'][0]
