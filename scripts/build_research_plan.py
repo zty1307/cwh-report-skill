@@ -138,7 +138,7 @@ def research_queries(topic: str, meeting_date: str) -> dict[str, list[str]]:
         ],
         "academic_and_think_tank_viewpoints": [
             f"site:edu.cn {meeting_date} {subject} 专家 认为 建议",
-            f"{meeting_date} {subject} 研究院 智库 学者 解读",
+            f"{meeting_date} {subject} (研究院 OR 智库 OR 学者 OR 协会 OR 学会) (解读 OR 分析 OR 建议 OR 评论)",
             f"{meeting_date} {subject} 协会 学会 研讨 观点",
         ],
         "finance_and_industry_viewpoints": [

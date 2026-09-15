@@ -6,6 +6,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build_research_plan import load_source_registry, research_queries, stable_source_tasks
 from cwh_host_research import topic_search_tasks
+
+
+def test_academic_discovery_uses_alternative_source_types_not_all_types_at_once():
+    query = research_queries('公共服务政策', '2026-07-31')['academic_and_think_tank_viewpoints'][1]
+    assert '(研究院 OR 智库 OR 学者 OR 协会 OR 学会)' in query
+    assert '(解读 OR 分析 OR 建议 OR 评论)' in query
+    assert '公共服务政策' in query and '2026-07-31' in query
 from run_cwh_compiled_worker import domestic_reading_limits, balanced_fetch_urls
 from prepare_cwh_corpus_index import prepare_corpus_index
 from cwh_model_contract import execution_profile

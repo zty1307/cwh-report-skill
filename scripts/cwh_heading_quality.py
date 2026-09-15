@@ -22,6 +22,36 @@ def repair_runs(packet):
             and isinstance(r.get('session_id'), str) and r['session_id']}
 
 
+def review_retained_headings(analysis, packet, command, workspace, timeout):
+    """Optional compact recheck after claim retention; never reuse old claim IDs."""
+    from cwh_host_research import semantic_json, HostModelError
+    manifest = heading_manifest(analysis)
+    if not manifest or timeout < 25:
+        return packet
+    claims = [{"id": f'e{i}', **{k: ev.get(k, '') for k in
+              ('formal_claim', 'source_excerpt', 'speaker_name', 'speaker_role')}}
+              for i, ev in enumerate((ev for topic in analysis['viewpoints']['by_topic']
+                  for cluster in topic['clusters'] for ev in cluster['evidence']), 1)]
+    try:
+        result, run = semantic_json({'headings': manifest, 'claims': claims},
+            '只复审当前已独立核验观点对应的标题，返回heading_reviews，不修改观点或复做观点审核。'
+            '这些是当前保留和收窄后的观点；原始旧短ID已经作废，按本输入ID审核。\n' + HEADING_REVIEW_PROMPT,
+            command, workspace, 'retained-heading-review', min(90, timeout), reuse_cache=False)
+        reviews = result.get('heading_reviews')
+        ids = [r.get('id') for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else []
+        if (not isinstance(reviews, list) or len(reviews) != len(manifest)
+                or not all(isinstance(identity, str) for identity in ids)
+                or len(ids) != len(manifest) or len(ids) != len(set(ids)) or set(ids) != {r['id'] for r in manifest}):
+            return packet
+        final = copy.deepcopy(packet)
+        final['heading_reviews'] = [{**r, 'reviewer_run_id': run['session_id']} for r in reviews]
+        final['heading_repair_runs'] = [run]
+        final['heading_repair_run'] = run
+        return final
+    except (HostModelError, ValueError, TimeoutError):
+        return packet
+
+
 def repair_overlong_headings(packet, result, command, workspace, timeout):
     """One optional compact call for length/clear style faults, never truncation."""
     from cwh_host_research import semantic_json, HostModelError

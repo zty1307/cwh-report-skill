@@ -104,6 +104,10 @@ def validate_combined(original, repaired, initial, combined):
     digest = hashlib.sha256(json.dumps(initial, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if digest != provenance['earlier_review_sha256'] or initial['source_bundle_sha256'] != provenance['original_source_bundle_sha256']:
         raise ValueError('Initial independent review provenance mismatch')
+    if provenance.get('mode') == 'reviewer_retention_v1':
+        from cwh_review_retention import validate_retention
+        validate_retention(original, repaired, initial, combined)
+        return
     validate_identity(original, repaired, failed)
     rows = {r['evidence_id']: r for r in combined['reviews']}
     for row in initial['reviews']:

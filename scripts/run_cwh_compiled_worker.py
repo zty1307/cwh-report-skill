@@ -23,6 +23,7 @@ from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_re
 from cwh_semantic_repairs import normalize_excluded_claims
 from cwh_semantic_repairs import repair_missing_reasons
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
+from domestic_evidence_mapping import has_ambiguous_meeting_reference
 
 
 def read(path):
@@ -277,6 +278,7 @@ REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原�
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
 REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
 REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
+REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 
 
 def compile_review(analysis, result, run, digest):
@@ -351,7 +353,7 @@ def independent_packet(analysis):
                 if snapshot['source_text'][ev['source_excerpt_start']:ev['source_excerpt_end']] != ev['source_excerpt']:
                     raise ValueError('Frozen source does not contain the exact declared excerpt')
                 claims.append({"id": claim_id, "source_id": short, "topic": topic['topic'],
-                    "reference_expansion_required": bool(re.search(r'(?:本次|这次|此次|该)会议', ev['formal_claim'])),
+                    "reference_expansion_required": has_ambiguous_meeting_reference(ev['formal_claim']),
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
@@ -382,7 +384,13 @@ def verify(task, deadline):
     if Path(repair_path).resolve() not in [Path(p).resolve() for p in task['declared_outputs']]:
         raise ValueError('Repair output must be explicitly declared')
     atomic_write_json(workspace / 'initial_independent_review.json', packet)
-    repaired, revisions = apply_reviewer_narrowing(analysis, result)
+    from cwh_available_delivery import available_delivery
+    use_retention = available_delivery(analysis)
+    if use_retention:
+        from cwh_review_retention import retain_reviewed_content, retention_packet
+        repaired, revisions = retain_reviewed_content(analysis, packet)
+    else:
+        repaired, revisions = apply_reviewer_narrowing(analysis, result)
     from run_cwh_resumable_pipeline import validate_analysis_bundle
     atomic_write_json(Path(repair_path), repaired)
     problems = validate_analysis_bundle(Path(repair_path), [t['topic'] for t in repaired['viewpoints']['by_topic']],
@@ -390,7 +398,12 @@ def verify(task, deadline):
     if problems:
         raise ValueError('Author repair failed draft gate: ' + '; '.join(problems[:5]))
     repaired_hash = hashlib.sha256(Path(repair_path).read_bytes()).hexdigest()
-    combined = reviewer_narrowing_packet(repaired, packet, result, revisions, run, repaired_hash)
+    combined = (retention_packet(repaired, packet, revisions, run, repaired_hash) if use_retention else
+                reviewer_narrowing_packet(repaired, packet, result, revisions, run, repaired_hash))
+    if use_retention and revisions:
+        output(task, combined)  # Keep usable claims if optional heading recheck fails.
+        from cwh_heading_quality import review_retained_headings
+        combined = review_retained_headings(repaired, combined, command, workspace, deadline-time.monotonic()-15)
     output(task, combined)
 
 

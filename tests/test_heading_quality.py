@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_heading_quality import heading_manifest, build_heading_audit, reviewed_display_headings
 from report_rules import enrich_viewpoint_titles
 from cwh_heading_quality import repair_overlong_headings
+from cwh_heading_quality import review_retained_headings
 from unittest.mock import patch
 
 
@@ -35,6 +36,29 @@ def test_heading_manifest_connects_each_heading_to_its_own_claims():
         {'evidence_id': 'real-2', 'formal_claim': '另一观点'}]})
     rows = heading_manifest(data)
     assert [r['claim_ids'] for r in rows] == [['e1', 'e2'], ['e1'], ['e2']]
+
+
+def test_retained_heading_recheck_uses_current_claims_and_real_separate_run():
+    analysis = sample()
+    frozen = copy.deepcopy(analysis)
+    result = {'heading_reviews': packet()['heading_reviews']}
+    with patch('cwh_host_research.semantic_json', return_value=(result, {'session_id': 'actual-heading-run'})) as call:
+        revised = review_retained_headings(analysis, packet(), [], Path('.'), 90)
+    request = call.call_args.args[0]
+    assert request['claims'][0]['formal_claim'] == analysis['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]['formal_claim']
+    assert call.call_args.args[-1] == 90
+    assert call.call_args.kwargs['reuse_cache'] is False
+    assert revised['heading_reviews'][0]['reviewer_run_id'] == 'actual-heading-run'
+    assert analysis == frozen
+
+
+def test_retained_heading_recheck_skips_short_budget_and_rejects_partial_coverage():
+    analysis, earlier = sample(), packet()
+    with patch('cwh_host_research.semantic_json') as call:
+        assert review_retained_headings(analysis, earlier, [], Path('.'), 20) == earlier
+        call.assert_not_called()
+    with patch('cwh_host_research.semantic_json', return_value=({'heading_reviews': []}, {'session_id': 'run'})):
+        assert review_retained_headings(analysis, earlier, [], Path('.'), 40) == earlier
 
 
 def test_supported_replacement_is_display_only_and_preserves_source_audit():

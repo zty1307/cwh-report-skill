@@ -29,6 +29,11 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def has_ambiguous_meeting_reference(value: Any) -> bool:
+    text = re.sub(r'\s+', '', str(value or ''))
+    return bool(re.search(r'(?:本次|这次|此次|该|(?:\d{4}年)?[0-9一二三四五六七八九十]{1,2}月(?:[0-9一二三四五六七八九十]{1,2}日)?)会议', text))
+
+
 def _normalized(value: Any) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")))
 
@@ -234,7 +239,7 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
                         issues.append(_issue("speaker_role_not_in_excerpt", "具名专家的机构或职务未出现在对应原文片段中。", **context))
 
                 formal_claim = _text(evidence.get("formal_claim"))
-                if require_semantic_review and re.search(r'(?:本次|这次|此次|该)会议', formal_claim):
+                if require_semantic_review and has_ambiguous_meeting_reference(formal_claim):
                     issues.append(_issue("ambiguous_meeting_reference", "正式观点含未展开的会议指称；须依据原文明确实际会议名称，不能由宿主猜测替换。", **context))
                 if not formal_claim:
                     issues.append(_issue("formal_claim_missing", "成文观点缺少正式报告表述。", **context))

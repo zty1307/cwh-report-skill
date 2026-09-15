@@ -49,7 +49,7 @@
     "mature_cluster_voice_range": [2, 4],
     "topic_cluster_range": [2, 4],
     "assembly": "one_speaker_one_sentence",
-    "meeting_reference_rule": "正式观点不用裸‘本次会议’‘此次会议’‘这次会议’‘该会议’，按原文明确实际会议名称。相关背景会议可作本期议程背景，但不冒充国务院常务会议的新决定；不按报告标题统一替换，也不删去对象掩盖区别。",
+    "meeting_reference_rule": "正式观点不用裸‘本次会议’‘此次会议’‘这次会议’‘该会议’，也不以只有年月的‘某月会议’冒充实际会议名称。按原文明确真实对象；原文无法确认会议名称就不补名，排除该条正式选材并留档。相关背景会议可作本期议程背景，但不冒充国务院常务会议的新决定；不按报告标题统一替换，也不删去对象掩盖区别。",
     "source_order": ["named_expert", "authoritative_media", "industry_institution", "public_account", "other_traceable_source"],
     "source_type_classes": {
       "central_media": "authoritative_media", "mainstream_media": "authoritative_media", "official_media": "authoritative_media",
