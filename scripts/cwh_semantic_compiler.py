@@ -29,6 +29,26 @@ def query_domains(query):
     return re.findall(r"site:([A-Za-z0-9.-]+)", query)
 
 
+def normalize_web_publication_dates(packet, decision):
+    """Canonicalize a valid ISO timestamp, never infer or replace a source date."""
+    from datetime import datetime
+    result = copy.deepcopy(decision)
+    web_ids = {row["id"] for row in packet["items"] if row.get("origin") == "web"}
+    for choice in result.get("items") or []:
+        value = choice.get("published_at")
+        if choice.get("id") not in web_ids or not isinstance(value, str):
+            continue
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?", value):
+            continue
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        choice.setdefault("author_published_at", value)
+        choice["published_at"] = value[:10]
+    return result
+
+
 def web_metadata_errors(packet, decision):
     choices = {row.get("id"): row for row in decision.get("items") or []}
     errors = []

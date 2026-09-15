@@ -12,6 +12,7 @@ from cwh_host_research import collect_topic, semantic_json, HostModelError
 from cwh_public_reader import read_public_pages
 from cwh_semantic_compiler import AUTHOR_PROMPT, make_packet, compile_topic
 from cwh_semantic_compiler import web_metadata_errors
+from cwh_semantic_compiler import normalize_web_publication_dates
 from cwh_semantic_compiler import exclude_certain_period_misses
 from cwh_semantic_compiler import duplicate_voice_errors
 from run_cwh_batched_viewpoints import merge_topic_bundles
@@ -167,7 +168,8 @@ def author(task, deadline):
     decisions = normalize_excluded_claims(decisions)
     if len(decisions) != len(packets) or {d.get("topic") for d in decisions} != {p["topic"] for p in packets}:
         raise ValueError("Each requested topic requires exactly one semantic decision bundle")
-    decisions = [exclude_certain_period_misses(next(p for p in packets if p["topic"] == d["topic"]), d) for d in decisions]
+    decisions = [exclude_certain_period_misses(next(p for p in packets if p["topic"] == d["topic"]),
+                 normalize_web_publication_dates(next(p for p in packets if p["topic"] == d["topic"]), d)) for d in decisions]
     atomic_write_json(checkpoint, {"source_packet_sha256": packet_hash, "decisions": decisions, "run": run,
         "decisions_sha256": hashlib.sha256(json.dumps(decisions, ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
     compilation_errors = []

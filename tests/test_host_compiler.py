@@ -430,3 +430,19 @@ def test_query_cache_rederives_results_and_checks_log_hash(tmp_path, monkeypatch
     Path(first["host_run"]["log"]).write_text("tampered", encoding="utf-8")
     collect_topic(plan, period, [], tmp_path, 10)
     assert len(calls) == 2
+def test_web_timestamp_format_is_canonicalized_without_guessing_or_touching_raw_dates():
+    from cwh_semantic_compiler import normalize_web_publication_dates, web_metadata_errors
+    packet = {"period": {"start": "2026-07-31", "end": "2026-08-03"},
+        "items": [{"id": "w1", "origin": "web", "content": "新华社 2026-07-31 21:56"},
+                  {"id": "r1", "origin": "raw_monitoring"}]}
+    decision = {"items": [{"id": "w1", "decision": "eligible", "source": "新华社",
+        "published_at": "2026-07-31 21:56", "date_quote": "2026-07-31 21:56"},
+        {"id": "r1", "published_at": "2026-07-31 21:56"}]}
+    result = normalize_web_publication_dates(packet, decision)
+    assert result["items"][0]["published_at"] == "2026-07-31"
+    assert result["items"][0]["author_published_at"] == "2026-07-31 21:56"
+    assert result["items"][1]["published_at"] == "2026-07-31 21:56"
+    assert not web_metadata_errors(packet, result)
+    assert decision["items"][0]["published_at"] == "2026-07-31 21:56"
+    result["items"][0]["date_quote"] = "2026-08-01 21:56"
+    assert web_metadata_errors(packet, result)
