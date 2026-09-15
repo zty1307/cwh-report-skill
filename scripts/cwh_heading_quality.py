@@ -44,6 +44,7 @@ def repair_runs(packet):
     rows = packet.get('heading_repair_runs')
     rows = list(rows) if isinstance(rows, list) else []
     rows.append(packet.get('heading_repair_run'))
+    rows.append(packet.get('heading_original_run'))
     return {r['session_id']: r for r in rows if isinstance(r, dict)
             and isinstance(r.get('session_id'), str) and r['session_id']}
 
@@ -174,6 +175,7 @@ def build_heading_audit(analysis, packet):
     audit = {'version': '1.0', 'input_sha256': heading_input_digest(analysis),
              'reviewer_run_id': packet.get('reviewer_run_id'), 'reviews': copy.deepcopy(supplied or []),
              'heading_repair_run': packet.get('heading_repair_run'),
+             'heading_original_run': packet.get('heading_original_run'),
              'heading_repair_runs': packet.get('heading_repair_runs') or [],
              'approved': approved, 'fallbacks': fallbacks, 'warnings': warnings}
     duplicates = cross_topic_exact_duplicate_groups(analysis)
@@ -257,6 +259,7 @@ def reviewed_display_headings(data):
         return {}
     packet = {'heading_reviews': audit.get('reviews'), 'reviewer_run_id': audit['reviewer_run_id'],
               'heading_repair_run': audit.get('heading_repair_run'),
+              'heading_original_run': audit.get('heading_original_run'),
               'heading_repair_runs': audit.get('heading_repair_runs') or [],
               'reviews': [{'evidence_id': ev['evidence_id'],
                            'verdict': (ev.get('semantic_review') or {}).get('verdict')}

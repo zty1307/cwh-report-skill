@@ -64,6 +64,17 @@ def test_missing_policy_scope_confirmation_uses_original_topic_not_first_cluster
     assert [r['id'] for r in build_heading_audit(data, review)['approved']] == ['h2']
 
 
+def test_body_field_retry_cannot_restamp_original_heading_reviewer():
+    data, review = sample(), packet()
+    review['reviewer_run_id'] = 'new-body-review-run'
+    review['heading_original_run'] = {'session_id': 'original-heading-run'}
+    for row in review['heading_reviews']:
+        row['reviewer_run_id'] = 'original-heading-run'
+    data['research_audit'] = {'heading_quality': build_heading_audit(data, review)}
+    assert {row['reviewer_run_id'] for row in data['research_audit']['heading_quality']['approved']} == {'original-heading-run'}
+    assert len(reviewed_display_headings(data)) == 2
+
+
 def test_exact_cross_topic_duplicate_detection_never_guesses_routes_or_merges_homonyms():
     from cwh_heading_quality import cross_topic_exact_duplicate_groups
     ev = {'evidence_id': 'a', 'speaker_name': '某专家', 'speaker_role': '原文职务',

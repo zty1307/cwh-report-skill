@@ -403,6 +403,7 @@ REVIEW_PROMPT = '''独立核验每条formal_claim是否被同条excerpt_segments
 返回且只返回{"reviews":[{"id":"输入短ID","verdict":"fully_supported|partially_supported|unsupported|uncertain","rationale":"一句具体理由","revision":null或{"formal_claim":"45至120汉字的完整忠实观点","verdict":"fully_supported","rationale":"一句说明重组后为何被原文完整支持"}}]}，每个ID恰好一次。原观点fully_supported时revision必须为null；否则revision必须是对象：只从同一excerpt中删除越界内容、纠正主客体方向或重新组织明确受支持的信息，形成45至120汉字的完整观点；不得新增事实、改变发言主体，也不得因原句删短就返回null。对revision再次逐项核对，只有确认为fully_supported才提交。
 判断前须检查观点中的每个事实、因果、效果、程度、数字、限定词、发言主体和职务；任何一部分缺乏支持都不能判fully_supported。媒体自身评论可按source元数据核对媒体名，但不得把其引用人物冒充媒体观点。只允许依据同条excerpt_segments；宿主负责逐字引用、位置、哈希、命题覆盖和时间。'''
 REVIEW_PROMPT += '\n' + HEADING_REVIEW_PROMPT
+REVIEW_PROMPT += '\n每条reviews.rationale必须为非空字符串，fully_supported也要说明原文具体支持什么以及范围、强度是否一致，严禁填null或空串。revision=null仅表示没有修订，不表示审核理由可以省略。'
 REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
 REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
@@ -416,6 +417,10 @@ def compile_review(analysis, result, run, digest):
     evidence = [(topic["topic"], e) for topic in analysis["viewpoints"]["by_topic"] for cl in topic["clusters"] for e in cl["evidence"]]
     candidates = {(pool["topic"], c["candidate_id"]): c for pool in analysis["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"] for c in pool["candidates"]}
     by_short = {f"e{n}": row for n, row in enumerate(evidence, 1)}
+    from cwh_review_fields import review_field_errors
+    invalid_fields = review_field_errors(result, by_short)
+    if invalid_fields:
+        raise ValueError('Invalid independent review fields: ' + json.dumps(invalid_fields, ensure_ascii=False))
     ids = [r.get("id") for r in result.get("reviews") or []]
     if len(ids) != len(set(ids)) or set(ids) != set(by_short):
         raise ValueError("Independent reviewer must assess each evidence exactly once")
@@ -465,6 +470,9 @@ def compile_review(analysis, result, run, digest):
         packet['heading_repair_run'] = result['heading_repair_run']
     if 'heading_repair_runs' in result:
         packet['heading_repair_runs'] = result['heading_repair_runs']
+    for key in ('heading_original_run', 'review_field_retry'):
+        if key in result:
+            packet[key] = json.loads(json.dumps(result[key]))
     return packet
 
 
@@ -505,6 +513,11 @@ def verify(task, deadline):
         command, workspace, "independent-review", deadline-time.monotonic())
     result.pop('heading_repair_run', None)
     result.pop('heading_repair_runs', None)
+    result.pop('heading_original_run', None)
+    result.pop('review_field_retry', None)
+    from cwh_review_fields import retry_invalid_review_fields
+    result, run = retry_invalid_review_fields(request_packet, result, run,
+        REVIEW_PROMPT.replace(HEADING_REVIEW_PROMPT, ''), command, workspace, deadline-time.monotonic()-15)
     result = repair_overlong_headings(request_packet, result, command, workspace, deadline-time.monotonic()-15)
     packet = compile_review(analysis, result, run, digest)
     output(task, packet)  # Preserve rejection even if a later repair times out.
@@ -532,6 +545,8 @@ def verify(task, deadline):
     repaired_hash = hashlib.sha256(Path(repair_path).read_bytes()).hexdigest()
     combined = (retention_packet(repaired, packet, revisions, run, repaired_hash) if use_retention else
                 reviewer_narrowing_packet(repaired, packet, result, revisions, run, repaired_hash))
+    if packet.get('review_field_retry'):
+        combined['review_field_retry'] = packet['review_field_retry']
     if use_retention and revisions:
         output(task, combined)  # Keep usable claims if optional heading recheck fails.
         from cwh_heading_quality import review_retained_headings

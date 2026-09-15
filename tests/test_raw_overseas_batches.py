@@ -84,6 +84,25 @@ def test_no_budget_never_calls_vendor(tmp_path, monkeypatch):
     assert error.value.code == 124 and not calls
 
 
+@pytest.mark.parametrize('span', ['[o1/1, o1/2]', '["o1/1", "o1/2"]'])
+def test_stringified_pair_changes_only_encoding_and_keeps_exact_source(span):
+    source = packet()
+    native = {'items': [{'record_id': 'row-0', 'decision': 'include', 'interpretive_range': span}]}
+    frozen = copy.deepcopy((source, native))
+    resolved = worker.resolve_overseas_spans(source, native)['items'][0]
+    assert resolved['interpretive_range'] == ['o1/1', 'o1/2']
+    assert resolved['interpretive_excerpt'] == source['items'][0]['content']
+    assert resolved['transport_repairs'][0] == {'reason': 'lossless_stringified_segment_pair', 'original_interpretive_range': span}
+    assert (source, native) == frozen
+
+
+@pytest.mark.parametrize('span', ['[o1/2, o1/1]', '[o1/1, o2/2]', '[o1/1, o1/999]',
+    '[o1/1, o1/2, o1/2]', '[1,2]', '[o1/1, o1/2] trailing'])
+def test_stringified_range_never_guesses_ids_order_or_source(span):
+    with pytest.raises(ValueError):
+        worker.resolve_overseas_spans(packet(), {'items': [{'record_id': 'row-0', 'interpretive_range': span}]})
+
+
 @pytest.mark.parametrize('kind', ['public_top', 'overseas'])
 def test_batch_tail_never_gives_public_top_foreign_summary_instructions(tmp_path, monkeypatch, kind):
     calls, prompts = [], []

@@ -28,7 +28,8 @@ def overseas_span_packet(packet):
     result = copy.deepcopy(packet)
     result["instructions"] = [
         ("解读性报道须明确interpretive_verified=true并填写本条interpretive_segments的连续范围interpretive_range，"
-         "格式为[起始片段ID,结束片段ID]，单片段也写两个相同ID；"
+         '字段须为两个字符串的JSON数组，例如["本条起始ID","本条结束ID"]，不是带方括号的整段字符串；单片段也写两个相同ID；'
+         "ID逐字复制本条interpretive_segments，不据record_id或原始行号猜编号；"
          "不要输出摘录正文，宿主按片段范围逐字提取interpretive_excerpt，不能跨条引用。")
         if "interpretive_excerpt" in instruction else instruction
         for instruction in result.get("instructions", [])
@@ -61,14 +62,20 @@ def resolve_overseas_spans(packet, result):
             number, source = sources[row["record_id"]]
             original_span = copy.deepcopy(span)
             if isinstance(span, str):
-                span = [span, span]
+                try:
+                    decoded = json.loads(span)
+                except json.JSONDecodeError:
+                    match = re.fullmatch(r'\[\s*(o[1-9][0-9]*/[1-9][0-9]*)\s*,\s*(o[1-9][0-9]*/[1-9][0-9]*)\s*\]', span)
+                    decoded = list(match.groups()) if match else None
+                span = decoded if isinstance(decoded, list) else [span, span]
             elif isinstance(span, list) and len(span) == 1:
                 span = [span[0], span[0]]
             quote, start, end = selected_quote(source.get("content", ""), span, f"o{number}", "sentence_v2")
             if span != original_span:
                 row["interpretive_range"] = span
                 row.setdefault("transport_repairs", []).append({
-                    "reason": "lossless_single_segment_range", "original_interpretive_range": original_span})
+                    "reason": ("lossless_stringified_segment_pair" if isinstance(original_span, str) and original_span.lstrip().startswith('[')
+                               else "lossless_single_segment_range"), "original_interpretive_range": original_span})
             row["interpretive_excerpt"] = quote
             row["interpretive_source_span"] = {"start": start, "end": end, "scheme": "sentence_v2"}
     return result
