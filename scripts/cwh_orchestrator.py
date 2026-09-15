@@ -3287,6 +3287,7 @@ def build_system_audit(
     samples: list[dict[str, Any]],
     collection_gaps: list[str],
     viewpoints: dict[str, Any],
+    analysis_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gaps = list(collection_gaps)
     blockers: list[str] = []
@@ -3386,7 +3387,9 @@ def build_system_audit(
             "同一子议题的评论存在多个并列小标题；须由AI填写唯一topic_comment_heading后再成稿："
             + "、".join(inconsistent_comment_topics) + "。"
         )
-    viewpoint_quality_issues = domestic_viewpoint_quality_issues({"viewpoints": viewpoints})
+    viewpoint_quality_issues = domestic_viewpoint_quality_issues({
+        "viewpoints": viewpoints, "metadata": analysis_metadata or {},
+    })
     viewpoint_quality_errors = [
         item for item in viewpoint_quality_issues if item.get("severity") == "error"
     ]
@@ -3679,7 +3682,8 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
     appendices = build_appendices(samples, overseas, selected_comments)
     targets = collection_targets(args, topics)
     if system_data:
-        audit = build_system_audit(system_data, samples, collection_gaps, viewpoints)
+        audit = build_system_audit(system_data, samples, collection_gaps, viewpoints,
+                                   analysis_bundle.get("metadata"))
         if not (analysis_bundle.get("viewpoints") or {}).get("by_topic"):
             message = "正式系统报告缺少经过公开网络研究和AI审核的analysis_bundle.json。"
             audit.setdefault("data_gaps", []).append(message)

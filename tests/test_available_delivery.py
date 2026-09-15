@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_available_delivery import prepare_available_delivery, valid_gap, available_delivery
 from domestic_evidence_mapping import validate_analysis_mapping
 from report_rules import domestic_viewpoint_quality_issues
+from cwh_orchestrator import build_system_audit
 
 
 def material():
@@ -33,6 +34,15 @@ def test_unmapped_eligible_candidate_cannot_be_excused_as_missing_evidence():
     original = material()
     original["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"][0]["candidates"] = [{"candidate_id": "c1", "decision": "eligible"}]
     assert not valid_gap(prepare_available_delivery(original)["viewpoints"]["by_topic"][0])
+
+
+def test_final_audit_reports_honest_gap_as_warning_not_fabricated_stance_error():
+    data = prepare_available_delivery(material())
+    audit = build_system_audit({}, [], [], data["viewpoints"], data["metadata"])
+    issues = audit["quality_summary"]["domestic_viewpoint_quality_issues"]
+    assert any(i["code"] == "domestic_interpretation_gap" for i in issues)
+    assert all(i["severity"] == "warning" for i in issues)
+    assert audit["acceptance"]["ready_for_formal_delivery"] is False
 
 
 def test_missing_research_does_not_create_zero_result_exception():
