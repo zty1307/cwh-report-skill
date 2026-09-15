@@ -103,3 +103,5 @@ def test_comment_author_and_reviewer_share_context_boundary_rule():
                    comments.QUOTE_REVIEW_PROMPT):
         assert '不要求评论重复完整政策名称' in prompt
         assert '抽象积极表态不能靠父帖补成实质观点' in prompt
+        assert '不能把标题写成政策A导致B进而影响C' in prompt
+        assert '标题保留原话的真实条件B即可' in prompt
