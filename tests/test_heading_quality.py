@@ -128,3 +128,5 @@ def test_factual_certified_heading_is_not_given_an_invented_stance():
     data['research_audit'] = {'heading_quality': build_heading_audit(data, review)}
     enrich_viewpoint_titles(data)
     assert data['viewpoints']['by_topic'][0]['heading'] == '公共服务部门公布布局调整规则'
+    enrich_viewpoint_titles(data)
+    assert data['viewpoints']['by_topic'][0]['heading'] == '公共服务部门公布布局调整规则'

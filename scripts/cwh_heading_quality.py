@@ -146,14 +146,27 @@ def reviewed_display_headings(data):
     """Return only a current, complete host-recompiled audit; stale data is inert."""
     research = data.get('research_audit') or (data.get('analysis_bundle') or {}).get('research_audit') or {}
     audit = research.get('heading_quality') or {}
-    if not audit.get('reviewer_run_id') or audit.get('input_sha256') != heading_input_digest(data):
+    if not audit.get('reviewer_run_id'):
+        return {}
+    original = {'viewpoints': copy.deepcopy(data.get('viewpoints') or {})}
+    try:
+        for row in (audit.get('approved') or []) + (audit.get('fallbacks') or []):
+            topic = original['viewpoints']['by_topic'][row['topic_index']]
+            target = topic if row['cluster_index'] is None else topic['clusters'][row['cluster_index']]
+            field = 'heading' if row['cluster_index'] is None else 'summary'
+            if target.get(field) not in (row['text'], row['display_text']):
+                return {}
+            target[field] = row['text']
+        if audit.get('input_sha256') != heading_input_digest(original):
+            return {}
+    except (KeyError, IndexError, TypeError):
         return {}
     packet = {'heading_reviews': audit.get('reviews'), 'reviewer_run_id': audit['reviewer_run_id'],
               'heading_repair_run': audit.get('heading_repair_run'),
               'reviews': [{'evidence_id': ev['evidence_id'],
                            'verdict': (ev.get('semantic_review') or {}).get('verdict')}
                           for topic in data['viewpoints']['by_topic'] for cl in topic['clusters'] for ev in cl['evidence']]}
-    rebuilt = build_heading_audit(data, packet)
+    rebuilt = build_heading_audit(original, packet)
     if rebuilt['approved'] != audit.get('approved') or rebuilt['fallbacks'] != audit.get('fallbacks'):
         return {}
     return {(r['topic_index'], r['cluster_index']): r['display_text'] for r in rebuilt['approved'] + rebuilt['fallbacks']}
