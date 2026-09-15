@@ -90,7 +90,7 @@ def repair_missing_reasons(packet, decision, command, workspace, timeout):
     for attempt in range(2):
         requested = wanted - set(reasons)
         remaining = deadline - time.monotonic()
-        if remaining < 15:
+        if remaining <= 0 or (attempt and remaining < 15):
             break
         response, run = semantic_json({'topic': packet['topic'],
             'agenda_topics': packet.get('agenda_topics', []),

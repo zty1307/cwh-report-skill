@@ -88,6 +88,18 @@ def test_reason_cache_namespace_is_topic_specific(monkeypatch, tmp_path):
     assert labels[0] != labels[1]
 
 
+def test_exact_minimum_budget_allows_first_call_without_extending_deadline(monkeypatch, tmp_path):
+    packet, decision = fixture()
+    calls = []
+    def model(request, prompt, command, workspace, label, timeout, **kwargs):
+        calls.append(timeout)
+        return {'items': [{'id': 'r1', 'reason': '原文机制'}]}, {'session_id': 'native'}
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    result, run = repair_missing_reasons(packet, decision, [], tmp_path, 15)
+    assert 0 < calls[0] <= 15
+    assert result['items'][0]['reason'] == '原文机制'
+
+
 def test_plain_timestamp_source_header_excludes_outside_period_without_editing_source():
     content = '文章标题\n2026-08-13 17:07\n来源：\n真实媒体\n正文含2026年8月15日施行。'
     evidence = labeled_publication_date(content)
