@@ -56,8 +56,8 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared
                  for x in candidates}
         ranked = sorted(candidates, key=lambda x: (
             -hints[str(x['record_id'])],
-            -bool(re.search("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             -max((len(str(alias)) for alias in aliases if str(alias) and str(alias) in str(x.get("title", ""))), default=0),
+            -bool(re.search("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             -len(re.findall("解读|专家|认为|指出|意味着|如何", str(x.get("title", "")))),
             len(str(x.get("title", ""))), str(x.get("record_id", ""))))
         sources = {}

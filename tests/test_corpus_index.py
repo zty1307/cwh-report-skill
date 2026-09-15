@@ -40,7 +40,7 @@ def test_reading_prioritizes_analysis_titles_and_delays_identical_fact_titles(tm
     data = corpus()
     data['candidates'][0]['title'] = '议题发布要点'
     data['candidates'][1]['title'] = '议题发布要点'
-    data['candidates'][2]['title'] = '专家解读另一种表达'
+    data['candidates'][2]['title'] = '专家解读议题另一种表达'
     source = tmp_path / 'public_article_evidence.json'
     source.write_text(json.dumps(data), encoding='utf-8')
     index = json.loads(prepare_corpus_index(source, data, ['议题']).read_text('utf-8'))

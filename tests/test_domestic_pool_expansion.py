@@ -57,6 +57,20 @@ def test_ten_page_slots_cover_ten_observed_queries_before_second_results():
     assert balanced_fetch_urls(obs, 10) == [f'a{i}' for i in range(10)]
 
 
+def test_specific_policy_title_is_read_before_generic_weekend_market_analysis(tmp_path):
+    corpus = {'candidates': [
+        {'record_id': 'market', 'source': '甲账号', 'title': '周末消息解读，下周交易策略分享',
+         'topic_hits': [1], 'content': '新闻之一提到公共服务布局；正文其余部分讨论其他市场信息。'},
+        {'record_id': 'policy', 'source': '乙账号', 'title': '公共服务布局的实施安排',
+         'topic_hits': [1], 'content': '公共服务布局的具体原文，阅读优先不代表独立解读合格。'}]}
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(corpus, ensure_ascii=False), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, corpus, ['公共服务布局']).read_text('utf-8'))
+    assert [row['record_id'] for row in index['topics'][0]['shortlist']] == ['policy', 'market']
+    assert set(index['topics'][0]['record_ids']) == {'policy', 'market'}
+    assert json.loads(source.read_text('utf-8')) == corpus
+
+
 def test_month_day_header_cannot_borrow_year_from_body_or_url():
     packet = {'period': {'start': '2026-07-31', 'end': '2026-08-03'},
               'items': [{'id': 'w1', 'origin': 'web', 'content': '某报07-31 19:16\n2026年项目开始建设。',
