@@ -1973,15 +1973,22 @@ def main() -> None:
     args = parser().parse_args()
     job_dir = Path(args.job_dir)
     state_path = job_dir / "pipeline_state.json"
+    if args.action == "status":
+        if not state_path.is_file():
+            raise FileNotFoundError('No saved pipeline state; status does not initialize a job: ' + str(state_path))
+        state = read_json(state_path)
+        if state.get('status') != 'succeeded' and isinstance(state.get('budget_started_epoch'), (int, float)):
+            state['wall_clock_elapsed_seconds'] = round(max(0, time.time()-state['budget_started_epoch']), 3)
+        output = state if args.output_format == "full" else cli_state_summary(state, job_dir)
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return  # Read-only query success is not workflow completion.
     if state_path.exists():
         existing = read_json(state_path)
         contract = existing.get("input_contract") or {}
     else:
         contract = contract_from_args(args)
     pipeline = CwhPipeline(job_dir, contract)
-    if args.action == "status":
-        state = pipeline.runner.state
-    elif args.action == "invalidate":
+    if args.action == "invalidate":
         if not args.invalidate_from:
             raise ValueError("--invalidate-from is required for invalidate")
         pipeline.runner.invalidate_from(args.invalidate_from, reason="operator_requested")

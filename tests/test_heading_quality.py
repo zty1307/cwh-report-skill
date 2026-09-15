@@ -157,6 +157,17 @@ def test_clear_repetition_and_multi_center_style_faults_share_one_small_repair()
     assert model.call_count == 1
 
 
+def test_source_label_heading_requests_semantic_repair_not_mechanical_deletion():
+    data, review = sample(), packet()
+    review['heading_reviews'][0]['replacement']['text'] = '认为机构解读公共服务改善机制'
+    request = {'headings': heading_manifest(data), 'claims': [{'id': 'e1', 'formal_claim': '原观点'}], 'sources': []}
+    frozen = copy.deepcopy(review)
+    with patch('cwh_host_research.semantic_json', return_value=({'heading_reviews': []}, {'session_id': 'actual'})) as model:
+        assert repair_overlong_headings(request, review, [], Path('.'), 30) == frozen
+    assert len(model.call_args.args[0]['headings']) == 1
+    assert '来源标签或审核动作代替具体判断' in model.call_args.args[0]['headings'][0]['style_faults']
+
+
 def test_heading_replay_preserves_real_prior_repair_provenance():
     data, review = sample(), packet()
     review['heading_repair_run'] = {'session_id': 'earlier-real'}

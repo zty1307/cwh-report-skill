@@ -290,6 +290,21 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         self.assertNotIn("一是事实性报道", text)
         self.assertNotIn("二是解读性报道", text)
 
+    def test_redundant_report_attribution_is_removed_but_real_source_chain_is_kept(self) -> None:
+        import copy
+        data = {'appendices': {'overseas_reports': [{
+            'source': '媒体乙', 'title_cn': '政策解读', 'url': 'https://example.test/interpretive',
+            'summary_cn': '报道认为，政策有望改善公共服务覆盖。',
+            'overseas_category': '解读性报道', 'formal_include': True, 'meeting_relevance': True}]}}
+        frozen = copy.deepcopy(data)
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
+        self.assertNotIn('认为，报道认为', text)
+        self.assertIn('认为，政策有望改善公共服务覆盖', text)
+        self.assertEqual(frozen, data)
+        data['appendices']['overseas_reports'][0]['summary_cn'] = '报道引述研究机构认为，政策效果仍取决于资金安排。'
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
+        self.assertIn('引述研究机构认为', text)
+
     def test_missing_workbook_category_never_silently_defaults_to_factual(self) -> None:
         with self.assertRaisesRegex(ValueError, "不能静默默认为事实性报道"):
             ORCHESTRATOR.build_system_reviewed_overseas(

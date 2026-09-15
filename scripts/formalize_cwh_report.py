@@ -1231,7 +1231,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
             source = formal_overseas_source(row)
             title = str(row.get("_formal_title_cn") or "").strip()
             summary = clean_sentence(row.get("_formal_summary_cn"))
-            summary = re.sub(r"^(?:文章)?(?:认为|指出|称)[，,:：\s]*", "", summary)
+            summary = re.sub(r"^(?:文章|报道)?(?:认为|指出|称)[，,:：\s]*", "", summary)
             if row.get("_formal_category") == "借题炒作/风险解读":
                 descriptions.append(f"{source}文章《{title}》{summary}")
             else:
