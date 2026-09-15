@@ -1,5 +1,6 @@
 import copy
 import sys
+import pytest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_heading_quality import heading_manifest, build_heading_audit, reviewed_display_headings
@@ -220,6 +221,18 @@ def test_source_label_heading_requests_semantic_repair_not_mechanical_deletion()
         assert repair_overlong_headings(request, review, [], Path('.'), 30) == frozen
     assert len(model.call_args.args[0]['headings']) == 1
     assert '来源标签或审核动作代替具体判断' in model.call_args.args[0]['headings'][0]['style_faults']
+
+
+@pytest.mark.parametrize('text', ['认为公共服务被解读为协同保障', '认为保护与发展双赢的空间配置判断'])
+def test_introduction_style_heading_uses_existing_single_optional_repair(text):
+    data, review = sample(), packet()
+    review['heading_reviews'][0]['replacement']['text'] = text
+    request = {'headings': heading_manifest(data), 'claims': [{'id': 'e1', 'formal_claim': '原观点'}], 'sources': []}
+    frozen = copy.deepcopy(review)
+    with patch('cwh_host_research.semantic_json', return_value=({'heading_reviews': []}, {'session_id': 'actual'})) as model:
+        assert repair_overlong_headings(request, review, [], Path('.'), 30) == frozen
+    assert model.call_count == 1 and len(model.call_args.args[0]['headings']) == 1
+    assert any('介绍解读过程' in fault for fault in model.call_args.args[0]['headings'][0]['style_faults'])
 
 
 def test_heading_replay_preserves_real_prior_repair_provenance():

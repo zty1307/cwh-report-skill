@@ -101,6 +101,8 @@ def repair_overlong_headings(packet, result, command, workspace, timeout):
             faults.append('标题过长')
         if re.search(r'(?:转向|转为)[^，。]{0,8}转变', text):
             faults.append('转向转变表达重复')
+        if '被解读为' in text or re.search(r'(?:认为|认可|支持|建议|期待).*(?:的|配置)判断$', text):
+            faults.append('介绍解读过程或判断标签代替具体判断；须核对原论断，不机械删词')
         verbs = '|'.join(re.escape(v) for v in writing_rules()['viewpoint']['attribution_verbs'])
         if re.match(r'^(?:认为|强调|建议|认可|肯定)?(?:机构解读|审慎提示|(?:专家|媒体|机构|舆论)(?:' + verbs + r'))', text):
             faults.append('来源标签或审核动作代替具体判断')
