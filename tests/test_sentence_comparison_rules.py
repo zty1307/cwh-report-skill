@@ -85,7 +85,8 @@ def test_semantic_editorial_categories_cannot_become_a_keyword_veto():
 def test_legacy_author_transport_routes_the_same_cross_period_claim_and_cluster_rules():
     root = Path(__file__).resolve().parents[1]
     rules = copy.deepcopy(writing_rules())
-    keys = ('selection_rule', 'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')
+    keys = ('interpretation_eligibility_rule', 'meeting_reference_rule', 'selection_rule',
+            'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')
     for key in keys:
         rules['viewpoint'][key] = 'configured-' + key
     registry = (root / 'config/source_registry.v1.json').read_text('utf-8')
@@ -93,6 +94,7 @@ def test_legacy_author_transport_routes_the_same_cross_period_claim_and_cluster_
     with patch('cwh_authoring_packet.writing_rules', return_value=rules):
         result = compact_authoring_references(schema, registry, {'topic': '公共服务', 'stable_source_tasks': []})
     assert all('configured-' + key in result['semantic_requirements'] for key in keys)
+    assert not any('只谈消费金融板块受益' in text for text in result['semantic_requirements'])
     assert result['output_shape']['metadata']['meeting_date'].startswith('Only a verified')
 
 
