@@ -19,7 +19,7 @@ def sample():
 def packet():
     return {'reviewer_run_id': 'actual-run', 'reviews': [{'evidence_id': 'real-1', 'verdict': 'fully_supported'}],
             'heading_reviews': [{'id': identity, 'verdict': 'needs_revision',
-                'rationale': '原文为建议，未说效果已实现。', 'supporting_claim_ids': ['e1'],
+                'rationale': '原文为建议，未说效果已实现。', 'supporting_claim_ids': ['e1'], 'scope_preserved': True,
                 'replacement': {'text': '建议按需求优化布局并保留服务覆盖', 'verdict': 'supported',
                                 'rationale': '原文明确支持调整建议与覆盖条件。'}} for identity in ('h1', 'h2')]}
 
@@ -36,6 +36,49 @@ def test_heading_manifest_connects_each_heading_to_its_own_claims():
         {'evidence_id': 'real-2', 'formal_claim': '另一观点'}]})
     rows = heading_manifest(data)
     assert [r['claim_ids'] for r in rows] == [['e1', 'e2'], ['e1'], ['e2']]
+
+
+def test_cluster_title_cannot_cover_only_one_of_two_retained_members():
+    data = sample()
+    data['viewpoints']['by_topic'][0]['clusters'][0]['evidence'].append({
+        'evidence_id': 'real-2', 'formal_claim': '另一实质判断',
+        'semantic_review': {'verdict': 'fully_supported'}})
+    review = packet()
+    review['reviews'].append({'evidence_id': 'real-2', 'verdict': 'fully_supported'})
+    frozen = copy.deepcopy(data)
+    audit = build_heading_audit(data, review)
+    assert [r['id'] for r in audit['approved']] == ['h1']
+    assert any('未覆盖全部保留成员' in warning for warning in audit['warnings'])
+    assert data == frozen
+    review['heading_reviews'][1]['supporting_claim_ids'] = ['e1', 'e2']
+    assert len(build_heading_audit(data, review)['approved']) == 2
+
+
+def test_missing_policy_scope_confirmation_uses_original_topic_not_first_cluster():
+    data, review = sample(), packet()
+    review['heading_reviews'][0].pop('scope_preserved')
+    audit = build_heading_audit(data, review)
+    assert [r['id'] for r in audit['approved']] == ['h2']
+    assert audit['fallbacks'][0]['display_text'] == data['viewpoints']['by_topic'][0]['topic']
+    review['heading_reviews'][0]['scope_preserved'] = 1
+    assert [r['id'] for r in build_heading_audit(data, review)['approved']] == ['h2']
+
+
+def test_exact_cross_topic_duplicate_detection_never_guesses_routes_or_merges_homonyms():
+    from cwh_heading_quality import cross_topic_exact_duplicate_groups
+    ev = {'evidence_id': 'a', 'speaker_name': '某专家', 'speaker_role': '原文职务',
+          'url': 'https://example.com/article', 'formal_claim': '完全相同的实际判断。'}
+    other = {**ev, 'evidence_id': 'b', 'formal_claim': '完全相同的实际判断'}
+    data = {'viewpoints': {'by_topic': [
+        {'topic': '议题甲', 'clusters': [{'evidence': [ev]}]},
+        {'topic': '议题乙', 'clusters': [{'evidence': [other]}]}]}}
+    frozen = copy.deepcopy(data)
+    groups = cross_topic_exact_duplicate_groups(data)
+    assert groups == [{'claim_ids': ['e1', 'e2'], 'topics': ['议题甲', '议题乙'],
+                       'evidence_ids': ['a', 'b']}]
+    assert data == frozen
+    other['speaker_role'] = '不同职务，不据同名合并'
+    assert cross_topic_exact_duplicate_groups(data) == []
 
 
 def test_retained_heading_recheck_uses_current_claims_and_real_separate_run():

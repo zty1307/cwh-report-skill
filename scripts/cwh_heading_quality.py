@@ -7,13 +7,36 @@ from cwh_writing_rules import writing_rules, judgment_heading
 
 
 HEADING_REVIEW_PROMPT = '''同时返回heading_reviews数组，每个headings输入ID恰好一次：
-{"id":"h1","verdict":"supported|needs_revision|uncertain","rationale":"具体说明标题对应哪些论据、是否夸大或改变立场","supporting_claim_ids":["e1"],"replacement":null或{"text":"有出处的单一中心判断","verdict":"supported","rationale":"具体支持理由"}}。
+{"id":"h1","verdict":"supported|needs_revision|uncertain","rationale":"具体说明标题对应哪些论据、是否夸大或改变立场","supporting_claim_ids":["e1"],"scope_preserved":true或false,"replacement":null或{"text":"有出处的单一中心判断","verdict":"supported","rationale":"具体支持理由"}}。
 标题只能依据本标题claim_ids内的原文；观点有revision时以收窄后的观点为准。不能把政策发布事实写成专家肯定，不能把建议写成已经实现的效果，保留可能、前提、风险等限定。一级标题提炼主判断，分簇标题区分具体机制、条件、影响或建议；避免不同簇反复说同一件事。不要为了凑正面、凑簇数或换动词新增立场。标题supported时replacement为null；needs_revision可提出已逐项核对原文的替代标题；实在没有依据则uncertain且replacement为null。不要改写证据原文或发言人身份。'''
 HEADING_REVIEW_PROMPT += '\n替代一级标题12—26个汉字，分簇标题10—24个汉字；只保留一个中心判断，不带专家强调、媒体认为等套头，不堆砌并列论点。只有客观细则而没有评价依据时用中性标题，不凭空补肯定或认可。'
 HEADING_REVIEW_PROMPT += '\n专家对机制或影响的实质判断可准确概括为认为、强调，不要求原文逐字出现同一个标题动词；但政策发布事实不能改成舆论赞扬、已经实现的效果或额外主张。'
 HEADING_REVIEW_PROMPT += '\n标题语义受支持但带“机构解读”“专家强调”“媒体认为”“审慎提示”等来源标签或审核动作套头，也应needs_revision：直接写具体判断，不把审核过程当观点。不要改变真实批评、风险或建议的强度，不因有部分审慎建议就将同簇明确批评一律软化为提示。'
 HEADING_REVIEW_PROMPT += '\n单独的“认为/建议/认可/期待”等是合法判断动词，不是来源标签；不能仅因标题以“认为”开头就判needs_revision或删去它。“专家认为/机构解读”等额外来源套头才须去掉；保留原判断立场，标题是否改写取决于语义、具体程度和单一中心，而不是要求所有标题无态度动词。'
 HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['heading_support_rule']
+HEADING_REVIEW_PROMPT += '\ncluster_index不为null时，逐条核对该簇全部保留claim_ids都支持同一个中心判断；supporting_claim_ids必须完整覆盖，不得只选适合新标题的一名主体而把其他不同对象或机制留在标题下。无法形成共同判断就uncertain，不能把多个中心用顿号拼起来，也不能删除组员的观点。'
+HEADING_REVIEW_PROMPT += '\ncluster_index为null是一级议题标题。scope_preserved须为原生布尔值，确认替代标题仍保留输入topic实际全部政策对象，不要求不同立场赞同同一评价。议题有多个政策对象时，不能为缩短标题只剩一个子对象或第一簇机制；无法提炼有依据的共同判断时直接用输入topic作中性标题并确认范围，不硬拼多个结论。'
+
+
+def cross_topic_exact_duplicate_groups(analysis):
+    """Flag identical declared actors/roles/URLs/claims; never choose a topic."""
+    groups, ordinal = {}, 0
+    for topic in analysis['viewpoints']['by_topic']:
+        for cluster in topic['clusters']:
+            for evidence in cluster['evidence']:
+                ordinal += 1
+                name, role = evidence.get('speaker_name'), evidence.get('speaker_role') or ''
+                url = evidence.get('url') or evidence.get('source_url')
+                claim = (evidence.get('formal_claim') or '').strip().rstrip('。')
+                if not name or not url or not claim:
+                    continue
+                key = (name, role, url, claim)
+                groups.setdefault(key, []).append({'claim_id': f'e{ordinal}',
+                    'topic': topic['topic'], 'evidence_id': evidence.get('evidence_id')})
+    return [{'claim_ids': [r['claim_id'] for r in rows],
+             'topics': [r['topic'] for r in rows],
+             'evidence_ids': [r['evidence_id'] for r in rows]}
+            for rows in groups.values() if len({r['topic'] for r in rows}) > 1]
 
 
 def repair_runs(packet):
@@ -153,6 +176,10 @@ def build_heading_audit(analysis, packet):
              'heading_repair_run': packet.get('heading_repair_run'),
              'heading_repair_runs': packet.get('heading_repair_runs') or [],
              'approved': approved, 'fallbacks': fallbacks, 'warnings': warnings}
+    duplicates = cross_topic_exact_duplicate_groups(analysis)
+    audit['cross_topic_exact_duplicates'] = duplicates
+    if duplicates:
+        warnings.append('存在同一声明主体、职务及原始URL的完全相同判断跨议题重用；须依据实际政策对象确认唯一归属，脚本不猜去向。')
     if not isinstance(supplied, list):
         warnings.append('本次独立审核未返回标题语义审核；不自动改写标题。')
         return audit
@@ -174,6 +201,12 @@ def build_heading_audit(analysis, packet):
                          and all(isinstance(s, str) for s in support_ids)
                          and len(support_ids) == len(set(support_ids))
                          and all(isinstance(s, str) and s in row['claim_ids'] and supported.get(s) for s in support_ids))
+        if row['cluster_index'] is not None and valid_support and set(support_ids) != set(row['claim_ids']):
+            valid_support = False
+            warnings.append(f"{row['topic']}：分簇标题未覆盖全部保留成员，不采用仅部分主体支持的替代标题。")
+        scope_valid = row['cluster_index'] is not None or review.get('scope_preserved') is True
+        if not scope_valid:
+            warnings.append(f"{row['topic']}：一级标题未确认完整政策对象范围，保留原议题名称。")
         verdict = review.get('verdict')
         replacement = review.get('replacement')
         text = row['text']
@@ -181,12 +214,12 @@ def build_heading_audit(analysis, packet):
         if verdict == 'needs_revision' and isinstance(replacement, dict):
             text = replacement.get('text')
             certified = replacement.get('verdict') == 'supported' and bool(replacement.get('rationale'))
-        if (not certified or not valid_support or not review.get('rationale')
+        if (not certified or not valid_support or not scope_valid or not review.get('rationale')
                 or not packet.get('reviewer_run_id') or not isinstance(text, str)
                 or not 4 <= len(text) <= 80
                 or any(c in text for c in '\n\r')):
             warnings.append(f"{row['topic']} / {row['text']}：{review.get('rationale') or '未取得可采用的标题审核'}")
-            if verdict in {'needs_revision', 'uncertain'}:
+            if verdict in {'needs_revision', 'uncertain'} or not scope_valid or not valid_support:
                 fallbacks.append({**row, 'display_text': row['topic'] if row['cluster_index'] is None else '相关报道'})
             continue
         if text.startswith(stances):

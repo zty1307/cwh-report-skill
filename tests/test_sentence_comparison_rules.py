@@ -55,7 +55,7 @@ def test_reviewed_effect_strength_changes_only_display_and_stales_after_claim_ch
     packet = {'reviewer_run_id': 'actual-independent-review',
         'reviews': [{'evidence_id': evidence['evidence_id'], 'verdict': 'fully_supported'}],
         'heading_reviews': [{'id': identity, 'verdict': 'needs_revision', 'rationale': '原文只说有助于，未称关键。',
-            'supporting_claim_ids': ['e1'], 'replacement': {'text': '认为完善设施有助于降低流通成本',
+            'supporting_claim_ids': ['e1'], 'scope_preserved': True, 'replacement': {'text': '认为完善设施有助于降低流通成本',
             'verdict': 'supported', 'rationale': '原文直接支持作用及有限强度。'}} for identity in ('h1', 'h2')]}
     data['research_audit'] = {'heading_quality': build_heading_audit(data, packet)}
     enrich_viewpoint_titles(data)

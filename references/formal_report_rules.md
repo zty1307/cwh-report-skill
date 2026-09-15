@@ -307,7 +307,13 @@ Those belong in `cwh_audit.json` and, if needed, a separate review note.
 境外summary_cn_simplified是正文观点，review_reason是选材审核理由。两者不能混写：“属会议事实之外新增的分析”“因此纳入”等只放审核理由；正式摘要直接写判断、机制和条件，无原文分析就不补造。
 
 本期议程明确涉及的其他会议或背景政策的实质解读可以保留，但成文须明确原文实际讨论对象。不能把该原文中的“本次会议”“新增部署”等指称直接移到报告会议，冒称另一场会议的要求是本次报告会议的新决定。独立复核同时收到当前议题、议程组和原始标题，用于讨论对象消歧；标题不代替原文论据，不新增原文未支持的日期、因果或结论。
-### Early publication-metadata checks
+### 标题覆盖与跨议题去重
+
+分簇标题必须获得该簇全部保留论断的支持；独立审核的 supporting_claim_ids 只覆盖部分成员时，宿主拒绝采纳该标题，而不是把其余成员硬放在第一人的判断下。不同机制不能仅凭宏观主题相同合并，也不以顿号拼接多个中心来冒充共同判断。一级议题标题须以原生布尔 scope_preserved 确认保留输入议题的完整政策对象；不能为了短标题只留下第一簇或一个子对象。没有可采用的概括时保留原议题名称，不补造结论。这些检查只约束展示标题，不改冻结原文、主体和论断。
+
+同一声明主体、职务和原始URL的完全相同判断跨议题出现时，脚本标记全部证据ID，已有全局独立审核按实际政策对象确定最直接的归属。脚本不自行删观点、猜去向或合并同名不同职务的人。原文有不同实质判断可以分属不同议题；不能靠稍改措辞将同一判断重复收录。
+
+### Early publication-metadata validation
 
 Before moving to the next author topic, validate selected web articles against their literal original publisher and complete publication date. Explicit source/date metadata on one line, or a standalone full timestamp immediately followed by a source/publishing-location label, may establish a publication date. Navigation dates, narrative event dates, month/day without year, and conflicting metadata dates must not be inferred. A verified out-of-period header is a deterministic exclusion with original model selection preserved in audit.
 

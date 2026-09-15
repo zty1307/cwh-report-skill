@@ -23,6 +23,7 @@ from cwh_semantic_repairs import REPAIR_PROMPT, repair_packet, apply_semantic_re
 from cwh_semantic_repairs import normalize_excluded_claims
 from cwh_semantic_repairs import repair_missing_reasons
 from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_overlong_headings
+from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
 from cwh_writing_rules import writing_rules
 
@@ -408,6 +409,7 @@ REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号
 REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']
+REVIEW_PROMPT += '\ncross_topic_exact_duplicates是脚本发现的同一声明主体、职务及原始URL的完全相同判断跨题重用，不预设去向。结合全部agenda_topics和实际对象保留在最直接对应的一个议题；其他重复条按本题正式选材资格判unsupported或uncertain并解释，文字原文支持不自动证明本题归属。不要把同一判断稍改措辞后重复保留，也不合并同名但职务不同的人或同主体的不同判断。'
 
 
 def compile_review(analysis, result, run, digest):
@@ -486,7 +488,8 @@ def independent_packet(analysis):
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
-            "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']]}
+            "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']],
+            "cross_topic_exact_duplicates": cross_topic_exact_duplicate_groups(analysis)}
 
 
 def verify(task, deadline):
