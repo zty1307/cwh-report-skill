@@ -522,7 +522,8 @@ def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
         other_new_media = max(0, buckets.get("self_media", 0) + buckets.get("comments", 0) - wechat - weibo - video)
     total_text = f"{total / 10000:.1f}万" if total >= 10000 else str(total)
     representative = representative_overseas_rows(data)
-    overseas_sources = "、".join(formal_overseas_source(row) for row in representative[:3] if row.get("source"))
+    overseas_sources = "、".join(formal_overseas_source(row) for row in representative[:3]
+                                if row.get("source") and not overseas_source_name_pending(row))
     frames = writing_rules()["propagation"]
     dated_counts = {}
     for key, value in (stats.get("by_date") or {}).items():
@@ -810,11 +811,17 @@ def formal_overseas_source(row: dict[str, Any]) -> str:
         " ",
         str(row.get("source_cn_simplified") or row.get("formal_source_cn_simplified") or row.get("source_cn") or row.get("source_zh") or FOREIGN_SOURCE_CN.get(source, "")),
     ).strip()
-    if contains_chinese(source_cn):
-        return to_simplified_chinese(source_cn)
-    if contains_chinese(source):
-        return to_simplified_chinese(source)
-    return "境外媒体"
+    name = to_simplified_chinese(source_cn) if contains_chinese(source_cn) else (
+        to_simplified_chinese(source) if contains_chinese(source) else "境外媒体")
+    # These exact labels describe geography or an unknown source, not an outlet.
+    # This is presentation only: retain raw rows, eligibility and all counts.
+    if name in {"香港", "澳门", "台湾", "新加坡", "境外", "海外", "境外媒体", "海外媒体"}:
+        return name + "（媒体名称待核）"
+    return name
+
+
+def overseas_source_name_pending(row: dict[str, Any]) -> bool:
+    return formal_overseas_source(row).endswith("（媒体名称待核）")
 
 
 def overseas_report_category(row: dict[str, Any]) -> str:
@@ -1090,7 +1097,7 @@ def dedupe_formal_overseas_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
     selected: list[dict[str, Any]] = []
     story_tokens: set[str] = set()
     title_keys: list[str] = []
-    for row in rows:
+    for row in sorted(rows, key=overseas_source_name_pending):
         token = formal_overseas_story_token(row)
         title_key = formal_overseas_title_key(row)
         if token and token in story_tokens:
@@ -1174,6 +1181,9 @@ def formal_appendix_overseas_rows(data: dict[str, Any], limit: int = 10) -> list
 
 def representative_overseas_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
     rows = [row for row in appendix_overseas_rows(data) if row.get("_formal_category") == "事实性报道"]
+    # Prefer named examples without removing unnamed material from the appendix.
+    named_rows = [row for row in rows if not overseas_source_name_pending(row)]
+    rows = named_rows or rows
     region_markers = [
         ("新加坡", ("联合早报", "新加坡")),
         ("香港", ("香港", "港澳")),

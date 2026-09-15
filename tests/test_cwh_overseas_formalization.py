@@ -340,6 +340,38 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             "Wedoany英文网",
         )
 
+    def test_region_only_source_is_marked_not_guessed_and_counts_are_unchanged(self) -> None:
+        import copy
+        self.assertEqual(FORMALIZE.formal_overseas_source({'source': '香港'}), '香港（媒体名称待核）')
+        self.assertEqual(FORMALIZE.formal_overseas_source({'source': '香港商业电台'}), '香港商业电台')
+        self.assertEqual(FORMALIZE.formal_overseas_source({'source': '香港', 'source_cn_simplified': '媒体甲'}), '媒体甲')
+        rows = [{
+            'source': source, 'title_cn': f'会议报道{source}', 'url': f'https://example.test/{i}',
+            'overseas_category': '事实性报道', 'formal_include': True, 'meeting_relevance': True}
+            for i, source in enumerate(['香港', '媒体甲', '媒体乙'])]
+        data = {'appendices': {'overseas_reports': rows}}
+        frozen = copy.deepcopy(data)
+        selected = FORMALIZE.representative_overseas_rows(data)
+        self.assertEqual(['媒体甲', '媒体乙'], [row['source'] for row in selected])
+        self.assertEqual(3, len(FORMALIZE.appendix_overseas_rows(data)))
+        self.assertEqual(frozen, data)
+        data['appendices']['overseas_reports'] = [rows[0]]
+        self.assertEqual(1, len(FORMALIZE.representative_overseas_rows(data)))
+        text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
+        self.assertIn('香港（媒体名称待核）文章', text)
+
+    def test_existing_story_dedup_prefers_named_mirror_without_mutating_raw_rows(self) -> None:
+        import copy
+        rows = [{'source': source, 'title_cn': '同一会议的事实报道',
+                 'url': f'https://example.test/{i}', 'overseas_category': '事实性报道',
+                 'formal_include': True, 'meeting_relevance': True}
+                for i, source in enumerate(['香港', '媒体甲'])]
+        frozen = copy.deepcopy(rows)
+        data = {'appendices': {'overseas_reports': rows}}
+        selected = FORMALIZE.appendix_overseas_rows(data)
+        self.assertEqual(['媒体甲'], [row['source'] for row in selected])
+        self.assertEqual(frozen, rows)
+
     def test_traditional_title_requires_reviewed_simplified_field(self) -> None:
         self.assertEqual(
             FORMALIZE.formal_overseas_title({"title_cn": "國務院常務會議部署"}),
