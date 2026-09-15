@@ -29,6 +29,7 @@ if str(SCRIPT_DIRECTORY) not in sys.path:
 
 from cwh_hotword_pipeline import build_hotword_payload, render_wordcloud_png
 from source_identity import public_source_family
+from cwh_writing_rules import writing_rules
 
 
 CANONICAL_DAILY_COLUMNS = [
@@ -791,6 +792,7 @@ def build_overseas_review_packet(
             "不得按财经题材或合集标题一概排除：正文确实围绕本次决策展开政策内容、实施机制或直接影响分析时可include。review_reason须说明全文主线与本次决策的关系，排除时说明为何会议提及不足以构成主要报道。",
             "正文缺失或正文仅重复标题时不能include；保留证据不足及补取正文的原因，不冒称与会议无关。",
             "解读性报道必须明确interpretive_verified=true，并从原始content逐字复制连续interpretive_excerpt，保留繁简、标点、空格和异常字符；不得改写、纠错或简繁转换，摘要不等于原文核实。",
+            writing_rules()["overseas"]["interpretive_summary_rule"],
             "decision只能为include或exclude；不得仅凭关键词命中纳入。",
             "publisher_class只能为overseas_origin_media、mainland_outward_media或not_overseas_media。",
             "每条必须填写review_reason和0至1之间的classification_confidence。",
@@ -1609,6 +1611,18 @@ def reconcile_overseas_daily_counts(
     }
 
 
+def validate_declared_topic_mapping(metadata: dict[str, Any]) -> None:
+    """Known-inferred mappings cannot become factual report labels unnoticed."""
+    basis = str(metadata.get('topic_mapping_basis') or '')
+    status = str(metadata.get('topic_mapping_status') or '').lower()
+    inferred = bool(re.search(r'推断|猜测|\binferred\b|\bassumed\b', basis, re.IGNORECASE))
+    if (metadata.get('topic_mapping_confirmed') is False
+        or status in {'inferred', 'unconfirmed', 'pending_review'}
+        or (inferred and metadata.get('topic_mapping_confirmed') is not True)):
+        raise PipelineError('topic_mapping_requires_confirmation:原始统计组议题身份尚未确认；'
+                            '不能按议程顺序、文件排序或传播量大小推断，亦不能将正文拆分用于改名原始统计组。')
+
+
 def build_normalized_bundle(
     inputs: InputBundle,
     config: dict[str, Any],
@@ -1617,6 +1631,7 @@ def build_normalized_bundle(
     hotword_review: dict[str, Any] | None = None,
     public_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    validate_declared_topic_mapping(metadata)
     total_daily = read_daily(inputs.total_heat, config)
     child_daily = {index: read_daily(path, config) for index, path in inputs.child_heat.items()}
 
@@ -2085,6 +2100,7 @@ def main() -> None:
     args = parse_args()
     config = load_json(args.config)
     metadata = load_json(args.metadata)
+    validate_declared_topic_mapping(metadata)
     overseas_review = load_json(args.overseas_review) if args.overseas_review else None
     hotword_review = load_json(args.hotword_review) if args.hotword_review else None
     public_review = load_json(args.public_review) if args.public_review else None

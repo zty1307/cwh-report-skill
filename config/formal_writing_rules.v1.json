@@ -112,7 +112,7 @@
     "no_comment_evidence_sentence": "本轮检索范围内未取得可核验的境外网民评论，暂不判断其关注程度或态度。",
     "max_interpretive_examples": 3,
     "max_factual_examples": 3,
-    "interpretive_summary_rule": "只写相对于会议事实新增的影响、机制、风险或评价，不复述会议议程，不使用报道并引述解读等元叙述",
+    "interpretive_summary_rule": "正式分析摘要只写相对于会议事实新增的政策判断，以及原文支持的机制、条件、影响或风险；不复述议程、股价涨跌，不写报道包含什么、介绍哪些内容或其余无关等文章简介。审核理由单独记录，不代替正式摘要；保留政策实施阶段与不确定性。",
     "category_numbering": false
   },
   "style": {

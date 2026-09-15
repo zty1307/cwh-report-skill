@@ -9,6 +9,8 @@ The formal report must follow this stable structure. Do not invent a new chapter
 
 The machine-readable source of truth is `config/formal_writing_rules.v1.json`. It captures cross-topic patterns rather than facts from one meeting. `scripts/normalize_cwh_analysis.py` assembles viewpoint paragraphs from verified atomic claims; the model does not improvise the final attribution, order or punctuation.
 
+An exact statement in a source does not automatically belong to that source's publisher as an independent viewpoint. Pure retelling of meeting requirements remains meeting facts, even if “要” is paraphrased as “需”; use only the identified speaker's additional reasoning. Preserve distinctions between a proposal, a draft passed at the meeting, a published regulation, a local pilot and nationwide implementation. Overseas raw-review and supplemental-search summaries share the configured interpretation rule: policy judgment plus source-supported reasoning, not an article synopsis or review-process explanation. Keep qualifications in full; renderers must not cut a reviewed summary at an arbitrary character boundary.
+
 ## Typography measured from both mentor reports
 
 - Title: `华文中宋`, 22 pt, bold, centered, no first-line indent.

@@ -192,9 +192,11 @@ def sentiment_text(row: dict[str, Any]) -> str:
 def md_table(headers: list[str], rows: list[list[Any]], empty: str = "未接入可核验数据") -> str:
     if not rows:
         rows = [[empty for _ in headers]]
-    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    def cell(value: Any) -> str:
+        return ("" if value is None else str(value)).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+    lines = ["| " + " | ".join(cell(value) for value in headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
     for row in rows:
-        lines.append("| " + " | ".join(("" if x is None else str(x)).replace("\n", " ") for x in row) + " |")
+        lines.append("| " + " | ".join(cell(value) for value in row) + " |")
     return "\n".join(lines)
 
 
@@ -772,7 +774,8 @@ def formal_overseas_summary(row: dict[str, Any]) -> str:
         value,
         maxsplit=1,
     )[0].strip()
-    return value[:260]
+    # Length is an authoring target, not permission to cut a reviewed condition.
+    return value
 
 
 FOREIGN_SOURCE_CN = {
