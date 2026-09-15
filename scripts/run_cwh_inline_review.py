@@ -340,8 +340,8 @@ def main():
                         supplement = normalize_hotword_transport(supplement)
                         allowed = {str(row.get("term") or "").strip()
                                    for row in supplement_packet["remaining_candidates"]}
-                        target = int(packet.get("target_term_count") or minimum)
-                        result = merge_hotword_supplement(result, supplement, allowed, target)
+                        target_count = int(packet.get("target_term_count") or minimum)
+                        result = merge_hotword_supplement(result, supplement, allowed, target_count)
             if not result.get("blocker"):
                 validate_transport_result(kind, packet, result)
         except (ValueError, TypeError, KeyError) as exc:
