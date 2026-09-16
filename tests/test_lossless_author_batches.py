@@ -84,6 +84,23 @@ def test_synthesis_feedback_changes_selection_packet_only():
     assert after == before
 
 
+def test_many_cached_batches_can_resume_without_impossible_fixed_reservations(monkeypatch, tmp_path):
+    packet = {'topic': '动态议题', 'items': [{'id': f'r{i}', 'content': '原文'} for i in range(20)]}
+    groups = [{'items': [row]} for row in packet['items']]
+    deadlines = []
+    def cached(packets, prompt, command, workspace, deadline, **kwargs):
+        remaining = deadline - time.monotonic()
+        deadlines.append(remaining)
+        assert 15 < remaining < 90
+        return [{'items': [{'id': packets[0]['items'][0]['id'], 'decision': 'excluded',
+                            'reason': '原生缓存判断', 'claims': []}]}], {'seconds': 0, 'cache_reused': True}
+    monkeypatch.setattr(worker, 'author_topic_decisions', cached)
+    result, run = worker.review_author_article_batches(packet, groups, '', [], tmp_path,
+        time.monotonic() + 90, reuse_cache=True, feedback=[], maximum_request_seconds=90)
+    assert len(deadlines) == len(result['items']) == 20
+    assert run['synthesis_run']['model_invoked'] is False
+
+
 def test_single_oversized_article_is_not_truncated():
     packet = {'items': [{'id': 'a', 'segments': [{'id': 1, 'text': '完整。'*1000}]}]}
     assert partition_author_packet(packet, max_characters=100) == [packet]

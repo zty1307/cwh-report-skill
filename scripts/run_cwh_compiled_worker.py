@@ -301,7 +301,9 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         local_workspace.mkdir(parents=True, exist_ok=True)
         # Reserve a little time for every unread batch and the native synthesis;
         # never reset the cumulative stage deadline or borrow future topics.
-        local_deadline = deadline - 30 - 15 * (len(transport_groups) - number)
+        available = max(0, deadline - time.monotonic())
+        reserve = min(30 + 15 * (len(transport_groups) - number), available * 0.5)
+        local_deadline = deadline - reserve
         local_prompt = prompt + '\n这是同一议题的原文子批，所有正文完整保留；先独立审核本批各篇和逐名主体。'
         local_prompt += '本批heading/clusters仅为暂存，随后会用全部子批的已有判断汇总；不按本批声音数推断全题缺口。'
         result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
