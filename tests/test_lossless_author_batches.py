@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_author_batches import partition_author_packet, synthesis_packet, apply_synthesis, synthesis_prompt, native_topic_synthesis
 import run_cwh_compiled_worker as worker
 from cwh_host_research import HostModelError
+import cwh_author_batches as author_batches
 
 
 def fixture():
@@ -68,6 +69,19 @@ def test_synthesis_changes_only_native_assignments_and_keeps_audit():
     assert result['items'][1] == original[1]
     assert decisions == original
     assert result['transport_repairs'][-1]['original_batch_decisions'] == original
+
+
+def test_synthesis_uses_shared_heading_targets_and_style_not_an_author_schema(monkeypatch):
+    rules = copy.deepcopy(author_batches.writing_rules())
+    rules['viewpoint']['topic_heading_cjk_range'] = [13, 27]
+    rules['viewpoint']['cluster_heading_cjk_range'] = [11, 25]
+    monkeypatch.setattr(author_batches, 'writing_rules', lambda: rules)
+    prompt = synthesis_prompt()
+    assert '一级heading目标13—27个汉字' in prompt
+    assert '簇heading目标11—25个汉字' in prompt
+    assert all(rule in prompt for rule in rules['viewpoint']['heading_rules'])
+    assert '不能为压短丢掉关键对象或限定' in prompt
+    assert '"quote_range"' not in prompt
 
 
 @pytest.mark.parametrize('fault', ['missing_id', 'new_claim', 'missing_claim', 'duplicate_claim', 'empty_cluster', 'wrong_cluster'])
