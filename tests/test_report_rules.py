@@ -293,7 +293,7 @@ def test_dashboard_rows_keep_eligible_unselected_candidate_pool_items() -> None:
     assert by_candidate["eligible-2"]["candidate_pool_status"] == "eligible_not_selected_for_formal"
 
 
-def test_repeated_voice_within_topic_is_a_quality_error() -> None:
+def test_same_person_can_offer_distinct_judgments_without_name_only_veto() -> None:
     data = {
         "viewpoints": {
             "by_topic": [
@@ -316,7 +316,7 @@ def test_repeated_voice_within_topic_is_a_quality_error() -> None:
         }
     }
     issues = domestic_viewpoint_quality_issues(data)
-    assert any(item["code"] == "repeated_voice_within_topic" for item in issues)
+    assert not any(item["code"] == "repeated_voice_within_topic" for item in issues)
 
 
 def test_unnamed_interview_expert_form_is_rejected() -> None:

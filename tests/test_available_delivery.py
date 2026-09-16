@@ -71,7 +71,12 @@ def test_channel_label_does_not_merge_independent_accounts():
         {"summary": "建议优化不同群体的服务供给", "evidence": [{"source": "公众号", "speaker_name": "账号乙", "attribution": "账号乙", "attribution_status": "self_media"}]}]}]}}
     assert not any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
     data['viewpoints']['by_topic'][0]['clusters'][1]['evidence'][0]['speaker_name'] = '账号甲'
+    assert not any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
+    for cluster in data['viewpoints']['by_topic'][0]['clusters']:
+        cluster['evidence'][0]['formal_claim'] = '同一个实际判断重复选入'
     assert any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
+    data['viewpoints']['by_topic'][0]['clusters'][1]['evidence'][0]['formal_claim'] = '不同实质判断可以保留'
+    assert not any(i['code'] == 'repeated_voice_within_topic' for i in domestic_viewpoint_quality_issues(data))
 
 
 def test_available_delivery_keeps_editorial_preferences_advisory():

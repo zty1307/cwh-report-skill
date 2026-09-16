@@ -26,8 +26,8 @@ def test_cjk_quote_transport_repair_preserves_decoded_text_not_claim_content():
 
 def test_duplicate_voice_feedback_names_all_conflicting_items_and_clusters():
     result = duplicate_voice_errors({"items": [
-        {"id": "r1", "decision": "eligible", "claims": [{"speaker": "同一专家", "cluster": "k1"}]},
-        {"id": "r2", "decision": "eligible", "claims": [{"speaker": "同一专家", "cluster": "k2"}]}]})
+        {"id": "r1", "decision": "eligible", "claims": [{"speaker": "同一专家", "claim": "相同判断", "cluster": "k1"}]},
+        {"id": "r2", "decision": "eligible", "claims": [{"speaker": "同一专家", "claim": "相同判断", "cluster": "k2"}]}]})
     assert len(result) == 1
     assert all(value in result[0] for value in ("同一专家", "r1", "r2", "k1", "k2"))
 
@@ -230,34 +230,64 @@ def test_missing_or_duplicate_semantic_decisions_rejected():
         compile_topic(packet, decision, observation, plan, "bounded_60m", "v1", "author")
 
 
-def test_same_voice_same_cluster_keeps_first_and_preserves_later_claim_as_reserve():
+def test_same_voice_distinct_claims_are_preserved_without_self_certification():
     packet, decision, observation, plan = fixture()
     later = copy.deepcopy(decision["items"][0]["claims"][0])
     later["claim"] = "另一条观点不得拼接进入第一条正式观点"
     decision["items"][0]["claims"].append(later)
     bundle = compile_topic(packet, decision, observation, plan, "bounded_60m", "v1", "author")
     evidence = bundle["viewpoints"]["by_topic"][0]["clusters"][0]["evidence"]
-    assert len(evidence) == 1
-    assert evidence[0]["formal_claim"] != later["claim"]
-    reserve = bundle["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"][0]["candidates"][1]
-    assert reserve["formal_use"] == "reserve" and reserve["semantic_claim"] == later
-    assert "semantic_review" not in reserve
+    assert len(evidence) == 2
+    assert evidence[0]["formal_claim"] == decision["items"][0]["claims"][0]["claim"]
+    assert evidence[1]["formal_claim"] == later["claim"]
+    assert all("semantic_review" not in row for row in evidence)
+    assert duplicate_voice_errors(decision) == []
 
 
-def test_same_voice_different_clusters_reserves_later_bounded_voice_without_merging():
+@pytest.mark.parametrize('profile', ['bounded_60m', 'exhaustive'])
+def test_exact_repeated_claim_across_clusters_reserved_without_merging(profile):
     packet, decision, observation, plan = fixture()
     later = copy.deepcopy(decision["items"][0]["claims"][0])
     later["cluster"] = "k2"
     decision["items"][0]["claims"].append(later)
     decision["clusters"].append({"key": "k2", "heading": "另一个簇"})
-    bounded = compile_topic(packet, decision, observation, plan, "bounded_60m", "v1", "author")
+    frozen = copy.deepcopy(decision)
+    bounded = compile_topic(packet, decision, observation, plan, profile, "v1", "author")
     pool = bounded["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"][0]["candidates"]
     reserved = [row for row in pool if row.get("formal_use") == "reserve"]
     assert len(reserved) == 1
     assert reserved[0]["semantic_claim"]["cluster"] == "k2"
     assert "不合并或改写" in reserved[0]["reserve_reason"]
-    with pytest.raises(ValueError, match="semantic consolidation"):
-        compile_topic(packet, decision, observation, plan, "exhaustive", "v1", "author")
+    assert decision == frozen
+
+
+@pytest.mark.parametrize('profile', ['bounded_60m', 'exhaustive'])
+def test_same_person_distinct_judgments_in_different_clusters_survive(profile):
+    packet, decision, observation, plan = fixture()
+    later = copy.deepcopy(decision['items'][0]['claims'][0])
+    later.update(cluster='k2', claim='另一条实质判断仍须原文独立审核')
+    decision['items'][0]['claims'].append(later)
+    decision['clusters'].append({'key': 'k2', 'heading': '另一个判断'})
+    bundle = compile_topic(packet, decision, observation, plan, profile, 'v1', 'author')
+    clusters = bundle['viewpoints']['by_topic'][0]['clusters']
+    assert len(clusters) == 2
+    assert clusters[1]['evidence'][0]['formal_claim'] == later['claim']
+    assert all('semantic_review' not in ev for group in clusters for ev in group['evidence'])
+    assert duplicate_voice_errors(decision) == []
+
+
+def test_metadata_gap_counts_people_not_distinct_claims():
+    packet, decision, observation, plan = fixture()
+    for number in range(3):
+        later = copy.deepcopy(decision['items'][0]['claims'][0])
+        later['claim'] += '不同判断' + str(number)
+        decision['items'][0]['claims'].append(later)
+    decision['items'][1]['classification_origin'] = 'deterministic_web_metadata_gate'
+    bundle = compile_topic(packet, decision, observation, plan, 'bounded_60m', 'v1', 'author')
+    topic = bundle['viewpoints']['by_topic'][0]
+    assert len(topic['clusters'][0]['evidence']) == 4
+    assert topic['evidence_shortfall']['reason_origin'] == 'host_metadata_integrity_gate'
+    assert topic['clusters'][0]['thin_cluster_exception']['reason_origin'] == 'host_metadata_integrity_gate'
 
 
 def test_search_snippet_never_becomes_full_source():

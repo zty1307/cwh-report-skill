@@ -288,7 +288,7 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                     ),
                 }
             )
-        voice_clusters: dict[str, set[int]] = {}
+        repeated_claim_clusters: dict[tuple[str, str, str], set[int]] = {}
         for cluster_index, cluster in enumerate(viewpoint.get("clusters") or [], 1):
             details = str(cluster.get("details") or cluster.get("analysis") or "").strip()
             cluster_name = str(cluster.get("summary") or f"分论点{cluster_index}")
@@ -365,7 +365,6 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
             for person in _named_people(details):
                 key = f"person:{_voice_key(person)}"
                 voice_labels[key] = person
-                voice_clusters.setdefault(key, set()).add(cluster_index)
                 cross_topic_voices.setdefault(key, set()).add(topic)
 
             evidence_claim_signatures: set[str] = set()
@@ -380,10 +379,11 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                     continue
                 key = f"evidence:{_voice_key(voice)}"
                 voice_labels[key] = voice
-                voice_clusters.setdefault(key, set()).add(cluster_index)
                 formal_claim = str(evidence.get("formal_claim") or evidence.get("claim") or "").strip()
                 claim_signature = _voice_key(formal_claim)
                 if claim_signature:
+                    signature = (key, _voice_key(str(evidence.get('speaker_role') or '')), claim_signature)
+                    repeated_claim_clusters.setdefault(signature, set()).add(cluster_index)
                     if claim_signature in evidence_claim_signatures:
                         issues.append(
                             {
@@ -441,7 +441,7 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                         }
                     )
 
-        for key, cluster_indexes in voice_clusters.items():
+        for (key, role, claim_signature), cluster_indexes in repeated_claim_clusters.items():
             if len(cluster_indexes) <= 1:
                 continue
             label = voice_labels.get(key, key)
@@ -451,8 +451,8 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                     "severity": "error",
                     "topic": topic,
                     "message": (
-                        f"{topic}在{len(cluster_indexes)}个分论点中重复使用“{label}”。"
-                        "应把该来源的相关观点合并为一次完整表述，并用其他独立来源支撑其余分论点。"
+                        f"{topic}在{len(cluster_indexes)}个分论点中重复使用“{label}”的同一判断。"
+                        "同主体同判断只保留一次；不同实质判断可分别保留，不按姓名合并或删去观点。"
                     ),
                 }
             )

@@ -20,7 +20,7 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 纯转述“会议指出、强调、要求”的部署，同样归meeting_action_fact并排除；把“要健全、要推动”等要求改写为“需健全、需推动”，不产生媒体或专家自身观点。原文同时有独立分析时只取实际发言主体提出的新增机制、条件、建议或评价，不能把相邻会议要求移到其名下。区分会议方向、征求意见稿、审议通过草案、已公布条文和地方试点；没有本期明确依据不写成全国已经实施。
 优先选具名专家、专业机构和提供具体政策机制的媒体判断。自媒体不是禁用，但以下内容不得作为正式观点：为本公司、本品牌或本产品寻找市场机会；只从消费、金融、板块或产业链受益角度推介市场机会；借会议议题宣传无直接政策论证的机构活动；只剩口号、押韵梗、比喻或空泛增长前景而没有机制、条件或建议。
 写作按“具体判断＋原文支持的机制、条件、影响或建议”组织，不写文章简介，不把标题和会议议程当论据；空泛的意义评价不优于具体论证。不同簇按实质判断区分，不按媒体类型或段落数量硬拆；同一论点的重复表述保留最有信息量的声音。保留原文的不确定性和实施前提，不把有望改成必将、建议改成已经实现，不为了正面比例杜撰肯定或反对。
-同一专家/账号只选一次，一个文章内不同专家可分别提取，切勿把引述专家改成媒体自身观点。
+同一专家/账号的同一判断只选一次；不同实质判断可分别进入对应观点簇，但独立主体数仍只计一个。一个文章内不同专家可分别提取，切勿把引述专家改成媒体自身观点。
 每条claim通常45—120个汉字，至少30，不含归因前缀；不新增数字、引号术语、因果、效果或确定性。quote是足以支持claim的最短连续原文，具名专家的姓名和原文机构职务必须都在quote内。媒体自身观点的speaker必须等于输入source或account。不要计算哈希、偏移或时间。
 若输入提供segments，claim中改用quote_range:[起始片段id,结束片段id]，不输出quote。片段id为带原文前缀的字符串（如"p8abc1234/13"），必须照抄本篇id，不能跨文使用。选连续片段覆盖主体、职务和论据，原文由脚本提取；不能选无关全文代替定位。每个双人簇的两条claim合计至少120汉字，证据不足则给出具体thin_reason，不填充无依据语句。
 一级heading目标12—26个汉字，簇heading目标10—24个汉字，均只表达一个有证据支持的中心判断；不要把多个观点簇用“并/与/及”机械拼接，不要使用口号、行业黑话或空泛前景。根据证据选择认可、肯定、建议、期待、希望、支持、质疑、担忧、强调或认为，避免所有标题机械重复“认为”，但不得为了变化而改变立场。少于4个声音须返回shortfall_reason；只有1簇须返回single_cluster_reason；单人簇须在对应clusters项返回thin_reason，说明实际材料不足，不可空泛套话。
@@ -112,16 +112,20 @@ def duplicate_voice_errors(decision):
             continue
         for claim in item.get("claims") or []:
             speaker = str(claim.get("speaker") or "")
-            key = re.sub(r"\s+", "", speaker).casefold()
-            if not key:
+            text = str(claim.get('claim') or '').strip()
+            if not speaker.strip() or not text:
                 continue
-            entry = voices.setdefault(key, {"speaker": speaker, "clusters": set(), "ids": set()})
+            key = (re.sub(r"\s+", "", speaker).casefold(),
+                   re.sub(r"\s+", "", str(claim.get('role') or '')).casefold(),
+                   str(claim.get('speaker_type') or ''), re.sub(r"\s+", "", text))
+            entry = voices.setdefault(key, {"speaker": speaker, "clusters": set(), "ids": set(), "count": 0})
+            entry['count'] += 1
             entry["clusters"].add(str(claim.get("cluster") or ""))
             entry["ids"].add(str(item.get("id") or ""))
     return [
-        f'One speaker {row["speaker"]} assigned to different clusters {sorted(row["clusters"])} '
-        f'in items {sorted(row["ids"])} needs semantic consolidation; retain this speaker only once'
-        for row in voices.values() if len(row["clusters"]) > 1
+        f'Exactly repeated claim by {row["speaker"]} in clusters {sorted(row["clusters"])} '
+        f'and items {sorted(row["ids"])}; keep one occurrence, not one viewpoint per person'
+        for row in voices.values() if row['count'] > 1
     ]
 
 
@@ -222,7 +226,7 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         query["retained_candidate_ids"] = []
         for url in query["result_urls"]:
             by_url.setdefault(url, []).append(query)
-    seen_speakers = {}
+    seen_claims = {}
     for item in packet["items"]:
         choice = choices[item["id"]]
         if choice.get("decision") not in {"eligible", "duplicate", "excluded"} or not choice.get("reason"):
@@ -297,21 +301,19 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                             raise ValueError(f'Web publication date not anchored in original text: {item["id"]}')
                     row.update(published_at_source_text=item["published_at"] if raw else choice["date_quote"],
                                published_at_verified_from_source=True, viewpoint_cluster_key=claim["cluster"], formal_use="selected")
-                    speaker_key = re.sub(r"\s+", "", claim["speaker"]).casefold()
-                    if speaker_key in seen_speakers:
-                        different_cluster = seen_speakers[speaker_key] != claim["cluster"]
-                        if different_cluster and not profile.startswith("bounded_"):
-                            raise ValueError("One speaker assigned to different clusters needs semantic consolidation")
-                        # Keep one formal voice in the author's supplied order;
-                        # preserve later statements without merging or certifying.
-                        row.update(formal_use="reserve", reserve_reason="同一主体在同一观点簇已按作者顺序选入；扩展观点保留审核，不重复增加正式声音",
+                    claim_key = (re.sub(r"\s+", "", claim["speaker"]).casefold(),
+                        re.sub(r"\s+", "", str(claim.get('role') or '')).casefold(),
+                        str(claim.get('speaker_type') or ''), re.sub(r"\s+", "", claim['claim']))
+                    if claim_key in seen_claims:
+                        # Exact repeated wording is mechanical deduplication;
+                        # different statements by the same person remain separate
+                        # candidates for unchanged independent source review.
+                        row.update(formal_use="reserve", reserve_reason="同一主体同一职务的完全相同判断已选入；重复版本保留审计，不重复成文，不合并或改写观点",
                                    semantic_claim=copy.deepcopy(claim))
-                        if different_cluster:
-                            row["reserve_reason"] = "限时档同一主体已按作者排序选入首个正式声音；跨簇后续观点保留待选审计，不重复成文、不合并或改写观点"
                         candidates.append(row)
                         query["retained_candidate_ids"].append(candidate_id)
                         continue
-                    seen_speakers[speaker_key] = claim["cluster"]
+                    seen_claims[claim_key] = claim["cluster"]
                     if claim["cluster"] not in clusters:
                         raise ValueError("Claim references an absent semantic cluster")
                     attribution = (claim.get("role", "") if claim["speaker_type"] == "named_person" else "") + claim["speaker"]
@@ -392,7 +394,10 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         gap = {'reason': reason, 'search_evidence': search_evidence,
                'reviewed_by': 'host:deterministic_web_metadata_gate', 'reason_origin': 'host_metadata_integrity_gate',
                'quarantined_item_ids': quarantined}
-        voice_count = sum(len(cl['evidence']) for cl in viewpoint['clusters'])
+        def independent_voices(evidence):
+            return {re.sub(r'\s+', '', str(ev.get('speaker_name') or ev.get('attribution') or ev.get('source') or '')).casefold()
+                    for ev in evidence} - {''}
+        voice_count = len(independent_voices(ev for cl in viewpoint['clusters'] for ev in cl['evidence']))
         if voice_count < 4:
             viewpoint.setdefault('evidence_shortfall', copy.deepcopy(gap))
         if len(viewpoint['clusters']) <= 1:
@@ -400,7 +405,7 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         density = writing_rules()['viewpoint']['density_gate']
         for cl in viewpoint['clusters']:
             cjk = sum('\u4e00' <= char <= '\u9fff' for ev in cl['evidence'] for char in ev['formal_claim'])
-            if len(cl['evidence']) < density['minimum_independent_voices'] or cjk < density['minimum_details_cjk']:
+            if len(independent_voices(cl['evidence'])) < density['minimum_independent_voices'] or cjk < density['minimum_details_cjk']:
                 cl.setdefault('thin_cluster_exception', copy.deepcopy(gap))
     route_coverage = [{"route": route, "status": "completed" if any(q["status"] == "completed" for q in queries if q["route"] == route) else "access_failed"}
                       for route in ("open_web", "public_platform")]
