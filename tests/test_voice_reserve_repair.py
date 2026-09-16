@@ -46,9 +46,12 @@ def test_no_host_selection_under_cap_or_when_reserves_not_allowed():
     assert voice_reserve_request(packet, response) is None
 
 
-def test_native_repair_uses_one_compact_choice_and_preserves_actual_runs(tmp_path):
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_native_repair_uses_one_compact_choice_and_preserves_actual_runs(tmp_path, duplicate):
     from cwh_author_batches import native_topic_synthesis
     packet, response = fixture()
+    if duplicate:
+        response['excluded'] = [{'id': 'c3', 'reason': '重复取舍'}]
     decisions = [{'id': 'r1', 'decision': 'eligible', 'reason': '原生判断',
                   'claims': [{'speaker': row['speaker'], 'claim': row['claim']} for row in packet['candidates']]}]
     request = {'topic': packet['topic'], 'formal_selection': packet['formal_selection'],
@@ -57,10 +60,14 @@ def test_native_repair_uses_one_compact_choice_and_preserves_actual_runs(tmp_pat
     calls = []
     def model(payload, prompt, command, workspace, label, timeout, **kwargs):
         calls.append((payload, label, timeout))
-        return (response if len(calls) == 1 else {'choices': [{'id': 'v3', 'reason': '已覆盖同类分析'}]}), {
+        patch = {'choices': [{'id': 'v3', 'reason': '已覆盖同类分析'}]}
+        if duplicate:
+            patch = {'choices': [{'id': 'c3', 'option': 1}],
+                     'voice_reserves': [{'id': 'v3', 'reason': '已覆盖同类分析'}]}
+        return (response if len(calls) == 1 else patch), {
             'session_id': str(len(calls)), 'seconds': 2}
     result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=False)
-    assert len(calls) == 2 and calls[1][1] == 'synthesis-voice-reserve'
+    assert len(calls) == 2 and calls[1][1] == ('synthesis-ownership-repair' if duplicate else 'synthesis-voice-reserve')
     assert calls[1][2] <= 45 and run['seconds'] == 4
-    assert sum(c.get('formal_use') == 'reserve' for c in result['items'][0]['claims']) == 2
-    assert result['transport_repairs'][-1]['kind'] == 'native_voice_reserve_repair'
+    assert sum(c.get('formal_use') == 'reserve' for c in result['items'][0]['claims']) == (1 if duplicate else 2)
+    assert result['transport_repairs'][-1]['kind'] == ('native_synthesis_ownership_repair' if duplicate else 'native_voice_reserve_repair')

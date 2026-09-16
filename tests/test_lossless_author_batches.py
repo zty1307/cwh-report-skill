@@ -47,6 +47,14 @@ def test_partition_preserves_all_original_segments_and_order():
     assert packet == original
 
 
+def test_default_batches_bound_work_for_all_models_without_truncating():
+    packet = {'topic': '通用题', 'items': [{'id': f'r{i}', 'content': '完整原文' * 900} for i in range(8)]}
+    groups = partition_author_packet(packet)
+    assert max(len(group['items']) for group in groups) <= 3
+    assert [item for group in groups for item in group['items']] == packet['items']
+    assert all(len(json.dumps(group, ensure_ascii=False, separators=(',', ':'))) <= 20000 for group in groups)
+
+
 def test_single_oversized_article_is_not_truncated():
     packet = {'items': [{'id': 'a', 'segments': [{'id': 1, 'text': '完整。'*1000}]}]}
     assert partition_author_packet(packet, max_characters=100) == [packet]

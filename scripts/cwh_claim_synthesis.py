@@ -94,7 +94,8 @@ def apply_voice_reserves(original, request, patch):
         raise ValueError('Voice reserve repair requires enough unique existing voices and native reasons')
     result = copy.deepcopy(original)
     for choice in choices:
-        ids = {row['id'] for row in voices[choice['id']]['claims']}
+        selected_now = {key for group in result['selected'] for key in group['claim_ids']}
+        ids = {row['id'] for row in voices[choice['id']]['claims']} & selected_now
         for group in result['selected']:
             group['claim_ids'] = [key for key in group['claim_ids'] if key not in ids]
         result.setdefault('reserved', []).extend({'id': key, 'reason': choice['reason']} for key in sorted(ids))
