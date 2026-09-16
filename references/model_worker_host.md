@@ -26,6 +26,8 @@ Before business data, check whether the CLI really permits the configured input/
 
 Verify public search and full-page fetch separately: a successful search does not prove fetch permission. Some hosts return a permission error with `is_error=false`; the adapter checks explicit permission-denied tool events too. A permission blocker returns exit 23, a timeout 124; neither triggers a blind automatic worker retry. Per-process permission configuration requires user approval when a denied capability needs to be enabled. Never use a global permission bypass.
 
+When a successful raw-review model invocation omits only `review_method`, the host supplies `ai_semantic_review` from that actual invocation and records its session/log in transport provenance. It does not alter an explicitly supplied value, infer human edits, fill rows or approve decisions. Exact-ID, quotation and downstream semantic gates still apply. Missing orchestration metadata alone does not require another semantic request.
+
 ## Raw-review JSON transport
 
 `run_cwh_inline_review.py --task <task>` is a narrower adapter for `raw_workbook_semantic_reviews` only. Configure the model CLI with no filesystem/shell tools and JSON or stream-JSON output. It receives source material over stdin and returns review JSON; host code writes only declared review outputs. It cannot perform downstream internet research or replace independent claim verification; unsupported stages return an explicit blocker.

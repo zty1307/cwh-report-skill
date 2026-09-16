@@ -205,6 +205,19 @@ def response_object(log: str) -> dict:
     raise ValueError("model returned no parseable review JSON" + detail)
 
 
+def stamp_native_review_method(result: dict, run: dict) -> dict:
+    """Fill only host-observed provenance after a successful actual model call."""
+    if ('review_method' in result or result.get('blocker') or run.get('exit_code') != 0
+        or not run.get('session_id') or not run.get('log')):
+        return result
+    stamped = copy.deepcopy(result)
+    stamped['review_method'] = 'ai_semantic_review'
+    stamped.setdefault('transport_repairs', []).append({
+        'kind': 'host_observed_native_review_method', 'session_id': run['session_id'],
+        'log': run['log'], 'scope': 'Invocation provenance only; no semantic decisions added or approved'})
+    return stamped
+
+
 def validate_transport_result(kind: str, packet: dict, result: dict) -> None:
     if result.get("review_method") not in {"ai_semantic_review", "ai_semantic_review_with_human_edits"}:
         raise ValueError("review_method is missing")
@@ -391,6 +404,7 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                 if cached.get('blocker'):
                     atomic_write_json(workspace / 'blocker.json', cached)
                     raise SystemExit(23)
+                cached = stamp_native_review_method(cached, run)
                 cached = normalize_topic_hit_transport(batch, cached, kind)
                 if kind == 'overseas':
                     cached = resolve_overseas_spans(batch, cached)
@@ -436,6 +450,7 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                     if cached.get('blocker'):
                         atomic_write_json(workspace / 'blocker.json', cached)
                         raise SystemExit(23)
+                    cached = stamp_native_review_method(cached, run)
                     cached = normalize_topic_hit_transport(batch, cached, kind)
                     if kind == 'overseas':
                         cached = resolve_overseas_spans(batch, cached)

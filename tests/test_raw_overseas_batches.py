@@ -179,3 +179,41 @@ def test_public_top_expansion_reuses_unchanged_complete_batches(tmp_path, monkey
     assert all(run['cache_reused'] for run in second['batch_review_audit']['actual_runs'][:2])
     assert first['items'][0]['reviewer_run_id'] == second['items'][0]['reviewer_run_id']
     assert (tmp_path / 'public_top_batch_runs.json').is_file()
+
+
+def test_native_method_is_host_provenance_not_another_semantic_request(tmp_path, monkeypatch):
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        payload = json.loads(kwargs['input_text'].split('\n只处理本批', 1)[0])
+        items = [{'record_id': row['record_id'], 'decision': 'exclude', 'topic_hits': [],
+                  'review_reason': 'Original article is unrelated'} for row in payload['packet']['items']]
+        kwargs['stdout'].write(json.dumps({'type': 'result', 'result': json.dumps({'items': items})}))
+        return 0
+    monkeypatch.setattr(worker, 'run_scoped_command', run)
+    result = worker.review_overseas_batches(packet(), {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 100, kind='public_top')
+    assert len(calls) == 1 and len(result['items']) == 5
+    assert all(row['decision'] == 'exclude' for row in result['items'])
+    saved = json.loads((tmp_path / 'public_top-batch-1/accepted_review.json').read_text('utf-8'))
+    audit = saved['transport_repairs'][0]
+    assert audit['kind'] == 'host_observed_native_review_method'
+    assert audit['session_id'] == result['batch_review_audit']['actual_runs'][0]['session_id']
+
+
+@pytest.mark.parametrize('method', [None, 'human_review', 'unknown'])
+def test_explicit_wrong_method_is_not_overwritten(method):
+    answer = {'review_method': method, 'items': []}
+    frozen = copy.deepcopy(answer)
+    assert worker.stamp_native_review_method(answer, {'exit_code': 0, 'session_id': 'native', 'log': 'original'}) == frozen
+    with pytest.raises(ValueError, match='review_method'):
+        worker.validate_transport_result('public_top', {'items': []}, answer)
+
+
+def test_provenance_stamp_never_fills_missing_rows_or_without_native_success():
+    answer = {'items': []}
+    assert worker.stamp_native_review_method(answer, {'exit_code': 124}) == answer
+    stamped = worker.stamp_native_review_method(answer, {'exit_code': 0, 'session_id': 'native', 'log': 'original'})
+    assert answer == {'items': []}
+    with pytest.raises(ValueError, match='exactly every'):
+        worker.validate_transport_result('public_top', packet(), stamped)
