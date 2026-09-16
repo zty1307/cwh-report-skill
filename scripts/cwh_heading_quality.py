@@ -93,30 +93,43 @@ def review_retained_headings(analysis, packet, command, workspace, timeout):
     """Optional compact recheck after claim retention; never reuse old claim IDs."""
     from cwh_host_research import semantic_json, HostModelError
     manifest = heading_manifest(analysis)
-    if not manifest or timeout < 25:
+    if not manifest:
         return packet
+    def unavailable(reason):
+        result = copy.deepcopy(packet)
+        prior = result.pop('heading_reviews', None)
+        if prior:
+            result['unusable_prior_heading_reviews'] = prior
+        result['heading_recheck'] = {'status': 'unavailable', 'reason': reason,
+            'scope': 'Current claim headings not certified; use neutral display fallback'}
+        return result
+    if timeout < 25:
+        return unavailable('insufficient_remaining_budget')
     claims = [{"id": f'e{i}', **{k: ev.get(k, '') for k in
-              ('formal_claim', 'source_excerpt', 'speaker_name', 'speaker_role')}}
+              ('formal_claim', 'speaker_name', 'speaker_role')}}
               for i, ev in enumerate((ev for topic in analysis['viewpoints']['by_topic']
                   for cluster in topic['clusters'] for ev in cluster['evidence']), 1)]
     try:
         result, run = semantic_json({'headings': manifest, 'claims': claims},
-            '只复审当前已独立核验观点对应的标题，返回heading_reviews，不修改观点或复做观点审核。'
-            '这些是当前保留和收窄后的观点；原始旧短ID已经作废，按本输入ID审核。\n' + HEADING_REVIEW_PROMPT,
+            '只复审当前已独立核验观点对应的标题，返回且只返回JSON对象{"heading_reviews":[...]}，不是数组或Markdown。'
+            '不修改观点或复做观点审核。以下formal_claim是当前保留和收窄后的完整判断，已通过独立原文审核；'
+            '标题只能由这些判断支持，不从旧标题推回已经删除的论据、因果或程度。原始原文仍保留在宿主审计，'
+            '本步骤不重传，以免把已被删除的原文内容重新带回标题。原始旧短ID已经作废，按本输入ID审核。\n' + HEADING_REVIEW_PROMPT,
             command, workspace, 'retained-heading-review', min(90, timeout), reuse_cache=False)
         reviews = result.get('heading_reviews')
         ids = [r.get('id') for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else []
         if (not isinstance(reviews, list) or len(reviews) != len(manifest)
                 or not all(isinstance(identity, str) for identity in ids)
                 or len(ids) != len(manifest) or len(ids) != len(set(ids)) or set(ids) != {r['id'] for r in manifest}):
-            return packet
+            return unavailable('incomplete_or_duplicate_heading_ids')
         final = copy.deepcopy(packet)
         final['heading_reviews'] = [{**r, 'reviewer_run_id': run['session_id']} for r in reviews]
         final['heading_repair_runs'] = [run]
         final['heading_repair_run'] = run
+        final['heading_recheck'] = {'status': 'completed', 'reviewer_run_id': run['session_id']}
         return final
-    except (HostModelError, ValueError, TimeoutError):
-        return packet
+    except (HostModelError, ValueError, TimeoutError) as exc:
+        return unavailable(str(exc))
 
 
 def repair_overlong_headings(packet, result, command, workspace, timeout):
@@ -225,13 +238,15 @@ def build_heading_audit(analysis, packet):
     if duplicates:
         warnings.append('存在同一声明主体、职务及原始URL的完全相同判断跨议题重用；须依据实际政策对象确认唯一归属，脚本不猜去向。')
     if not isinstance(supplied, list):
-        warnings.append('本次独立审核未返回标题语义审核；不自动改写标题。')
+        warnings.append('本次未取得标题语义审核，保留原稿审计，展示中性标题，不继续显示未核验判断。')
+        fallbacks.extend({**row, 'display_text': row['topic'] if row['cluster_index'] is None else '相关报道'} for row in manifest)
         return audit
     identities = [r.get('id') for r in supplied if isinstance(r, dict)]
     expected = {r['id'] for r in manifest}
     if (len(identities) != len(supplied) or not all(isinstance(s, str) for s in identities)
             or len(identities) != len(set(identities)) or set(identities) != expected):
         warnings.append('标题审核ID覆盖不完整或重复；不采用任何替代标题。')
+        fallbacks.extend({**row, 'display_text': row['topic'] if row['cluster_index'] is None else '相关报道'} for row in manifest)
         return audit
     by_id = {r['id']: r for r in supplied}
     claims = [ev for topic in analysis['viewpoints']['by_topic'] for cl in topic['clusters'] for ev in cl['evidence']]

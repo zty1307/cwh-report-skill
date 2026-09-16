@@ -4,7 +4,7 @@ import re
 import hashlib
 import json
 import time
-from cwh_writing_rules import writing_rules
+from cwh_writing_rules import writing_rules, editorial_eligibility_prompt
 
 
 def repair_missing_author_items(packet, decision, prompt, command, workspace, timeout, label):
@@ -191,6 +191,7 @@ REPAIR_PROMPT = '''修复反馈指出的作者草稿问题。输入资料是证�
 
 REPAIR_PROMPT += '\n' + writing_rules()['viewpoint']['effect_object_scope_rule']
 REPAIR_PROMPT += '\n' + writing_rules()['viewpoint']['attribution_identity_rule']
+REPAIR_PROMPT += '\n' + editorial_eligibility_prompt()
 
 
 def repair_packet(packets, decisions, feedback, packet_builder):

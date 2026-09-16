@@ -101,6 +101,8 @@ def test_retained_heading_recheck_uses_current_claims_and_real_separate_run():
         revised = review_retained_headings(analysis, packet(), [], Path('.'), 90)
     request = call.call_args.args[0]
     assert request['claims'][0]['formal_claim'] == analysis['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]['formal_claim']
+    assert 'source_excerpt' not in request['claims'][0]
+    assert '不从旧标题推回已经删除的论据' in call.call_args.args[1]
     assert call.call_args.args[-1] == 90
     assert call.call_args.kwargs['reuse_cache'] is False
     assert revised['heading_reviews'][0]['reviewer_run_id'] == 'actual-heading-run'
@@ -110,10 +112,28 @@ def test_retained_heading_recheck_uses_current_claims_and_real_separate_run():
 def test_retained_heading_recheck_skips_short_budget_and_rejects_partial_coverage():
     analysis, earlier = sample(), packet()
     with patch('cwh_host_research.semantic_json') as call:
-        assert review_retained_headings(analysis, earlier, [], Path('.'), 20) == earlier
+        result = review_retained_headings(analysis, earlier, [], Path('.'), 20)
+        assert 'heading_reviews' not in result
+        assert result['heading_recheck']['reason'] == 'insufficient_remaining_budget'
         call.assert_not_called()
     with patch('cwh_host_research.semantic_json', return_value=({'heading_reviews': []}, {'session_id': 'run'})):
-        assert review_retained_headings(analysis, earlier, [], Path('.'), 40) == earlier
+        result = review_retained_headings(analysis, earlier, [], Path('.'), 40)
+        assert result['heading_recheck']['status'] == 'unavailable'
+        assert result['unusable_prior_heading_reviews'] == earlier['heading_reviews']
+        assert 'heading_reviews' not in result
+
+
+@pytest.mark.parametrize('supplied', [None, [], [{'id': 'h1'}]])
+def test_unavailable_heading_review_uses_neutral_display_without_mutating_claims(supplied):
+    data, review = sample(), packet()
+    frozen = copy.deepcopy(data)
+    review['heading_reviews'] = supplied
+    audit = build_heading_audit(data, review)
+    assert audit['approved'] == []
+    assert [r['display_text'] for r in audit['fallbacks']] == ['公共服务布局', '相关报道']
+    assert data == frozen
+    data['research_audit'] = {'heading_quality': audit}
+    assert reviewed_display_headings(data) == {(0, None): '公共服务布局', (0, 0): '相关报道'}
 
 
 def test_supported_replacement_is_display_only_and_preserves_source_audit():

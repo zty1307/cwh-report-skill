@@ -28,7 +28,7 @@ from cwh_heading_quality import HEADING_REVIEW_PROMPT, heading_manifest, repair_
 from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from cwh_heading_quality import cross_topic_shared_source_spans
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
-from cwh_writing_rules import writing_rules
+from cwh_writing_rules import writing_rules, editorial_eligibility_prompt
 from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, native_topic_synthesis,
                                 MAX_AUTHOR_PACKET_CHARACTERS, MAX_AUTHOR_BATCH_ITEMS)
 
@@ -546,6 +546,8 @@ REVIEW_PROMPT = '''独立核验每条formal_claim是否被同条excerpt_segments
 REVIEW_PROMPT += '\n' + HEADING_REVIEW_PROMPT
 REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['effect_object_scope_rule']
 REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['attribution_identity_rule']
+REVIEW_PROMPT += '\n' + editorial_eligibility_prompt()
+REVIEW_PROMPT += '\nfully_supported还要求本题正式选材资格成立；逐条rationale同时说明原文支持与具体政策分析资格。若文字忠实但仅为市场推介、口号或政策事实，按本题正式选材资格判unsupported并明确理由，revision=null；不要为使其入选而编造或补写机制。存在真实受支持的合格分析但当前表述越界时，才在同一原文范围内revision。'
 REVIEW_PROMPT += '\n每条reviews.rationale必须为非空字符串，fully_supported也要说明原文具体支持什么以及范围、强度是否一致，严禁填null或空串。revision=null仅表示没有修订，不表示审核理由可以省略。'
 REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
