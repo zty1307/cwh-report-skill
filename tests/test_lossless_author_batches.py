@@ -63,6 +63,16 @@ def test_synthesis_feedback_is_routed_without_dropping_article_errors():
     assert not is_synthesis_feedback('[议题] contradictory interpretation without source support')
 
 
+def test_literal_claim_feedback_only_invalidates_the_affected_batch():
+    from cwh_author_batches import article_feedback_for_ids
+    error = '[动态议题] w11 claim[0] role missing from selected quote'
+    assert article_feedback_for_ids([error], ['r1', 'r2']) == []
+    assert article_feedback_for_ids([error], ['w10', 'w11']) == [error]
+    unscoped = 'Unknown article coverage problem'
+    assert article_feedback_for_ids([unscoped], ['r1']) == [unscoped]
+    assert article_feedback_for_ids(['Formal selection has 13 independent voices'], ['r1']) == []
+
+
 def test_synthesis_feedback_changes_selection_packet_only():
     packet, decisions, _ = fixture()
     request = synthesis_packet(packet, decisions)

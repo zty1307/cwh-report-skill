@@ -28,6 +28,19 @@ def is_synthesis_feedback(value):
         'Ownership repair ', 'Voice reserve repair ', 'Joint ownership and cap repair '))
 
 
+def article_feedback_for_ids(feedback, ids):
+    """Route explicit claim-anchor errors to their article batch; keep unknown scope."""
+    wanted = set(ids)
+    result = []
+    for item in feedback:
+        if is_synthesis_feedback(item):
+            continue
+        named = set(re.findall(r'\b([A-Za-z][A-Za-z0-9_-]*)\s+claim\[\d+\]', str(item)))
+        if not named or named & wanted:
+            result.append(item)
+    return result
+
+
 def partition_author_packet(packet, max_characters=MAX_AUTHOR_PACKET_CHARACTERS,
                             max_items=MAX_AUTHOR_BATCH_ITEMS):
     if max_characters < 1 or max_items < 1:

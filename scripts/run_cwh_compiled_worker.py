@@ -356,9 +356,8 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         if packet['topic'] in targets:
             retained = {'source_packet_sha256': digest, 'feedback': list(feedback)}
         if not allow_article_batches and retained.get('feedback'):
-            from cwh_author_batches import is_synthesis_feedback
-            retained = {**retained, 'feedback': [item for item in retained['feedback']
-                                               if not is_synthesis_feedback(item)]}
+            from cwh_author_batches import article_feedback_for_ids
+            retained = {**retained, 'feedback': article_feedback_for_ids(retained['feedback'], ids)}
         if retained:
             prior_feedback[packet['topic']] = retained
             atomic_write_json(feedback_path, prior_feedback)
@@ -383,11 +382,6 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                     batch_workspace = workspace / f'a{number}'
                     batch_workspace.mkdir(parents=True, exist_ok=True)
                     batch_prompt = prompt
-                    if retained.get('feedback'):
-                        from cwh_author_batches import is_synthesis_feedback
-                        article_feedback = [item for item in retained['feedback'] if not is_synthesis_feedback(item)]
-                        if article_feedback:
-                            batch_prompt += '\n仅修复本议题真实反馈：' + json.dumps(article_feedback, ensure_ascii=False)
                     result, run = review_author_article_batches(readable, transport_groups,
                         batch_prompt, command, batch_workspace, deadline - reserved,
                         reuse_cache=reuse_cache, feedback=retained.get('feedback') or (),
