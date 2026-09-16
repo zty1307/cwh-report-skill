@@ -211,3 +211,30 @@ def test_synthesis_transport_failure_does_not_trigger_fresh_call(tmp_path):
     with pytest.raises(HostModelError):
         native_topic_synthesis(synthesis_packet(packet, decisions), decisions, [], tmp_path, 90, model, reuse_cache=False)
     assert calls == [1]
+
+
+def test_synthesis_index_feedback_names_exact_item_and_missing_claim():
+    _, decisions, valid = fixture()
+    valid['items'][0]['claim_clusters'] = [{'index': 0, 'cluster': 'k1'}]
+    with pytest.raises(ValueError) as caught:
+        apply_synthesis(decisions, valid)
+    assert 'item=r1' in str(caught.value)
+    assert 'required_indices=[0, 1]' in str(caught.value)
+    assert 'missing_indices=[1]' in str(caught.value)
+
+
+def test_synthesis_retry_workspace_retains_hash_bound_original_inputs(tmp_path):
+    packet, decisions, valid = fixture()
+    request = synthesis_packet(packet, decisions)
+    def model(*args, **kwargs):
+        return valid, {'session_id': 'native', 'seconds': 1}
+    _, first = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=False)
+    original_path = Path(first['synthesis_input']['path'])
+    original_bytes = original_path.read_bytes()
+    changed = copy.deepcopy(request)
+    changed['scope'] = 'Different later authoring input'
+    _, second = native_topic_synthesis(changed, decisions, [], tmp_path, 90, model, reuse_cache=False)
+    assert first['synthesis_input'] != second['synthesis_input']
+    assert original_path.read_bytes() == original_bytes
+    assert json.loads(original_path.read_text('utf-8')) == request
+    assert Path(second['synthesis_original_decisions']['path']).is_file()

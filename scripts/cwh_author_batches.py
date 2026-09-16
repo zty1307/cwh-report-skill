@@ -6,6 +6,7 @@ claims and assign native clusters. All later evidence/reviewer gates still run.
 """
 from __future__ import annotations
 import copy
+import hashlib
 import json
 import time
 from cwh_source_spans import selected_quote
@@ -100,23 +101,38 @@ def synthesis_prompt():
         '排除或重复项claim_clusters为[]。不要返回claims或任何新事实；无共同判断不强行并簇。')
 
 
+def synthesis_checkpoint(workspace, label, value):
+    digest = hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    path = workspace / f'{label}-{digest[:16]}.json'
+    if path.exists():
+        if json.loads(path.read_text(encoding='utf-8')) != value:
+            raise ValueError('Synthesis checkpoint hash collision')
+    else:
+        atomic_write_json(path, value)
+    return {'path': str(path), 'sha256': digest}
+
+
 def native_topic_synthesis(request, decisions, command, workspace, timeout, model_call, *, reuse_cache):
     """One bounded shape repair, without re-reading completed article batches."""
     atomic_write_json(workspace / 'synthesis_input.json', request)
     atomic_write_json(workspace / 'synthesis_original_decisions.json', decisions)
+    provenance = {'synthesis_input': synthesis_checkpoint(workspace, 'si', request),
+                  'synthesis_original_decisions': synthesis_checkpoint(workspace, 'sd', decisions)}
     deadline = time.monotonic() + min(90, timeout)
     original_response, original_run, problem = None, None, None
     try:
         response, original_run = model_call(request, synthesis_prompt(), command, workspace,
             'topic-synthesis', max(1, deadline-time.monotonic()), reuse_cache=reuse_cache)
         original_response = response
-        return apply_synthesis(decisions, response), original_run
+        return apply_synthesis(decisions, response), {**original_run, **provenance}
     except SemanticResponseError as exc:
         original_run, problem = exc.run, str(exc)
     except ValueError as exc:
         problem = str(exc)
-    failure = {'validation_problem': problem, 'original_response': original_response, 'original_run': original_run}
+    failure = {'validation_problem': problem, 'original_response': original_response,
+               'original_run': original_run, **provenance}
     atomic_write_json(workspace / 'synthesis_shape_failure.json', failure)
+    synthesis_checkpoint(workspace, 'sf', failure)
     remaining = deadline-time.monotonic()
     if remaining < 15:
         raise ValueError('Topic synthesis invalid without remaining local repair time: ' + problem)
@@ -126,7 +142,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
         command, workspace, 'synthesis-shape-repair', min(45, remaining), reuse_cache=False)
     result = apply_synthesis(decisions, response)
     result['transport_repairs'].append({'kind': 'native_synthesis_shape_repair', **failure, 'repair_run': repair_run})
-    return result, {**repair_run, 'synthesis_initial_run': original_run,
+    return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
                    'seconds': (original_run or {}).get('seconds', 0) + repair_run.get('seconds', 0)}
 
 
@@ -182,8 +198,12 @@ def apply_synthesis(decisions, response):
                 continue  # Explicit native exclusion, retained verbatim in the audit.
             else:
                 raise ValueError('Invalid native claim-cluster assignment or missing exclusion reason')
-        if sorted(indices) != list(range(len(target['claims']))):
-            raise ValueError('Native synthesis must explicitly account for every existing claim')
+        required = list(range(len(target['claims'])))
+        if sorted(indices) != required:
+            raise ValueError('Native synthesis must explicitly account for every existing claim; '
+                f"item={patch['id']}; required_indices={required}; returned_indices={indices}; "
+                f"missing_indices={sorted(set(required)-set(indices))}; unknown_indices={sorted(set(indices)-set(required))}. "
+                'An item with no retained claims must be explicitly excluded or duplicate, not eligible.')
         if not retained:
             raise ValueError('Eligible synthesis item must retain at least one original claim')
         original_claims = target['claims']

@@ -50,6 +50,8 @@ The existing literal CJK-quote escaping also recognizes an internal quote at the
 
 An author item marked eligible but containing no atomic claims is contradictory, not an implicit exclusion. The bounded missing-item completion route also sends these exact affected items, their unchanged full source, and their invalid prior decisions to the native model. It may return source-backed claims or an explicit exclusion/duplicate decision. The host never infers exclusion from prose. Unaffected items and headings remain locked; the original answer and actual repair run are retained. A second empty eligible answer still fails, and all mapping and independent-review gates remain required.
 
+Synthesis requests, original author decisions and rejected responses additionally receive short content-addressed checkpoints. Later stage attempts can update the convenience filenames without destroying earlier inputs. Actual run provenance points to the immutable input hashes. Claim-index feedback names the exact item, required/returned indices and missing/unknown indices; it does not guess a replacement claim. Synthesis also reads the shared heading length targets and single-judgment style rules, without importing the competing article-author schema.
+
 ## Delivery and success
 
 ### Experimental host-compiled semantic transport
