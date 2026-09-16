@@ -25,7 +25,7 @@ def is_synthesis_feedback(value):
     """Only explicit selection/shape failures may skip unchanged article review."""
     return any(marker in str(value) for marker in (
         'Flat synthesis ', 'Formal selection has ', 'Topic synthesis invalid',
-        'Ownership repair ', 'Voice reserve repair ', 'Joint ownership and cap repair '))
+        'Ownership repair ', 'Voice reserve repair ', 'Joint ownership and cap repair ', 'Ranked selection '))
 
 
 def article_feedback_for_ids(feedback, ids):
@@ -97,9 +97,9 @@ def synthesis_packet(packet, decisions):
         'scope': 'Original full articles reviewed in native batches; synthesis is not independent verification'}
 
 
-def synthesis_prompt():
+def synthesis_prompt(ranked=False):
     from cwh_claim_synthesis import flat_prompt
-    return flat_prompt(writing_rules()['viewpoint'])
+    return flat_prompt(writing_rules()['viewpoint'], ranked=ranked)
 
 
 def synthesis_checkpoint(workspace, label, value):
@@ -121,15 +121,20 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
     provenance = {'synthesis_input': synthesis_checkpoint(workspace, 'si', request),
                   'synthesis_original_decisions': synthesis_checkpoint(workspace, 'sd', decisions)}
     transport, mapping = flat_packet(request)
+    ranked = (request.get('formal_selection') or {}).get('selection_mode') == 'ranked_positive_v1'
+    prompt = synthesis_prompt(ranked=ranked)
     provenance['synthesis_transport'] = synthesis_checkpoint(workspace, 'st', transport)
     provenance['synthesis_claim_ids'] = synthesis_checkpoint(workspace, 'sm',
         {key: list(value) for key, value in mapping.items()})
     deadline = time.monotonic() + min(90, timeout)
     original_response, original_run, problem = None, None, None
     try:
-        response, original_run = model_call(transport, synthesis_prompt(), command, workspace,
+        response, original_run = model_call(transport, prompt, command, workspace,
             'topic-synthesis', max(1, deadline-time.monotonic()), reuse_cache=reuse_cache)
         original_response = response
+        if ranked:
+            from cwh_ranked_selection import ranked_selection
+            response = ranked_selection(transport, response)
         return restore_synthesis(decisions, mapping, response, request.get('formal_selection')), {**original_run, **provenance}
     except SemanticResponseError as exc:
         original_run, problem = exc.run, str(exc)
@@ -142,6 +147,15 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
     remaining = deadline-time.monotonic()
     if remaining < 15:
         raise ValueError('Topic synthesis invalid without remaining local repair time: ' + problem)
+    if ranked:
+        from cwh_ranked_selection import ranked_selection
+        response, repair_run = model_call({**transport, 'previous_selection': original_response},
+            prompt + '\n仅修正本次入选清单格式或无效编号：' + problem,
+            command, workspace, 'ranked-selection-repair', min(45, remaining), reuse_cache=False)
+        result = restore_synthesis(decisions, mapping, ranked_selection(transport, response), request.get('formal_selection'))
+        result['transport_repairs'].append({'kind': 'native_ranked_selection_repair', **failure, 'repair_run': repair_run})
+        return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
+                       'seconds': (original_run or {}).get('seconds', 0) + repair_run.get('seconds', 0)}
     if problem.startswith('Formal selection has ') and original_response is not None:
         from cwh_claim_synthesis import voice_reserve_request, apply_voice_reserves
         reserve_request = voice_reserve_request(transport, original_response)

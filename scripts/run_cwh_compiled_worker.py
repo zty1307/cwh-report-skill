@@ -204,6 +204,7 @@ def author_contract_sha256(prompt, command):
     contract = {'prompt': prompt, 'command': command, 'repair_prompt': REPAIR_PROMPT,
                 'author_strategy': 'lossless_article_batches_native_topic_synthesis_v1',
                 'synthesis_contract': synthesis_prompt(),
+                'bounded_synthesis_contract': synthesis_prompt(ranked=True),
                 'batch_soft_limit': MAX_AUTHOR_PACKET_CHARACTERS, 'batch_items': MAX_AUTHOR_BATCH_ITEMS,
                 'shape': single_topic_author_contract({'topic': '', 'items': []})}
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -315,6 +316,8 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         manifest.append({'batch': number, 'item_ids': ids,
             'transport_characters': len(json.dumps(group, ensure_ascii=False, separators=(',', ':')))})
     request = synthesis_packet(packet, choices)
+    if (request.get('formal_selection') or {}).get('allow_reserve'):
+        request['formal_selection'] = {**request['formal_selection'], 'selection_mode': 'ranked_positive_v1'}
     if synthesis_feedback:
         request['synthesis_validation_feedback'] = synthesis_feedback
     if not request['eligible_items']:

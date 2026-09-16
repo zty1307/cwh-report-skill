@@ -12,7 +12,9 @@ import json
 VERDICTS = {'fully_supported', 'partially_supported', 'unsupported', 'uncertain'}
 
 
-def review_field_errors(result, expected_ids):
+def review_field_errors(result, expected_ids, claims=None):
+    from domestic_evidence_mapping import has_ambiguous_meeting_reference
+    originals = {row['id']: row for row in claims or []}
     rows = result.get('reviews')
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise ValueError('Independent review requires a reviews object array')
@@ -27,6 +29,10 @@ def review_field_errors(result, expected_ids):
         if not isinstance(row.get('rationale'), str) or not row['rationale'].strip():
             fields.append('rationale')
         revision = row.get('revision')
+        original = originals.get(row['id'], {})
+        if row.get('verdict') == 'fully_supported' and (original.get('reference_expansion_required') is True
+                or has_ambiguous_meeting_reference(original.get('formal_claim'))):
+            fields.append('unexpanded_meeting_reference_requires_native_revision')
         if revision is not None:
             if not isinstance(revision, dict) or any(
                 not isinstance(revision.get(key), str) or not revision[key].strip()
@@ -48,7 +54,7 @@ def review_field_errors(result, expected_ids):
 def retry_invalid_review_fields(request, result, run, prompt, command, workspace, timeout):
     from cwh_host_research import semantic_json
     ids = [claim['id'] for claim in request['claims']]
-    errors = review_field_errors(result, ids)
+    errors = review_field_errors(result, ids, request['claims'])
     if not errors:
         return result, run
     if timeout < 15:
@@ -61,9 +67,11 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         prompt + '\n此前正文审核含空值或非法字段，尚未通过字段门禁。只返回reviews，覆盖本输入全部claim ID一次，'
         '按每条冻结excerpt重新核验并给出非空字符串rationale；可以修正verdict，不强制维持此前支持结论。'
         'revision有值时完整填写formal_claim、verdict、rationale；确无可支持观点可以uncertain、revision=null并解释。'
-        '不审核标题，不编造缺失论据。', command, workspace,
+        '不审核标题，不编造缺失论据。遇unexpanded_meeting_reference反馈，原句的会议指称未展开，不能直接fully_supported；'
+        '须根据sources标题或开头确认实际会议名称，在revision中由你明确名称，原文论据仍只取同条excerpt。'
+        '无法确认就uncertain且revision=null，不得由report_agenda猜测。', command, workspace,
         'independent-review-field-retry', min(45, timeout))
-    remaining = review_field_errors(corrected, ids)
+    remaining = review_field_errors(corrected, ids, request['claims'])
     if remaining:
         raise ValueError('Independent review field retry still invalid: ' + json.dumps(remaining, ensure_ascii=False))
     combined = copy.deepcopy(result)

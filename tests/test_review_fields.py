@@ -69,3 +69,15 @@ def test_invalid_retry_is_rejected_after_one_call():
 def test_wrong_or_missing_ids_cannot_be_guessed(rows):
     with pytest.raises(ValueError, match='exactly once'):
         review_field_errors({'reviews': rows}, ['e1'])
+
+
+def test_ambiguous_meeting_reference_needs_native_revision_not_host_replacement():
+    request, result, run = fixtures()
+    request['claims'][0].update(formal_claim='会议首次提出该措施，可针对已有问题完善政策机制。', reference_expansion_required=True)
+    result['reviews'][0]['rationale'] = '文字原样出现'
+    assert review_field_errors(result, ['e1'], request['claims'])[0]['invalid_fields'] == ['unexpanded_meeting_reference_requires_native_revision']
+    corrected = {'reviews': [{'id': 'e1', 'verdict': 'uncertain', 'rationale': '无法确认实际会议，不猜测', 'revision': None}]}
+    with patch('cwh_host_research.semantic_json', return_value=(corrected, {'session_id': 'native-recheck'})):
+        reviewed, _ = retry_invalid_review_fields(request, result, run, '', [], Path('.'), 45)
+    assert reviewed['reviews'] == corrected['reviews']
+    assert request['claims'][0]['formal_claim'].startswith('会议首次')
