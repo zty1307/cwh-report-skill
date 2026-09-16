@@ -29,7 +29,7 @@ from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from cwh_heading_quality import cross_topic_shared_source_spans
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
 from cwh_writing_rules import writing_rules
-from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, apply_synthesis,
+from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, native_topic_synthesis,
                                 MAX_AUTHOR_PACKET_CHARACTERS, MAX_AUTHOR_BATCH_ITEMS)
 
 
@@ -203,7 +203,7 @@ def author_contract_sha256(prompt, command):
     """A repair checkpoint belongs to its author rules and model transport."""
     contract = {'prompt': prompt, 'command': command, 'repair_prompt': REPAIR_PROMPT,
                 'author_strategy': 'lossless_article_batches_native_topic_synthesis_v1',
-                'synthesis_contract': synthesis_prompt(prompt),
+                'synthesis_contract': synthesis_prompt(),
                 'batch_soft_limit': MAX_AUTHOR_PACKET_CHARACTERS, 'batch_items': MAX_AUTHOR_BATCH_ITEMS,
                 'shape': single_topic_author_contract({'topic': '', 'items': []})}
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -311,9 +311,8 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         remaining = deadline - time.monotonic()
         if remaining < 15:
             raise TimeoutError('No remaining native topic synthesis budget')
-        response, synthesis_run = semantic_json(request, synthesis_prompt(prompt), command, workspace,
-            'topic-synthesis', min(90, remaining), reuse_cache=reuse_cache)
-        result = apply_synthesis(choices, response)
+        result, synthesis_run = native_topic_synthesis(request, choices, command, workspace,
+            remaining, semantic_json, reuse_cache=reuse_cache)
     run = {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
         'transport': 'lossless_article_batches_native_topic_synthesis',
         'batch_manifest': manifest, 'batch_runs': batch_runs, 'synthesis_run': synthesis_run,
@@ -430,7 +429,8 @@ def actual_author_run_ids(run):
         children = [*(run.get('batch_runs') or []), run.get('synthesis_run') or {}]
     else:
         children = [run.get(key) or {} for key in (
-            'missing_item_completion_run', 'missing_reason_completion_run', 'web_metadata_repair_run')]
+            'missing_item_completion_run', 'missing_reason_completion_run', 'web_metadata_repair_run',
+            'synthesis_initial_run')]
         children.extend(run.get('reason_completion_runs') or [])
     values = [] if transport in {'sequential_single_topic_semantic', 'lossless_article_batches_native_topic_synthesis'} else (
         [run['session_id']] if run.get('session_id') and run.get('model_invoked') is not False else [])

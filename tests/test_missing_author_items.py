@@ -54,3 +54,32 @@ def test_no_call_if_complete_or_no_budget(monkeypatch, tmp_path):
     assert repair_missing_author_items({'items': [{'id': 'r1'}]}, decision, '', [], tmp_path, 90, 'coverage') == (decision, None)
     with pytest.raises(ValueError, match='missing IDs'):
         repair_missing_author_items({'items': [{'id': 'r1'}, {'id': 'r2'}]}, decision, '', [], tmp_path, 14, 'coverage')
+
+
+def test_empty_eligible_item_gets_native_local_decision_without_changing_other_rows(monkeypatch, tmp_path):
+    packet = {'topic': '动态政策', 'items': [{'id': 'r1', 'segments': [{'id': 1, 'text': '完整原文一'}]},
+        {'id': 'r2', 'segments': [{'id': 1, 'text': '完整原文二'}]}]}
+    decision = {'heading': '原生标题', 'clusters': [], 'items': [
+        {'id': 'r1', 'decision': 'excluded', 'reason': '仅会议事实', 'claims': []},
+        {'id': 'r2', 'decision': 'eligible', 'reason': '与已选来源重复，排除', 'claims': []}]}
+    original = copy.deepcopy(decision)
+    def model(request, prompt, command, workspace, label, timeout, **kwargs):
+        assert request['items'] == [packet['items'][1]]
+        assert request['invalid_prior_items'] == [decision['items'][1]]
+        assert timeout <= 45
+        return {'items': [{'id': 'r2', 'decision': 'duplicate', 'reason': '完整原文确认同主体同判断', 'claims': []}]}, {'session_id': 'new-native'}
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    repaired, run = repair_missing_author_items(packet, decision, '规则', [], tmp_path, 60, 'items')
+    assert decision == original and repaired['items'][0] == original['items'][0]
+    assert repaired['items'][1]['decision'] == 'duplicate'
+    assert repaired['heading'] == original['heading'] and repaired['clusters'] == original['clusters']
+    assert repaired['transport_repairs'][-1]['empty_eligible_ids'] == ['r2']
+    assert run['session_id'] == 'new-native'
+
+
+def test_empty_eligible_repair_may_not_return_another_empty_approval(monkeypatch, tmp_path):
+    decision = {'items': [{'id': 'r1', 'decision': 'eligible', 'reason': '选入但缺观点', 'claims': []}]}
+    monkeypatch.setattr('cwh_host_research.semantic_json', lambda *a, **k: (copy.deepcopy(decision), {'session_id': 'native'}))
+    with pytest.raises(ValueError):
+        repair_missing_author_items({'topic': '政策', 'items': [{'id': 'r1'}]}, decision, '', [], tmp_path, 60, 'items')
+    assert decision['items'][0]['decision'] == 'eligible' and decision['items'][0]['claims'] == []

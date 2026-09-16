@@ -8,7 +8,7 @@ from cwh_writing_rules import writing_rules
 
 
 def repair_missing_author_items(packet, decision, prompt, command, workspace, timeout, label):
-    """Complete only absent IDs once; never reinterpret already returned items."""
+    """Complete absent IDs or contradictory empty eligible rows once, locally."""
     from cwh_host_research import semantic_json
     rows = decision.get('items')
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
@@ -20,31 +20,43 @@ def repair_missing_author_items(packet, decision, prompt, command, workspace, ti
     if any(not isinstance(value, str) for value in returned) or len(returned) != len(set(returned)) or set(returned) - set(wanted):
         raise ValueError('Single-topic response must review every item exactly once; duplicate or unknown IDs')
     missing = [value for value in wanted if value not in set(returned)]
-    if not missing:
+    empty_eligible = [row['id'] for row in rows if row.get('decision') == 'eligible'
+                      and (not isinstance(row.get('claims'), list) or not row['claims'])]
+    repair_ids = [value for value in wanted if value in missing or value in empty_eligible]
+    if not repair_ids:
         return decision, None
-    if len(missing) > 12 or timeout < 15:
-        raise ValueError('Single-topic response must review every item exactly once; missing IDs: ' + ','.join(missing))
-    request = {**packet, 'items': [row for row in packet['items'] if row['id'] in missing],
+    if len(repair_ids) > 12 or timeout < 15:
+        raise ValueError('Single-topic response must review every item exactly once; missing IDs: '
+                         + ','.join(missing) + '; empty eligible IDs: ' + ','.join(empty_eligible))
+    request = {**packet, 'items': [row for row in packet['items'] if row['id'] in repair_ids],
                'existing_clusters': copy.deepcopy(decision.get('clusters') or [])}
-    response, run = semantic_json(request, prompt + '\n仅补审下列遗漏ID，不重新写已返回记录、标题或簇。'
-        '直接返回JSON {"items":[完整审核记录]}。每个遗漏ID恰好一次；claims如有观点只能引用输入existing_clusters中适合的key。'
-        '不得仅因遗漏就判excluded，仍须依据本篇完整原文；不返回heading、clusters或其他ID。'
-        '\nrequired_item_ids=' + json.dumps(missing, ensure_ascii=False),
+    if empty_eligible:
+        request['invalid_prior_items'] = [copy.deepcopy(row) for row in rows if row['id'] in empty_eligible]
+    response, run = semantic_json(request, prompt + '\n仅补审下列遗漏ID或eligible却没有claims的矛盾记录，其他记录、标题和簇均锁定。'
+        '直接返回JSON {"items":[完整审核记录]}。每个required_item_id恰好一次；claims如有观点只能引用输入existing_clusters中适合的key。'
+        'eligible必须有完整非空claims；确为重复或排除就明确decision=duplicate或excluded、claims=[]，并写原文依据。'
+        '不能同时写eligible和claims=[]。不得仅因遗漏或上次空答就判excluded，仍须依据本篇完整原文；'
+        '不返回heading、clusters或其他ID。'
+        '\nrequired_item_ids=' + json.dumps(repair_ids, ensure_ascii=False),
         command, workspace, label, min(45, timeout), reuse_cache=True)
     patches = response.get('items')
     if (response.get('topic') not in (None, packet['topic'])
-            or not isinstance(patches, list) or len(patches) != len(missing)
+            or not isinstance(patches, list) or len(patches) != len(repair_ids)
             or any(not isinstance(row, dict) or not isinstance(row.get('id'), str) for row in patches)
-            or {row['id'] for row in patches} != set(missing)
+            or {row['id'] for row in patches} != set(repair_ids)
             or any(row.get('decision') not in {'eligible', 'excluded', 'duplicate'}
-                   or not isinstance(row.get('reason'), str) or not row['reason'].strip() for row in patches)):
+                   or not isinstance(row.get('reason'), str) or not row['reason'].strip()
+                   or (row.get('decision') == 'eligible' and
+                       (not isinstance(row.get('claims'), list) or not row['claims'])) for row in patches)):
         raise ValueError('Missing-item completion must cover exactly missing IDs with native decisions and reasons')
     repaired = copy.deepcopy(decision)
     by_id = {row['id']: row for row in repaired['items']}
     by_id.update({row['id']: copy.deepcopy(row) for row in patches})
     repaired['items'] = [by_id[value] for value in wanted]
-    repaired.setdefault('transport_repairs', []).append({'kind': 'model_missing_item_completion',
-        'item_ids': missing, 'run': run, 'original_items': copy.deepcopy(rows),
+    repaired.setdefault('transport_repairs', []).append({
+        'kind': 'model_invalid_or_missing_item_completion' if empty_eligible else 'model_missing_item_completion',
+        'item_ids': repair_ids, 'missing_ids': missing, 'empty_eligible_ids': empty_eligible,
+        'run': run, 'original_items': copy.deepcopy(rows),
         'completion_response': copy.deepcopy(response)})
     return repaired, run
 

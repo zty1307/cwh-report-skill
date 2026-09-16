@@ -5,7 +5,7 @@ import sys
 import time
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from cwh_author_batches import partition_author_packet, synthesis_packet, apply_synthesis, synthesis_prompt
+from cwh_author_batches import partition_author_packet, synthesis_packet, apply_synthesis, synthesis_prompt, native_topic_synthesis
 import run_cwh_compiled_worker as worker
 from cwh_host_research import HostModelError
 
@@ -51,7 +51,8 @@ def test_synthesis_receives_every_existing_claim_and_exact_quotes():
     assert [claim['original_excerpt'] for claim in request['eligible_items'][0]['claims']] == ['原文甲。', '原文乙。']
     assert request['previously_excluded_items'][0]['id'] == 'r2'
     assert 'content' not in json.dumps(request, ensure_ascii=False)
-    assert '不是独立审核' in synthesis_prompt('作者原规则')
+    assert '不是独立审核' in synthesis_prompt()
+    assert '"quote_range"' not in synthesis_prompt()
     decisions[0]['claims'][0]['quote_range'] = [4, 5]
     with pytest.raises(ValueError, match='ordered pair'):
         synthesis_packet(packet, decisions)
@@ -166,3 +167,33 @@ def test_completed_invalid_json_feedback_is_recoverable_but_transport_failure_is
         'blocker': '已完成回复的JSON多一个闭合符'}) == ['已完成回复的JSON多一个闭合符']
     assert worker.recoverable_author_blocker_feedback({'error_type': 'HostModelError', 'blocker': '124'}) == []
     assert worker.recoverable_author_blocker_feedback({'error_type': 'TimeoutError', 'blocker': '无剩余预算'}) == []
+
+
+def test_invalid_synthesis_repairs_only_summary_preserving_native_claims(tmp_path):
+    packet, decisions, valid = fixture()
+    request = synthesis_packet(packet, decisions)
+    invalid = copy.deepcopy(valid)
+    invalid['items'][0]['claims'] = [{'claim': '模型改写不允许进入原判断'}]
+    calls = []
+    def model(packet, prompt, command, workspace, label, timeout, reuse_cache):
+        calls.append((copy.deepcopy(packet), label, timeout, reuse_cache))
+        return (invalid if len(calls) == 1 else valid), {'session_id': label, 'seconds': 2}
+    result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=True)
+    assert [row[1] for row in calls] == ['topic-synthesis', 'synthesis-shape-repair']
+    assert calls[0][0] == calls[1][0] == request
+    assert calls[1][2] <= 45 and calls[1][3] is False
+    assert result['items'][0]['claims'][0]['claim'] == decisions[0]['claims'][0]['claim']
+    assert result['transport_repairs'][-1]['original_response'] == invalid
+    assert run['synthesis_initial_run']['session_id'] == 'topic-synthesis'
+    assert (tmp_path / 'synthesis_shape_failure.json').is_file()
+
+
+def test_synthesis_transport_failure_does_not_trigger_fresh_call(tmp_path):
+    packet, decisions, _ = fixture()
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(1)
+        raise HostModelError('native timeout', 124)
+    with pytest.raises(HostModelError):
+        native_topic_synthesis(synthesis_packet(packet, decisions), decisions, [], tmp_path, 90, model, reuse_cache=False)
+    assert calls == [1]
