@@ -273,6 +273,41 @@ def extend_unique_attribution_context(packet, response, run):
     return result
 
 
+def quarantine_unresolved_spans(packet, response, problems, run):
+    """Bounded delivery may retain valid candidates, never invalid attribution."""
+    if not (packet.get('formal_selection') or {}).get('allow_reserve'):
+        return None
+    result = copy.deepcopy(response)
+    quarantined = []
+    for item in result.get('items', []):
+        if item.get('decision') != 'eligible':
+            continue
+        kept, rejected = [], []
+        for index, claim in enumerate(item.get('claims') or []):
+            errors = [error for error in problems if error.startswith(f"{item['id']} claim[{index}] ")]
+            if errors:
+                rejected.append({'index': index, 'claim': copy.deepcopy(claim), 'validation_problems': errors})
+            else:
+                kept.append(claim)
+        if not rejected:
+            continue
+        original = copy.deepcopy(item)
+        item['claims'] = kept
+        audit = {'reason': 'fixed_attribution_span_unverified', 'original_item': original,
+                 'rejected_claims': rejected, 'actual_repair_run': copy.deepcopy(run)}
+        item.setdefault('transport_exclusions', []).append(audit)
+        if not kept:
+            item.update(decision='excluded', classification_origin='deterministic_attribution_gate',
+                reason='fixed_attribution_span_unverified:引文与人物身份定位补修后仍未核实，隔离正式选材；'
+                       '原始判断和原文保留，不据此断言文章没有解读')
+        quarantined.append({'id': item['id'], **audit})
+    if not quarantined or article_span_problems(packet, result):
+        return None
+    result.setdefault('transport_repairs', []).append({'kind': 'quarantined_unverified_attribution',
+        'items': quarantined, 'scope': 'Excluded from prose pending evidence verification; retained claims still require independent review'})
+    return result
+
+
 def native_article_batch(packet, prompt, command, workspace, label, timeout, model_call, *, reuse_cache):
     """Repair a completed malformed batch locally, keeping earlier batches intact."""
     deadline = time.monotonic() + timeout
@@ -324,7 +359,10 @@ def native_article_batch(packet, prompt, command, workspace, label, timeout, mod
     response = extend_unique_attribution_context(packet, response, run)
     problems = article_span_problems(packet, response)
     if problems:
-        raise SemanticResponseError('; '.join(problems), run)
+        quarantined = quarantine_unresolved_spans(packet, response, problems, run)
+        if quarantined is None:
+            raise SemanticResponseError('; '.join(problems), run)
+        response = quarantined
     response = copy.deepcopy(response)
     response.setdefault('transport_repairs', []).append({'kind': 'native_article_span_repair' if original_response else 'native_article_batch_json_repair',
         'failure_checkpoint': checkpoint, **failure})
