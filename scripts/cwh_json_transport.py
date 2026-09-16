@@ -177,19 +177,31 @@ def escape_cjk_internal_quotes(text):
 
 
 def single_fenced_json(text):
-    """Decode one intact initial JSON fence; never choose between answers."""
+    """Decode one intact JSON object in a fence, allowing only a missing end fence.
+
+    An absent Markdown delimiter is not an absent JSON delimiter: the whole
+    remaining payload must parse strictly, without inventing any JSON content.
+    """
     stripped = text.strip()
     match = re.fullmatch(r'```(?:json)?[ \t]*\r?\n(.*?)\r?\n```[ \t]*(?:\r?\n(.*))?',
                          stripped, re.DOTALL | re.IGNORECASE)
-    if not match or stripped.count('```') != 2:
-        return None
-    outside = match.group(2) or ''
+    kind = 'decoded_single_complete_json_fence'
+    if match and stripped.count('```') == 2:
+        payload = match.group(1)
+        outside = match.group(2) or ''
+    else:
+        opening = re.fullmatch(r'```(?:json)?[ \t]*\r?\n(.*)', stripped,
+                               re.DOTALL | re.IGNORECASE)
+        if not opening or stripped.count('```') != 1:
+            return None
+        payload, outside = opening.group(1), ''
+        kind = 'decoded_complete_json_without_closing_markdown_fence'
     if any(char in outside for char in '{}[]`'):
         return None
     try:
         def reject_constant(value):
             raise ValueError('Non-standard JSON constant')
-        result = json.loads(match.group(1), object_pairs_hook=unique_members,
+        result = json.loads(payload, object_pairs_hook=unique_members,
                             parse_constant=reject_constant)
     except ValueError:
         return None
@@ -199,7 +211,7 @@ def single_fenced_json(text):
     if repairs is not None and not isinstance(repairs, list):
         return None
     result.setdefault('transport_repairs', []).append({
-        'kind': 'decoded_single_complete_json_fence',
+        'kind': kind,
         'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
     return result
 
