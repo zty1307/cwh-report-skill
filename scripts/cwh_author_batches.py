@@ -122,6 +122,22 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
     remaining = deadline-time.monotonic()
     if remaining < 15:
         raise ValueError('Topic synthesis invalid without remaining local repair time: ' + problem)
+    if problem.startswith('Formal selection has ') and original_response is not None:
+        from cwh_claim_synthesis import voice_reserve_request, apply_voice_reserves
+        reserve_request = voice_reserve_request(transport, original_response)
+        if reserve_request:
+            patch, repair_run = model_call(reserve_request,
+                '正文独立声音超过上限。仅选择转入备选的主体，不重写观点或分组，不调用工具。'
+                '依据当前完整观点的代表性及重复性，至少选择minimum_reserve_voices位，保留最有价值的声音。'
+                '这些是有效备选，不得伪称其原文无依据。仅返回'
+                '{"choices":[{"id":"v1","reason":"本稿不选的具体理由"}]}。',
+                command, workspace, 'synthesis-voice-reserve', min(45, remaining), reuse_cache=False)
+            response = apply_voice_reserves(original_response, reserve_request, patch)
+            result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'))
+            result['transport_repairs'].append({'kind': 'native_voice_reserve_repair',
+                **failure, 'reserve_request': reserve_request, 'reserve_patch': patch, 'repair_run': repair_run})
+            return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
+                'seconds': (original_run or {}).get('seconds', 0) + repair_run.get('seconds', 0)}
     ownership = duplicate_assignment_request(transport, original_response)
     if ownership:
         patch, repair_run = model_call(ownership,

@@ -57,6 +57,51 @@ def apply_duplicate_assignments(original, request, patch):
     return result
 
 
+def voice_reserve_request(transport, response):
+    """Make an over-cap repair a choice of subjects, not another full rewrite."""
+    from cwh_viewpoint_gate import independent_voice_keys
+    policy = transport.get('formal_selection') or {}
+    maximum = policy.get('max_independent_voices')
+    if not policy.get('allow_reserve') or not isinstance(maximum, int) or maximum < 1:
+        return None
+    selected = {key for group in response['selected'] for key in group['claim_ids']}
+    voices = {}
+    for claim in transport['candidates']:
+        if claim['id'] not in selected:
+            continue
+        keys = independent_voice_keys([{'speaker_name': claim.get('speaker')}])
+        if not keys:
+            continue
+        key = next(iter(keys))
+        voice = voices.setdefault(key, {'id': f'v{len(voices)+1}', 'speaker': claim['speaker'], 'claims': []})
+        voice['claims'].append(copy.deepcopy(claim))
+    if len(voices) <= maximum:
+        return None
+    return {'topic': transport['topic'], 'max_independent_voices': maximum,
+            'minimum_reserve_voices': len(voices) - maximum, 'voices': list(voices.values())}
+
+
+def apply_voice_reserves(original, request, patch):
+    if not isinstance(patch, dict) or set(patch) != {'choices'} or not isinstance(patch['choices'], list):
+        raise ValueError('Voice reserve repair requires only choices')
+    choices = patch['choices']
+    voices = {row['id']: row for row in request['voices']}
+    if (not request['minimum_reserve_voices'] <= len(choices) < len(voices)
+        or any(not isinstance(row, dict) or set(row) != {'id', 'reason'}
+               or not isinstance(row['id'], str) or row['id'] not in voices
+               or not isinstance(row['reason'], str) or not row['reason'].strip() for row in choices)
+        or len({row['id'] for row in choices}) != len(choices)):
+        raise ValueError('Voice reserve repair requires enough unique existing voices and native reasons')
+    result = copy.deepcopy(original)
+    for choice in choices:
+        ids = {row['id'] for row in voices[choice['id']]['claims']}
+        for group in result['selected']:
+            group['claim_ids'] = [key for key in group['claim_ids'] if key not in ids]
+        result.setdefault('reserved', []).extend({'id': key, 'reason': choice['reason']} for key in sorted(ids))
+    result['selected'] = [row for row in result['selected'] if row['claim_ids']]
+    return result
+
+
 def flat_packet(request):
     candidates, mapping = [], {}
     seen_items = set()
