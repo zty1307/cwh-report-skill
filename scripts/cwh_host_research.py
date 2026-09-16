@@ -17,11 +17,12 @@ from build_research_plan import policy_search_subject
 
 
 class HostModelError(RuntimeError):
-    def __init__(self, message, exit_code, *, category="", retry_after=""):
+    def __init__(self, message, exit_code, *, category="", retry_after="", run=None):
         super().__init__(message)
         self.exit_code = exit_code
         self.category = category
         self.retry_after = retry_after
+        self.run = run
 
 
 class SemanticResponseError(ValueError):
@@ -223,7 +224,7 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
         message = f'Model request failed: {run["exit_code"]}; {run["log"]}'
         if category:
             message = f'Model request failed: {category}' + (f'; retry after {retry_after}' if retry_after else '')
-        raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after)
+        raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after, run=run)
     try:
         result = response_object(log)
     except ValueError as exc:

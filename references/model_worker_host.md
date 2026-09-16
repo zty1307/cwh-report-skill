@@ -82,4 +82,6 @@ For duplicate claim destinations, the single local synthesis repair asks only wh
 
 Bounded thin-cluster audit may record the host's actual selected subject and character counts when the author omitted a reason. It explicitly describes this draft, not a claim that further evidence does not exist. It cannot excuse missing evidence, empty prose, source mismatches or independent-review failure.
 
+An optional local web source/date repair timing out does not invalidate unrelated accepted sources. Keep the actual failed run, quarantine only still-unverified web candidates using the unchanged literal metadata gate, and continue; do not retry that timed-out request or accept unverified metadata. Permission, quota and rate-limit states still propagate and are never relabelled as missing evidence.
+
 Default research cutoff: 45 minutes; total budget: 60 minutes. Optional 40-minute mode remains separate. Review snapshots live in `review_delivery/`; they do not change pipeline status, source hashes, formal audit or `report/`. A status-only draft is not a completed report. Report formal success, review-only output, elapsed time, failed stage and untested stages separately. Do not infer multi-model reliability from unit tests or one connection probe.

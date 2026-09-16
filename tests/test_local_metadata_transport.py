@@ -103,3 +103,31 @@ def test_local_metadata_repair_does_not_hide_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr('run_cwh_compiled_worker.semantic_json', review)
     with pytest.raises(HostModelError):
         repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'test')
+
+
+def test_metadata_timeout_quarantines_only_unverified_source_without_retry(tmp_path, monkeypatch):
+    packet, decision = fixture()
+    original = copy.deepcopy(decision)
+    actual_run = {'session_id': 'observed-timeout', 'exit_code': 124, 'seconds': 45}
+    calls = []
+    def review(*args, **kwargs):
+        calls.append(1)
+        raise HostModelError('timeout', 124, run=actual_run)
+    monkeypatch.setattr('run_cwh_compiled_worker.semantic_json', review)
+    result, run = repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'test')
+    assert len(calls) == 1 and run == actual_run
+    assert result['items'][0]['decision'] == 'excluded'
+    assert result['items'][0]['claims'] == []
+    assert result['items'][1] == original['items'][1]
+    assert result['transport_repairs'][-1]['run']['exit_code'] == 124
+    assert decision == original
+
+
+@pytest.mark.parametrize('code,category', [(23, 'permission_denied'), (29, 'quota_exhausted'), (124, 'rate_limited')])
+def test_metadata_timeout_handler_never_hides_denied_or_quota_states(tmp_path, monkeypatch, code, category):
+    packet, decision = fixture()
+    def review(*args, **kwargs):
+        raise HostModelError('blocked', code, category=category)
+    monkeypatch.setattr('run_cwh_compiled_worker.semantic_json', review)
+    with pytest.raises(HostModelError):
+        repair_topic_web_metadata(packet, decision, [], tmp_path, 45, 'test')

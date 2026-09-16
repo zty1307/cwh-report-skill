@@ -266,6 +266,13 @@ def repair_topic_web_metadata(packet, decision, command, workspace, timeout, lab
     except SemanticResponseError as exc:
         run, failure = exc.run, str(exc)
         repaired = copy.deepcopy(decision)
+    except HostModelError as exc:
+        if exc.exit_code != 124 or exc.category not in {'', 'timeout'}:
+            raise  # Permission, quota and transport-denial states are not hidden.
+        run, failure = exc.run, str(exc)
+        repaired = copy.deepcopy(decision)
+        # Optional metadata retry timed out: quarantine the still-unverified
+        # web candidates below, preserving accepted sources and the failed run.
     except ValueError as exc:
         failure = str(exc)
         repaired = copy.deepcopy(decision)
