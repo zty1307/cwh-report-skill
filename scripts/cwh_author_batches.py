@@ -233,12 +233,53 @@ def article_span_problems(packet, response):
     return problems
 
 
+def extend_unique_attribution_context(packet, response, run):
+    """Include one literal paired identity anchor; never infer identity or support."""
+    result = copy.deepcopy(response)
+    originals = {item['id']: item for item in packet.get('items', [])}
+    repairs = []
+    for item in result.get('items', []):
+        if item.get('decision') != 'eligible' or item.get('id') not in originals:
+            continue
+        segments = originals[item['id']].get('segments') or []
+        ids = [row['id'] for row in segments]
+        for number, claim in enumerate(item.get('claims') or []):
+            speaker, role, span = claim.get('speaker'), claim.get('role'), claim.get('quote_range')
+            if (claim.get('speaker_type') != 'named_person' or not speaker or not role
+                or not isinstance(span, list) or len(span) != 2 or any(value not in ids for value in span)):
+                continue
+            start, end = ids.index(span[0]), ids.index(span[1])
+            if start > end:
+                continue
+            quote = ''.join(row['text'] for row in segments[start:end+1])
+            if speaker not in quote or role in quote:
+                continue
+            pair = re.sub(r'\s+', '', role + speaker)
+            anchors = [i for i, row in enumerate(segments)
+                       if pair in re.sub(r'\s+', '', row['text'])]
+            if len(anchors) != 1:
+                continue
+            first, last = min(start, anchors[0]), max(end, anchors[0])
+            expanded = ''.join(row['text'] for row in segments[first:last+1])
+            if len(expanded) > 8000 or len(expanded) - len(quote) > 2000:
+                continue
+            repairs.append({'id': item['id'], 'claim_index': number, 'original_claim': copy.deepcopy(claim),
+                'original_range': list(span), 'expanded_range': [ids[first], ids[last]],
+                'identity_anchor_segment': ids[anchors[0]], 'original_model_run': copy.deepcopy(run)})
+            claim['quote_range'] = [ids[first], ids[last]]
+    if repairs:
+        result.setdefault('transport_repairs', []).append({'kind': 'unique_literal_identity_context_extension',
+            'scope': 'Exact same-source continuous context only; not semantic identity or claim approval', 'items': repairs})
+    return result
+
+
 def native_article_batch(packet, prompt, command, workspace, label, timeout, model_call, *, reuse_cache):
     """Repair a completed malformed batch locally, keeping earlier batches intact."""
     deadline = time.monotonic() + timeout
     original_response = None
     try:
         response, initial_run = model_call(packet, prompt, command, workspace, label, timeout, reuse_cache=reuse_cache)
+        response = extend_unique_attribution_context(packet, response, initial_run)
         problems = article_span_problems(packet, response)
         if problems:
             original_response = copy.deepcopy(response)
@@ -280,6 +321,7 @@ def native_article_batch(packet, prompt, command, workspace, label, timeout, mod
             command, workspace, label + '-json-repair', min(45, remaining), reuse_cache=False)
     if not isinstance(response, dict):
         raise SemanticResponseError('Article batch repair requires an object', run)
+    response = extend_unique_attribution_context(packet, response, run)
     problems = article_span_problems(packet, response)
     if problems:
         raise SemanticResponseError('; '.join(problems), run)
