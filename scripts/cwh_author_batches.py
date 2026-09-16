@@ -21,6 +21,13 @@ MAX_AUTHOR_PACKET_CHARACTERS = 20000
 MAX_AUTHOR_BATCH_ITEMS = 3
 
 
+def is_synthesis_feedback(value):
+    """Only explicit selection/shape failures may skip unchanged article review."""
+    return any(marker in str(value) for marker in (
+        'Flat synthesis ', 'Formal selection has ', 'Topic synthesis invalid',
+        'Ownership repair ', 'Voice reserve repair ', 'Joint ownership and cap repair '))
+
+
 def partition_author_packet(packet, max_characters=MAX_AUTHOR_PACKET_CHARACTERS,
                             max_items=MAX_AUTHOR_BATCH_ITEMS):
     if max_characters < 1 or max_items < 1:

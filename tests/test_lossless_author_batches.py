@@ -55,6 +55,25 @@ def test_default_batches_bound_work_for_all_models_without_truncating():
     assert all(len(json.dumps(group, ensure_ascii=False, separators=(',', ':'))) <= 20000 for group in groups)
 
 
+def test_synthesis_feedback_is_routed_without_dropping_article_errors():
+    from cwh_author_batches import is_synthesis_feedback
+    assert is_synthesis_feedback('[议题] Formal selection has 13 independent voices')
+    assert is_synthesis_feedback('[议题] Flat synthesis repeated claim ID: c1')
+    assert not is_synthesis_feedback('[议题] speaker missing from original quote')
+    assert not is_synthesis_feedback('[议题] contradictory interpretation without source support')
+
+
+def test_synthesis_feedback_changes_selection_packet_only():
+    packet, decisions, _ = fixture()
+    request = synthesis_packet(packet, decisions)
+    before, mapping = flat_packet(request)
+    request['synthesis_validation_feedback'] = ['Formal selection has 13 independent voices']
+    after, after_mapping = flat_packet(request)
+    assert mapping == after_mapping
+    assert after.pop('synthesis_validation_feedback') == request['synthesis_validation_feedback']
+    assert after == before
+
+
 def test_single_oversized_article_is_not_truncated():
     packet = {'items': [{'id': 'a', 'segments': [{'id': 1, 'text': '完整。'*1000}]}]}
     assert partition_author_packet(packet, max_characters=100) == [packet]

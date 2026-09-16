@@ -288,6 +288,9 @@ def repair_topic_web_metadata(packet, decision, command, workspace, timeout, lab
 
 def review_author_article_batches(packet, transport_groups, prompt, command, workspace,
                                   deadline, *, reuse_cache, feedback, maximum_request_seconds):
+    from cwh_author_batches import is_synthesis_feedback
+    article_feedback = [item for item in feedback if not is_synthesis_feedback(item)]
+    synthesis_feedback = [item for item in feedback if is_synthesis_feedback(item)]
     started = time.monotonic()
     originals = {item['id']: item for item in packet['items']}
     choices, batch_runs, manifest = [], [], []
@@ -302,7 +305,7 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         local_prompt = prompt + '\n这是同一议题的原文子批，所有正文完整保留；先独立审核本批各篇和逐名主体。'
         local_prompt += '本批heading/clusters仅为暂存，随后会用全部子批的已有判断汇总；不按本批声音数推断全题缺口。'
         result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
-            local_deadline, reuse_cache=reuse_cache, feedback=feedback,
+            local_deadline, reuse_cache=reuse_cache, feedback=article_feedback,
             maximum_request_seconds=min(90, maximum_request_seconds) if maximum_request_seconds > 0 else 90,
             future_topic_reserve_seconds=0, allow_article_batches=False)
         choices.extend(result[0]['items'])
@@ -310,6 +313,8 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         manifest.append({'batch': number, 'item_ids': ids,
             'transport_characters': len(json.dumps(group, ensure_ascii=False, separators=(',', ':')))})
     request = synthesis_packet(packet, choices)
+    if synthesis_feedback:
+        request['synthesis_validation_feedback'] = synthesis_feedback
     if not request['eligible_items']:
         result = {'items': choices, 'heading': '', 'clusters': [],
             'shortfall_reason': '原文子批审核均未取得可选独立判断；发现、未读和排除记录保留在证据审计中'}
@@ -350,6 +355,10 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             retained = {}
         if packet['topic'] in targets:
             retained = {'source_packet_sha256': digest, 'feedback': list(feedback)}
+        if not allow_article_batches and retained.get('feedback'):
+            from cwh_author_batches import is_synthesis_feedback
+            retained = {**retained, 'feedback': [item for item in retained['feedback']
+                                               if not is_synthesis_feedback(item)]}
         if retained:
             prior_feedback[packet['topic']] = retained
             atomic_write_json(feedback_path, prior_feedback)
@@ -375,7 +384,10 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                     batch_workspace.mkdir(parents=True, exist_ok=True)
                     batch_prompt = prompt
                     if retained.get('feedback'):
-                        batch_prompt += '\n仅修复本议题真实反馈：' + json.dumps(retained['feedback'], ensure_ascii=False)
+                        from cwh_author_batches import is_synthesis_feedback
+                        article_feedback = [item for item in retained['feedback'] if not is_synthesis_feedback(item)]
+                        if article_feedback:
+                            batch_prompt += '\n仅修复本议题真实反馈：' + json.dumps(article_feedback, ensure_ascii=False)
                     result, run = review_author_article_batches(readable, transport_groups,
                         batch_prompt, command, batch_workspace, deadline - reserved,
                         reuse_cache=reuse_cache, feedback=retained.get('feedback') or (),

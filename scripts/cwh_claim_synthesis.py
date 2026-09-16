@@ -122,7 +122,7 @@ def flat_packet(request):
                 'title': item.get('title'), 'speaker': claim.get('speaker'),
                 'role': claim.get('role'), 'speaker_type': claim.get('speaker_type'),
                 'claim': claim['claim']})
-    context = {key: copy.deepcopy(request[key]) for key in ('period', 'agenda_topics', 'report_agenda', 'formal_selection') if key in request}
+    context = {key: copy.deepcopy(request[key]) for key in ('period', 'agenda_topics', 'report_agenda', 'formal_selection', 'synthesis_validation_feedback') if key in request}
     return {**context, 'topic': request['topic'], 'candidates': candidates,
             'scope': 'Provisional existing author claims only; original text and independent review remain mandatory'}, mapping
 
