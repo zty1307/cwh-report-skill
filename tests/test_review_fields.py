@@ -81,3 +81,29 @@ def test_ambiguous_meeting_reference_needs_native_revision_not_host_replacement(
         reviewed, _ = retry_invalid_review_fields(request, result, run, '', [], Path('.'), 45)
     assert reviewed['reviews'] == corrected['reviews']
     assert request['claims'][0]['formal_claim'].startswith('会议首次')
+
+
+@pytest.mark.parametrize('claim', ['会议未给出具体安排。', '会议围绕市场环境作出部署。'])
+def test_bare_meeting_action_also_requires_explicit_source_reference(claim):
+    from domestic_evidence_mapping import has_ambiguous_meeting_reference
+    assert has_ambiguous_meeting_reference(claim)
+    assert not has_ambiguous_meeting_reference('中央政治局' + claim)
+
+
+def test_available_delivery_quarantines_only_unresolved_reference_not_other_fields():
+    request, result, run = fixtures()
+    request['delivery_policy'] = 'deliver_available_with_gaps'
+    request['claims'][0]['reference_expansion_required'] = True
+    result['reviews'][0]['rationale'] = '原文有依据，但尚未在正文写明会议'
+    original = copy.deepcopy(result)
+    retry_run = {'session_id': 'actual-retry'}
+    with patch('cwh_host_research.semantic_json', return_value=(result, retry_run)) as call:
+        checked, _ = retry_invalid_review_fields(request, result, run, '', [], Path('.'), 45)
+    row = checked['reviews'][0]
+    assert call.call_count == 1 and row['verdict'] == 'uncertain' and row['revision'] is None
+    assert row['host_reference_gate']['native_review'] == original['reviews'][0]
+    assert checked['review_field_retry']['host_reference_quarantines'] == ['e1']
+    assert result == original
+    result['reviews'][0]['rationale'] = None
+    with patch('cwh_host_research.semantic_json', return_value=(result, retry_run)), pytest.raises(ValueError, match='still invalid'):
+        retry_invalid_review_fields(request, result, run, '', [], Path('.'), 45)

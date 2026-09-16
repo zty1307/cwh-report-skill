@@ -69,9 +69,30 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         'revision有值时完整填写formal_claim、verdict、rationale；确无可支持观点可以uncertain、revision=null并解释。'
         '不审核标题，不编造缺失论据。遇unexpanded_meeting_reference反馈，原句的会议指称未展开，不能直接fully_supported；'
         '须根据sources标题或开头确认实际会议名称，在revision中由你明确名称，原文论据仍只取同条excerpt。'
-        '无法确认就uncertain且revision=null，不得由report_agenda猜测。', command, workspace,
+        '无法确认就uncertain且revision=null，不得由report_agenda猜测。'
+        '对反馈列出的未展开指称，原句verdict只能partially_supported或uncertain；'
+        '确认后必须把实际会议全称写入revision.formal_claim，仅在rationale说明语境明确不算修正文。'
+        '输入旧heading本身可能错误，不能据其把报告会议改成另一场会议。', command, workspace,
         'independent-review-field-retry', min(45, timeout))
     remaining = review_field_errors(corrected, ids, request['claims'])
+    quarantined = []
+    if (remaining and request.get('delivery_policy') == 'deliver_available_with_gaps'
+            and all(row['invalid_fields'] == ['unexpanded_meeting_reference_requires_native_revision'] for row in remaining)):
+        # A model's positive verdict cannot waive this mechanical publication
+        # gate. Preserve its real verdict verbatim, but do not publish the claim.
+        corrected = copy.deepcopy(corrected)
+        failed = {row['id'] for row in remaining}
+        for row in corrected['reviews']:
+            if row['id'] not in failed:
+                continue
+            original_review = copy.deepcopy(row)
+            row.update(verdict='uncertain', revision=None,
+                rationale='宿主字面门禁：一次原生补核后仍未在正文展开会议指称，暂不进入正文；此为发布限制，不是模型的语义否定结论。',
+                host_reference_gate={'origin': 'deterministic_reference_gate', 'native_review': original_review,
+                    'actual_native_run': copy.deepcopy(retry_run)})
+            row.pop('propositions', None)
+            quarantined.append(row['id'])
+        remaining = review_field_errors(corrected, ids, request['claims'])
     if remaining:
         raise ValueError('Independent review field retry still invalid: ' + json.dumps(remaining, ensure_ascii=False))
     combined = copy.deepcopy(result)
@@ -85,4 +106,6 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         'invalid_fields': errors, 'original_result_sha256': hashlib.sha256(
             json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
         'scope': 'One genuine frozen body-review retry; no heading re-review, inferred fields or changed stage budget'}
+    if quarantined:
+        combined['review_field_retry']['host_reference_quarantines'] = quarantined
     return combined, retry_run

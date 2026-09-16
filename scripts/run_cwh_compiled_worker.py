@@ -201,10 +201,12 @@ def single_topic_author_contract(packet):
 
 def author_contract_sha256(prompt, command):
     """A repair checkpoint belongs to its author rules and model transport."""
+    from cwh_article_reading import reading_prompt
     contract = {'prompt': prompt, 'command': command, 'repair_prompt': REPAIR_PROMPT,
                 'author_strategy': 'lossless_article_batches_native_topic_synthesis_v1',
                 'synthesis_contract': synthesis_prompt(),
                 'bounded_synthesis_contract': synthesis_prompt(ranked=True),
+                'article_reading_contract': reading_prompt(),
                 'batch_soft_limit': MAX_AUTHOR_PACKET_CHARACTERS, 'batch_items': MAX_AUTHOR_BATCH_ITEMS,
                 'shape': single_topic_author_contract({'topic': '', 'items': []})}
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -290,6 +292,7 @@ def repair_topic_web_metadata(packet, decision, command, workspace, timeout, lab
 def review_author_article_batches(packet, transport_groups, prompt, command, workspace,
                                   deadline, *, reuse_cache, feedback, maximum_request_seconds):
     from cwh_author_batches import is_synthesis_feedback
+    from cwh_article_reading import reading_prompt
     article_feedback = [item for item in feedback if not is_synthesis_feedback(item)]
     synthesis_feedback = [item for item in feedback if is_synthesis_feedback(item)]
     started = time.monotonic()
@@ -305,12 +308,11 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         available = max(0, deadline - time.monotonic())
         reserve = min(30 + 15 * (len(transport_groups) - number), available * 0.5)
         local_deadline = deadline - reserve
-        local_prompt = prompt + '\n这是同一议题的原文子批，所有正文完整保留；先独立审核本批各篇和逐名主体。'
-        local_prompt += '本批heading/clusters仅为暂存，随后会用全部子批的已有判断汇总；不按本批声音数推断全题缺口。'
+        local_prompt = reading_prompt()
         result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
             local_deadline, reuse_cache=reuse_cache, feedback=article_feedback,
             maximum_request_seconds=min(90, maximum_request_seconds) if maximum_request_seconds > 0 else 90,
-            future_topic_reserve_seconds=0, allow_article_batches=False)
+            future_topic_reserve_seconds=0, allow_article_batches=False, reading_only=True)
         choices.extend(result[0]['items'])
         batch_runs.append(run)
         manifest.append({'batch': number, 'item_ids': ids,
@@ -340,7 +342,7 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
 
 def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=(),
                            maximum_request_seconds=180, future_topic_reserve_seconds=45,
-                           allow_article_batches=True):
+                           allow_article_batches=True, reading_only=False):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
     decisions, runs = [], []
     feedback_path = workspace / 'author_topic_feedback.json'
@@ -353,7 +355,11 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             raise TimeoutError("No remaining single-topic semantic budget")
         model_packet, fixed_unread = author_transport_with_fixed_unread_web(packet)
         ids = [row['id'] for row in model_packet['items']]
-        contract = single_topic_author_contract(model_packet)
+        if reading_only:
+            from cwh_article_reading import reading_contract
+            contract = reading_contract(model_packet)
+        else:
+            contract = single_topic_author_contract(model_packet)
         digest = hashlib.sha256(json.dumps(model_packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         retained = prior_feedback.get(packet['topic']) or {}
         if retained.get('source_packet_sha256') != digest:
@@ -606,6 +612,10 @@ def compile_review(analysis, result, run, digest):
         topic, ev = by_short[short_id]
         text = candidates[(topic, ev["candidate_id"])]["source_snapshot"]["source_text"]
         row.update(evidence_id=ev["evidence_id"], reviewed_by="configured_model:" + run["session_id"], reviewed_at=run["completed_at"])
+        if (row.get('host_reference_gate') or {}).get('origin') == 'deterministic_reference_gate':
+            if row['verdict'] != 'uncertain' or row.get('revision') is not None:
+                raise ValueError('Host reference quarantine cannot certify or rewrite a claim')
+            row['reviewed_by'] = 'host_reference_gate_after_native:' + run['session_id']
         supplied_propositions = [dict(p) for p in row.get("propositions") or []]
         if not supplied_propositions:
             supplied_propositions = [{
@@ -671,6 +681,7 @@ def independent_packet(analysis):
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
     return {"sources": list(snapshots.values()), "claims": claims, "headings": heading_manifest(analysis),
+            "delivery_policy": (analysis.get('metadata') or {}).get('delivery_policy') or '',
             "report_agenda": (analysis.get('metadata') or {}).get('report_agenda') or '',
             "agenda_topics": [row['topic'] for row in analysis['viewpoints']['by_topic']],
             "cross_topic_shared_source_spans": cross_topic_shared_source_spans(analysis),
