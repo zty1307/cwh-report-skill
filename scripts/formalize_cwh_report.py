@@ -790,6 +790,9 @@ def formal_overseas_summary(row: dict[str, Any]) -> str:
         maxsplit=1,
     )[0].strip()
     # Length is an authoring target, not permission to cut a reviewed condition.
+    match = re.match(r'^(?:原文|原分析)(?:认为|指出|表示|称)[，,:：\s]*', value)
+    if match and value[match.end():].strip():
+        value = value[match.end():].strip()
     return value
 
 
@@ -1595,7 +1598,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             prefix = ordinal_prefix(idx)
             lines.append(f"{prefix}{name}。{comment_wording(rows)}")
     else:
-        lines.append("当前批次暂未取得可核验原始评论，暂不判断网民情感倾向。")
+        lines.append(empty_comment_notice(data))
 
     lines.extend(["", "### " + document_rules["domestic_subsections"][2], "", hotword_paragraph(data)])
 
@@ -2171,7 +2174,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
                 prefix = ordinal_prefix(idx)
                 add_comment_group_paragraph(document, prefix, name, rows)
         else:
-            document.add_paragraph("当前批次暂未取得可核验原始评论，暂不判断网民情感倾向。")
+            document.add_paragraph(empty_comment_notice(data))
 
         add_docx_heading(document, document_rules["domestic_subsections"][2], 2)
         document.add_paragraph(hotword_paragraph(data))
@@ -2216,6 +2219,15 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     end_run.font.size = Pt(1)
     remove_nonprinting_pagination_controls(document)
     document.save(out_path)
+def empty_comment_notice(data: dict[str, Any]) -> str:
+    """Missing quote eligibility does not mean no comments were captured."""
+    rows = (data.get('comments') or {}).get('selected') or []
+    rules = writing_rules()['comments']
+    if any(is_actual_comment_row(row) and row.get('in_monitoring_window') is not False for row in rows):
+        return rules['no_ready_quotes_verified_samples']
+    return rules['no_ready_quotes_unverified_candidates' if rows else 'no_comment_samples']
+
+
 def audit_formal_comment_quotes(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
     """Check actual domestic Word prose, not JSON approvals or appendix text."""
     approved = [row for row in (data.get('comments', {}).get('selected') or [])

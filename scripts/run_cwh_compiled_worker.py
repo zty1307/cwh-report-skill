@@ -29,6 +29,8 @@ from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from cwh_heading_quality import cross_topic_shared_source_spans
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
 from cwh_writing_rules import writing_rules
+from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, apply_synthesis,
+                                MAX_AUTHOR_PACKET_CHARACTERS, MAX_AUTHOR_BATCH_ITEMS)
 
 
 def read(path):
@@ -200,6 +202,9 @@ def single_topic_author_contract(packet):
 def author_contract_sha256(prompt, command):
     """A repair checkpoint belongs to its author rules and model transport."""
     contract = {'prompt': prompt, 'command': command, 'repair_prompt': REPAIR_PROMPT,
+                'author_strategy': 'lossless_article_batches_native_topic_synthesis_v1',
+                'synthesis_contract': synthesis_prompt(prompt),
+                'batch_soft_limit': MAX_AUTHOR_PACKET_CHARACTERS, 'batch_items': MAX_AUTHOR_BATCH_ITEMS,
                 'shape': single_topic_author_contract({'topic': '', 'items': []})}
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -274,8 +279,52 @@ def repair_topic_web_metadata(packet, decision, command, workspace, timeout, lab
     return repaired, run
 
 
+def review_author_article_batches(packet, transport_groups, prompt, command, workspace,
+                                  deadline, *, reuse_cache, feedback, maximum_request_seconds):
+    started = time.monotonic()
+    originals = {item['id']: item for item in packet['items']}
+    choices, batch_runs, manifest = [], [], []
+    for number, group in enumerate(transport_groups, 1):
+        ids = [item['id'] for item in group['items']]
+        local = {**packet, 'items': [originals[value] for value in ids]}
+        local_workspace = workspace / f'b{number}'
+        local_workspace.mkdir(parents=True, exist_ok=True)
+        # Reserve a little time for every unread batch and the native synthesis;
+        # never reset the cumulative stage deadline or borrow future topics.
+        local_deadline = deadline - 30 - 15 * (len(transport_groups) - number)
+        local_prompt = prompt + '\n这是同一议题的原文子批，所有正文完整保留；先独立审核本批各篇和逐名主体。'
+        local_prompt += '本批heading/clusters仅为暂存，随后会用全部子批的已有判断汇总；不按本批声音数推断全题缺口。'
+        result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
+            local_deadline, reuse_cache=reuse_cache, feedback=feedback,
+            maximum_request_seconds=min(90, maximum_request_seconds) if maximum_request_seconds > 0 else 90,
+            future_topic_reserve_seconds=0, allow_article_batches=False)
+        choices.extend(result[0]['items'])
+        batch_runs.append(run)
+        manifest.append({'batch': number, 'item_ids': ids,
+            'transport_characters': len(json.dumps(group, ensure_ascii=False, separators=(',', ':')))})
+    request = synthesis_packet(packet, choices)
+    if not request['eligible_items']:
+        result = {'items': choices, 'heading': '', 'clusters': [],
+            'shortfall_reason': '原文子批审核均未取得可选独立判断；发现、未读和排除记录保留在证据审计中'}
+        synthesis_run = {'model_invoked': False, 'seconds': 0, 'session_id': str(uuid.uuid4())}
+    else:
+        remaining = deadline - time.monotonic()
+        if remaining < 15:
+            raise TimeoutError('No remaining native topic synthesis budget')
+        response, synthesis_run = semantic_json(request, synthesis_prompt(prompt), command, workspace,
+            'topic-synthesis', min(90, remaining), reuse_cache=reuse_cache)
+        result = apply_synthesis(choices, response)
+    run = {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
+        'transport': 'lossless_article_batches_native_topic_synthesis',
+        'batch_manifest': manifest, 'batch_runs': batch_runs, 'synthesis_run': synthesis_run,
+        'original_packet_sha256': hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
+        'seconds': round(time.monotonic() - started, 3)}
+    return result, run
+
+
 def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reuse_cache, feedback=(),
-                           maximum_request_seconds=180, future_topic_reserve_seconds=45):
+                           maximum_request_seconds=180, future_topic_reserve_seconds=45,
+                           allow_article_batches=True):
     """Sequential small contexts; one model, no concurrent agents or token overlap."""
     decisions, runs = [], []
     feedback_path = workspace / 'author_topic_feedback.json'
@@ -308,7 +357,25 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                 run = {'session_id': str(uuid.uuid4()), 'seconds': 0, 'model_invoked': False,
                        'transport': 'fixed_unread_web_only'}
             else:
-                result, run = semantic_json(model_packet, local_prompt, command, workspace,
+                input_characters = len(json.dumps(model_packet, ensure_ascii=False, separators=(',', ':')))
+                transport_groups = (partition_author_packet(model_packet)
+                    if allow_article_batches and input_characters > MAX_AUTHOR_PACKET_CHARACTERS else [])
+                if len(transport_groups) > 1:
+                    readable_ids = set(ids)
+                    readable = {**packet, 'items': [row for row in packet['items'] if row['id'] in readable_ids]}
+                    reserved = min(max(0, future_topic_reserve_seconds),
+                        (deadline - time.monotonic()) / (len(packets) - number + 1)) * (len(packets) - number)
+                    batch_workspace = workspace / f'a{number}'
+                    batch_workspace.mkdir(parents=True, exist_ok=True)
+                    batch_prompt = prompt
+                    if retained.get('feedback'):
+                        batch_prompt += '\n仅修复本议题真实反馈：' + json.dumps(retained['feedback'], ensure_ascii=False)
+                    result, run = review_author_article_batches(readable, transport_groups,
+                        batch_prompt, command, batch_workspace, deadline - reserved,
+                        reuse_cache=reuse_cache, feedback=retained.get('feedback') or (),
+                        maximum_request_seconds=maximum_request_seconds)
+                else:
+                    result, run = semantic_json(model_packet, local_prompt, command, workspace,
                                        f"author-topic-{number}", single_topic_request_budget(
                                            deadline - time.monotonic(), len(packets) - number,
                                            maximum_request_seconds, future_topic_reserve_seconds), reuse_cache=reuse_cache)
@@ -352,6 +419,32 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                        'seconds': sum(r.get('seconds', 0) for r in runs)}
 
 
+def actual_author_run_ids(run):
+    """Flatten real model IDs; aggregation UUIDs are not native sessions."""
+    if not run:
+        return []
+    transport = run.get('transport')
+    if transport == 'sequential_single_topic_semantic':
+        children = run.get('topic_runs') or []
+    elif transport == 'lossless_article_batches_native_topic_synthesis':
+        children = [*(run.get('batch_runs') or []), run.get('synthesis_run') or {}]
+    else:
+        children = [run.get(key) or {} for key in (
+            'missing_item_completion_run', 'missing_reason_completion_run', 'web_metadata_repair_run')]
+        children.extend(run.get('reason_completion_runs') or [])
+    values = [] if transport in {'sequential_single_topic_semantic', 'lossless_article_batches_native_topic_synthesis'} else (
+        [run['session_id']] if run.get('session_id') and run.get('model_invoked') is not False else [])
+    for child in children:
+        values.extend(actual_author_run_ids(child))
+    return list(dict.fromkeys(values))
+
+
+def recoverable_author_blocker_feedback(blocker):
+    if blocker.get('error_type') in {'ValueError', 'SemanticResponseError', 'KeyError', 'TypeError'}:
+        return [str(blocker.get('blocker'))]
+    return []  # Auth, quota and transport timeouts are not blind author retries.
+
+
 def author(task, deadline):
     inputs = task["inputs"]
     plan, index, registry = (read(inputs[k]) for k in ("research_plan", "public_corpus_index", "source_registry"))
@@ -385,8 +478,7 @@ def author(task, deadline):
     blocker_path = Path(task["stage_workspace"]) / "compiled_blocker.json"
     if blocker_path.is_file():
         blocker = read(blocker_path)
-        if blocker.get("error_type") in {"ValueError", "KeyError", "TypeError"}:
-            feedback = [*feedback, str(blocker.get("blocker"))]
+        feedback = [*feedback, *recoverable_author_blocker_feedback(blocker)]
     packet = {"topics": [semantic_packet(p) for p in packets]}
     packet_hash = hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     checkpoint = Path(task["stage_workspace"]) / "author_decisions.json"
@@ -443,7 +535,7 @@ def author(task, deadline):
     merged["metadata"].update(execution_profile=task["execution_profile"],
         monitoring_start=plan["monitoring_period"]["start"], monitoring_end=plan["monitoring_period"]["end"],
         report_agenda=(plan.get('input_contract') or {}).get('agenda') or '',
-        authoring_batch_run_ids=[r['session_id'] for r in run.get('topic_runs') or [run]],
+        authoring_batch_run_ids=actual_author_run_ids(run),
         transport="host_compiled_semantic_v1")
     output(task, merged)
 
@@ -452,6 +544,8 @@ REVIEW_PROMPT = '''独立核验每条formal_claim是否被同条excerpt_segments
 返回且只返回{"reviews":[{"id":"输入短ID","verdict":"fully_supported|partially_supported|unsupported|uncertain","rationale":"一句具体理由","revision":null或{"formal_claim":"45至120汉字的完整忠实观点","verdict":"fully_supported","rationale":"一句说明重组后为何被原文完整支持"}}]}，每个ID恰好一次。原观点fully_supported时revision必须为null；否则revision必须是对象：只从同一excerpt中删除越界内容、纠正主客体方向或重新组织明确受支持的信息，形成45至120汉字的完整观点；不得新增事实、改变发言主体，也不得因原句删短就返回null。对revision再次逐项核对，只有确认为fully_supported才提交。
 判断前须检查观点中的每个事实、因果、效果、程度、数字、限定词、发言主体和职务；任何一部分缺乏支持都不能判fully_supported。媒体自身评论可按source元数据核对媒体名，但不得把其引用人物冒充媒体观点。只允许依据同条excerpt_segments；宿主负责逐字引用、位置、哈希、命题覆盖和时间。'''
 REVIEW_PROMPT += '\n' + HEADING_REVIEW_PROMPT
+REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['effect_object_scope_rule']
+REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['attribution_identity_rule']
 REVIEW_PROMPT += '\n每条reviews.rationale必须为非空字符串，fully_supported也要说明原文具体支持什么以及范围、强度是否一致，严禁填null或空串。revision=null仅表示没有修订，不表示审核理由可以省略。'
 REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'

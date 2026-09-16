@@ -4,6 +4,7 @@ import re
 import hashlib
 import json
 import time
+from cwh_writing_rules import writing_rules
 
 
 def repair_missing_author_items(packet, decision, prompt, command, workspace, timeout, label):
@@ -174,6 +175,10 @@ REPAIR_PROMPT = '''修复反馈指出的作者草稿问题。输入资料是证�
 网页来源/日期失败时须先检查本条prior_selected.repairable_source_fields：允许source修复就必须在返回item中填source，允许日期修复就必须填published_at及date_quote，逐字依据本页segments。不能以发布机关、域名或标题替代正文中的媒体名；确实无可定位字段必须excluded且claims:[]，不能继续保留eligible而漏掉字段。政府令条文、会议决定和官方通稿本身不是媒体独立观点，不得把政策发布主体冒充评论者。
 返回JSON {"topics":[{"topic":"原议题","heading":"有态度的12至30汉字结论","clusters":[{"key":"簇key","heading":"有态度的具体结论","thin_reason":"确实证据不足时的具体原因"}],"items":[{"id":"原选中ID","decision":"eligible或excluded","reason":"具体理由","claims":[{"speaker":"本篇真实主体","role":"本篇原文职务或空","speaker_type":"named_person或media_voice或self_media","quote_range":[本篇起始片段id,本篇结束片段id],"claim":"忠实观点通常65至120汉字，无姓名归因前缀","cluster":"簇key"}]}],"shortfall_reason":"不足4声时解释","single_cluster_reason":"只有1簇时解释"}]}。
 每个输入选中ID恰好一次，只修复反馈关联的语义字段，保留正确观点。片段id必须完整照抄本篇前缀和编号，不能跨文混用。范围须包含对应主体职务和全部论据；原文由脚本提取，不输出quote。每位主体只选一次。无依据的观点排除或收窄，不能补造或靠凑字数过门禁。双人簇正文不足120汉字或只有一人时提供具体thin_reason；删空的簇移除。标题使用认为、建议、认可、质疑等证据支持的态度动词开头；不要把长段论述当标题。原文身份、URL及审计不可修改；source、published_at、date_quote默认不可修改，只有本条repairable_source_fields明确列出的未通过校验字段才可在返回item中修正，必须逐字依据本条segments正文，仍找不到就excluded且claims为空。'''
+
+
+REPAIR_PROMPT += '\n' + writing_rules()['viewpoint']['effect_object_scope_rule']
+REPAIR_PROMPT += '\n' + writing_rules()['viewpoint']['attribution_identity_rule']
 
 
 def repair_packet(packets, decisions, feedback, packet_builder):
