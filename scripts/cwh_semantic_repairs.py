@@ -203,12 +203,15 @@ def repair_packet(packets, decisions, feedback, packet_builder):
         if mentioned and packet['topic'] not in mentioned:
             continue
         decision = next(d for d in decisions if d['topic'] == packet['topic'])
-        selected = [item for item in decision['items'] if item.get('decision') == 'eligible']
+        selected = [item for item in decision['items'] if item.get('decision') == 'eligible'
+                    and any(claim.get('formal_use') != 'reserve' for claim in item.get('claims') or [])]
         if not selected:
             continue
         ids = {item['id'] for item in selected}
         sources = {**packet, 'items': [item for item in packet['items'] if item['id'] in ids]}
         prior_selected = copy.deepcopy(selected)
+        for item in prior_selected:
+            item['claims'] = [claim for claim in item['claims'] if claim.get('formal_use') != 'reserve']
         by_id = {item['id']: item for item in sources['items']}
         for item in prior_selected:
             fields = set()
@@ -242,8 +245,16 @@ def apply_semantic_repairs(decisions, request, result):
             if item.get('decision') not in {'eligible', 'excluded'} or not item.get('reason'):
                 raise ValueError('Semantic repair lacks valid disposition and reason')
             original = next(r for r in topic['items'] if r['id'] == item['id'])
+            reserves = [copy.deepcopy(claim) for claim in original.get('claims') or []
+                        if claim.get('formal_use') == 'reserve']
             for key in ('decision', 'reason', 'claims'):
                 original[key] = copy.deepcopy(item[key])
+            if reserves:
+                original.setdefault('transport_repairs', []).append({
+                    'kind': 'selected_claim_repair_preserves_native_reserves',
+                    'selected_disposition': item['decision'], 'selected_reason': item['reason']})
+                original['claims'].extend(reserves)
+                original['decision'] = 'eligible'
             prior = next(r for p in request['topics'] if p['topic'] == patch['topic']
                          for r in p['prior_selected'] if r['id'] == item['id'])
             for key in prior.get('repairable_source_fields') or []:

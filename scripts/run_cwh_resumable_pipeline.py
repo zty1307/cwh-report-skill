@@ -27,7 +27,7 @@ from domestic_evidence_mapping import (
 from cwh_model_contract import build_task_payload, execution_profile, stage_budget_seconds, resolved_stage_budgets
 from normalize_cwh_analysis import normalize_analysis
 from complete_cwh_evidence_structure import complete_analysis_structure
-from cwh_viewpoint_gate import cluster_density_result
+from cwh_viewpoint_gate import cluster_density_result, independent_voice_keys
 from cwh_available_delivery import DELIVERY_POLICY, available_delivery, prepare_available_delivery, valid_gap
 from report_rules import domestic_viewpoint_quality_issues
 
@@ -526,7 +526,7 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                     cluster_key = str(candidate.get("viewpoint_cluster_key") or "").strip()
                     if not cluster_key:
                         problems.append(f"{topic}合格候选{candidate_id}缺少viewpoint_cluster_key")
-                    else:
+                    elif str(candidate.get('formal_use') or '').lower() != 'reserve':
                         eligible_cluster_keys.add(cluster_key)
                     eligible_candidates[candidate_id] = candidate
             linked_raw_ids = {
@@ -730,14 +730,16 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
                 + "、".join(missing_formal_candidates[:12])
             )
         if bounded_profile:
-            if len(formal_candidate_ids) > 12:
-                problems.append(f"{topic}bounded限时档正式声音{len(formal_candidate_ids)}条，超过12条硬上限")
-            if len(formal_candidate_ids) < 4:
+            voice_count = len(independent_voice_keys(
+                evidence for cluster in clusters for evidence in cluster.get("evidence") or []))
+            if voice_count > 12:
+                problems.append(f"{topic}bounded限时档正式独立声音{voice_count}个，超过12个硬上限")
+            if voice_count < 4:
                 shortfall = item.get("evidence_shortfall") or {}
                 if not all(str(shortfall.get(field) or "").strip() for field in ("reason", "search_evidence", "reviewed_by")):
                     problems.append(
-                        f"{topic}bounded限时档正式声音仅{len(formal_candidate_ids)}条，"
-                        "低于4条且缺少evidence_shortfall审计"
+                        f"{topic}bounded限时档正式独立声音仅{voice_count}个，"
+                        "低于4个且缺少evidence_shortfall审计"
                     )
     for issue in domestic_viewpoint_quality_issues(data):
         if issue.get("severity") == "error":

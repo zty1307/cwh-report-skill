@@ -244,6 +244,38 @@ def test_same_voice_distinct_claims_are_preserved_without_self_certification():
     assert duplicate_voice_errors(decision) == []
 
 
+def test_native_reserved_claim_stays_eligible_in_audit_but_not_prose():
+    packet, decision, observation, plan = fixture()
+    reserved = copy.deepcopy(decision['items'][0]['claims'][0])
+    reserved.update(claim='另一条原生备选观点', formal_use='reserve',
+                    reserve_reason='本稿选择了更具代表性的论据', cluster='__formal_reserve__')
+    decision['items'][0]['claims'].append(reserved)
+    bundle = compile_topic(packet, decision, observation, plan, 'bounded_60m', 'v1', 'author')
+    evidence = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence']
+    assert len(evidence) == 1
+    pool = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates']
+    row = next(row for row in pool if row.get('formal_use') == 'reserve')
+    assert row['decision'] == 'eligible'
+    assert row['semantic_claim'] == reserved
+    assert row['source_snapshot']['source_text']
+    with pytest.raises(ValueError, match='bounded mode'):
+        compile_topic(packet, decision, observation, plan, 'exhaustive', 'v1', 'author')
+
+
+def test_actual_thin_counts_do_not_claim_full_web_absence_or_semantic_approval():
+    packet, decision, observation, plan = fixture()
+    for cluster in decision['clusters']:
+        cluster.pop('thin_reason', None)
+    bounded = compile_topic(packet, decision, observation, plan, 'bounded_60m', 'v1', 'author')
+    cluster = bounded['viewpoints']['by_topic'][0]['clusters'][0]
+    gap = cluster['thin_cluster_exception']
+    assert gap['reviewed_by'] == 'host:actual_selected_counts'
+    assert '1个不同主体' in gap['reason'] and '不据此断言' in gap['reason']
+    assert all('semantic_review' not in row for row in cluster['evidence'])
+    exhaustive = compile_topic(packet, decision, observation, plan, 'exhaustive', 'v1', 'author')
+    assert 'thin_cluster_exception' not in exhaustive['viewpoints']['by_topic'][0]['clusters'][0]
+
+
 @pytest.mark.parametrize('profile', ['bounded_60m', 'exhaustive'])
 def test_exact_repeated_claim_across_clusters_reserved_without_merging(profile):
     packet, decision, observation, plan = fixture()

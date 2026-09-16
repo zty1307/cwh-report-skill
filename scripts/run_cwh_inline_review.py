@@ -148,7 +148,7 @@ def response_object(log: str) -> dict:
             if value.get("is_error"):
                 return None
             value = normalize_authoring_envelope(value)
-            if any(key in value for key in ("items", "topics", "selected", "viewpoints", "reviews", "heading_reviews", "repairs", "rows", "artifacts")) or value.get("blocker"):
+            if any(key in value for key in ("items", "topics", "selected", "choices", "viewpoints", "reviews", "heading_reviews", "repairs", "rows", "artifacts")) or value.get("blocker"):
                 return value
             for key in ("structured_output", "result", "text", "output_shape", "review", "output"):
                 found = parse(value.get(key))

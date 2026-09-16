@@ -25,6 +25,20 @@ def fixture():
     return packets, decisions
 
 
+def test_selected_repair_never_promotes_or_loses_existing_native_reserve():
+    packets, decisions = fixture()
+    reserve = {'claim': '有效备选原判断', 'formal_use': 'reserve', 'reserve_reason': '代表性取舍'}
+    decisions[0]['items'][0]['claims'].append(copy.deepcopy(reserve))
+    request = repair_packet(packets, decisions, ['甲有错误'], lambda p: p)
+    assert request['topics'][0]['prior_selected'][0]['claims'] == [{'claim': '旧观点'}]
+    patch = {'topics': [{'topic': '甲', 'clusters': [], 'items': [
+        {'id': 'r1', 'decision': 'excluded', 'reason': '所选判断无依据', 'claims': []}]}]}
+    result = apply_semantic_repairs(decisions, request, patch)
+    assert result[0]['items'][0]['decision'] == 'eligible'
+    assert result[0]['items'][0]['claims'] == [reserve]
+    assert decisions[0]['items'][0]['claims'][0] == {'claim': '旧观点'}
+
+
 def test_targeted_repair_keeps_untouched_topics_and_source_identity():
     packets, decisions = fixture()
     request = repair_packet(packets, decisions, ['甲有错误'], lambda p: p)

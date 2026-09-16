@@ -29,7 +29,7 @@ from cwh_heading_quality import cross_topic_exact_duplicate_groups
 from cwh_heading_quality import cross_topic_shared_source_spans
 from domestic_evidence_mapping import has_ambiguous_meeting_reference
 from cwh_writing_rules import writing_rules, editorial_eligibility_prompt
-from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, native_topic_synthesis,
+from cwh_author_batches import (partition_author_packet, synthesis_packet, synthesis_prompt, native_topic_synthesis, native_article_batch,
                                 MAX_AUTHOR_PACKET_CHARACTERS, MAX_AUTHOR_BATCH_ITEMS)
 
 
@@ -374,10 +374,15 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                         reuse_cache=reuse_cache, feedback=retained.get('feedback') or (),
                         maximum_request_seconds=maximum_request_seconds)
                 else:
-                    result, run = semantic_json(model_packet, local_prompt, command, workspace,
-                                       f"author-topic-{number}", single_topic_request_budget(
-                                           deadline - time.monotonic(), len(packets) - number,
-                                           maximum_request_seconds, future_topic_reserve_seconds), reuse_cache=reuse_cache)
+                    request_timeout = single_topic_request_budget(
+                        deadline - time.monotonic(), len(packets) - number,
+                        maximum_request_seconds, future_topic_reserve_seconds)
+                    if not allow_article_batches:
+                        result, run = native_article_batch(model_packet, local_prompt, command, workspace,
+                            f"author-topic-{number}", request_timeout, semantic_json, reuse_cache=reuse_cache)
+                    else:
+                        result, run = semantic_json(model_packet, local_prompt, command, workspace,
+                            f"author-topic-{number}", request_timeout, reuse_cache=reuse_cache)
         except ValueError as exc:
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if result.get('topic') not in (None, packet['topic']):
@@ -469,6 +474,11 @@ def author(task, deadline):
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
+        selection = topic_plan.get('candidate_pool_contract') or {}
+        packet['formal_selection'] = {
+            'allow_reserve': task['execution_profile'].startswith('bounded_'),
+            'max_independent_voices': selection.get('max_formal_voices_per_topic'),
+            'rule': selection.get('formal_selection_rule', '')}
         atomic_write_json(workspace / "source_packet.json", packet)
         packets.append(packet)
         topic_plans.append(topic_plan)

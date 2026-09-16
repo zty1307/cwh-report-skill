@@ -140,7 +140,7 @@ def test_oversized_author_runs_sequential_full_batches_then_native_synthesis(mon
     packet = {'topic': '动态议题', 'items': [{'id': f'r{i}', 'content': text, 'origin': 'raw_monitoring'} for i in range(8)]}
     calls = []
     def model(request, prompt, command, workspace, label, timeout, reuse_cache):
-        assert 0 < timeout <= 90
+        assert 0 < timeout <= (90 if label == 'topic-synthesis' else 180)
         calls.append((copy.deepcopy(request), label))
         if label == 'topic-synthesis':
             assert 'candidates' in request
@@ -202,7 +202,8 @@ def test_invalid_synthesis_repairs_only_summary_preserving_native_claims(tmp_pat
         return (invalid if len(calls) == 1 else valid), {'session_id': label, 'seconds': 2}
     result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=True)
     assert [row[1] for row in calls] == ['topic-synthesis', 'synthesis-shape-repair']
-    assert calls[0][0] == calls[1][0] == flat_packet(request)[0]
+    assert calls[0][0] == flat_packet(request)[0]
+    assert calls[1][0] == {**calls[0][0], 'previous_synthesis': invalid}
     assert calls[1][2] <= 45 and calls[1][3] is False
     assert result['items'][0]['claims'][0]['claim'] == decisions[0]['claims'][0]['claim']
     assert result['transport_repairs'][-1]['original_response'] == invalid

@@ -296,7 +296,9 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                 },
                 "domestic_viewpoint_contract": {
                     "distinct_voice_per_cluster": True,
-                    "same_voice_once_per_topic_by_default": True,
+                    "same_voice_once_per_topic_by_default": False,
+                    "same_voice_distinct_claims_allowed": True,
+                    "independent_voice_count_basis": "distinct_subject_not_claim_count",
                     "preserve_source_excerpt": True,
                     "preferred_claim_cjk_range": [45, 120],
                     "minimum_claim_cjk": 30,

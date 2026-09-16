@@ -7,7 +7,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from cwh_claim_synthesis import flat_packet, restore_synthesis
+from cwh_claim_synthesis import flat_packet, restore_synthesis, duplicate_assignment_request, apply_duplicate_assignments
 
 
 def fixture():
@@ -32,6 +32,29 @@ def test_flat_protocol_preserves_all_existing_claims_and_ids():
     assert result['items'][0]['claims'] == [{**decisions[0]['claims'][0], 'cluster': 'k1'}]
     assert result['transport_repairs'][-1]['native_response'] == response
     assert (request, decisions, response) == originals
+
+
+def test_selection_retains_declared_meeting_context_without_copying_source_excerpts():
+    request, _, _ = fixture()
+    request.update(period={'start': '2026-01-01'}, agenda_topics=['议题甲', '议题乙'],
+                   report_agenda='本期会议的原始议程')
+    transport, _ = flat_packet(request)
+    for key in ('period', 'agenda_topics', 'report_agenda'):
+        assert transport[key] == request[key]
+    assert all('original_excerpt' not in row for row in transport['candidates'])
+    transport['agenda_topics'].append('不得改变原始输入')
+    assert request['agenda_topics'] == ['议题甲', '议题乙']
+
+
+def test_duplicate_feedback_names_the_exact_id_and_both_assignments():
+    request, decisions, response = fixture()
+    _, mapping = flat_packet(request)
+    response['excluded'][0]['id'] = 'c1'
+    with pytest.raises(ValueError) as caught:
+        restore_synthesis(decisions, mapping, response)
+    assert 'repeated claim ID: c1' in str(caught.value)
+    assert 'first_assignment=' in str(caught.value)
+    assert 'repeated_assignment=' in str(caught.value)
 
 
 @pytest.mark.parametrize('fault', ['missing', 'duplicate', 'unknown', 'no_reason', 'empty_group', 'extra_field'])
@@ -62,6 +85,84 @@ def test_distinct_claims_by_same_person_remain_separately_traceable():
     result = restore_synthesis(decisions, mapping, response)
     assert len(result['items'][0]['claims']) == 2
     assert [r['claim'] for r in result['items'][0]['claims']] == [r['claim'] for r in decisions[0]['claims']]
+
+
+def test_native_reserve_retains_valid_original_claim_outside_formal_prose():
+    request, decisions, response = fixture()
+    _, mapping = flat_packet(request)
+    response['reserved'] = response.pop('excluded')
+    response['excluded'] = []
+    original = copy.deepcopy(decisions)
+    result = restore_synthesis(decisions, mapping, response,
+                               {'allow_reserve': True, 'max_independent_voices': 1})
+    claims = result['items'][0]['claims']
+    assert result['items'][0]['decision'] == 'eligible'
+    assert claims[1]['formal_use'] == 'reserve'
+    assert claims[1]['claim'] == original[0]['claims'][1]['claim']
+    assert claims[1]['reserve_reason']
+    assert decisions == original
+
+
+def test_voice_cap_counts_people_not_claims_and_does_not_silently_truncate():
+    request, decisions, response = fixture()
+    _, mapping = flat_packet(request)
+    response['selected'][0]['claim_ids'].append('c2')
+    response['excluded'] = []
+    assert len(restore_synthesis(decisions, mapping, response,
+        {'max_independent_voices': 1})['items'][0]['claims']) == 2
+    decisions[0]['claims'][1]['speaker'] = '另一专家'
+    with pytest.raises(ValueError, match='2 independent voices'):
+        restore_synthesis(decisions, mapping, response, {'max_independent_voices': 1})
+
+
+@pytest.mark.parametrize('policy', [None, {'allow_reserve': False}])
+def test_reserve_requires_explicit_contract(policy):
+    request, decisions, response = fixture()
+    _, mapping = flat_packet(request)
+    response['reserved'] = response.pop('excluded')
+    response['excluded'] = []
+    with pytest.raises(ValueError, match='explicit bounded'):
+        restore_synthesis(decisions, mapping, response, policy)
+
+
+def test_duplicate_ownership_repair_changes_only_native_selected_destination():
+    request, decisions, response = fixture()
+    transport, mapping = flat_packet(request)
+    response['reserved'] = [{'id': 'c1', 'reason': '正文之外的有效备选'}]
+    before = copy.deepcopy(response)
+    ownership = duplicate_assignment_request(transport, response)
+    assert len(ownership['conflicts']) == 1
+    fixed = apply_duplicate_assignments(response, ownership, {'choices': [{'id': 'c1', 'option': 0}]})
+    result = restore_synthesis(decisions, mapping, fixed, {'allow_reserve': True})
+    assert len(result['items'][0]['claims']) == 1
+    assert fixed['selected'] == before['selected'] and fixed['excluded'] == before['excluded']
+    assert fixed['reserved'] == [] and response == before
+
+
+@pytest.mark.parametrize('choices', [[], [{'id': 'c1', 'option': True}],
+    [{'id': 'c1', 'option': 2}], [{'id': 'other', 'option': 0}]])
+def test_duplicate_ownership_repair_rejects_missing_or_invented_choices(choices):
+    request, _, response = fixture()
+    transport, _ = flat_packet(request)
+    response['reserved'] = [{'id': 'c1', 'reason': '备选'}]
+    ownership = duplicate_assignment_request(transport, response)
+    with pytest.raises(ValueError):
+        apply_duplicate_assignments(response, ownership, {'choices': choices})
+
+
+def test_duplicate_only_repair_does_not_hide_missing_or_foreign_ids():
+    request, _, response = fixture()
+    transport, _ = flat_packet(request)
+    response['selected'][0]['claim_ids'].append('c1')
+    response['excluded'] = []
+    assert duplicate_assignment_request(transport, response) is None
+
+
+def test_native_ownership_reply_is_recognized_by_real_transport_parser():
+    import json
+    from run_cwh_inline_review import response_object
+    answer = {'choices': [{'id': 'c31', 'option': 0}, {'id': 'c33', 'option': 0}]}
+    assert response_object(json.dumps({'type': 'result', 'result': json.dumps(answer)})) == answer
 
 
 @pytest.mark.parametrize('fault', ['missing_pair', 'duplicate_pair', 'foreign_pair', 'boolean_index'])
