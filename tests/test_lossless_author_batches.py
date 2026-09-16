@@ -9,6 +9,14 @@ from cwh_author_batches import partition_author_packet, synthesis_packet, apply_
 import run_cwh_compiled_worker as worker
 from cwh_host_research import HostModelError
 import cwh_author_batches as author_batches
+from cwh_claim_synthesis import flat_packet
+
+
+def flat_response():
+    return {'heading': '认可动态判断', 'selected': [
+        {'key': 'k1', 'heading': '认可判断甲', 'claim_ids': ['c1']},
+        {'key': 'k2', 'heading': '建议判断乙', 'claim_ids': ['c2'],
+         'thin_reason': '当前只有一个独立主体'}], 'excluded': []}
 
 
 def fixture():
@@ -135,10 +143,9 @@ def test_oversized_author_runs_sequential_full_batches_then_native_synthesis(mon
         assert 0 < timeout <= 90
         calls.append((copy.deepcopy(request), label))
         if label == 'topic-synthesis':
-            assert 'eligible_items' in request
-            return {'heading': '建议优化配置', 'clusters': [{'key': 'all', 'heading': '建议协调实际需求'}],
-                'items': [{'id': row['id'], 'decision': 'eligible', 'reason': '不同独立来源判断',
-                          'claim_clusters': [{'index': 0, 'cluster': 'all'}]} for row in request['eligible_items']]}, {'session_id': label, 'seconds': 1}
+            assert 'candidates' in request
+            return {'heading': '建议优化配置', 'selected': [{'key': 'all', 'heading': '建议协调实际需求',
+                'claim_ids': [row['id'] for row in request['candidates']]}], 'excluded': []}, {'session_id': label, 'seconds': 1}
         assert all(''.join(seg['text'] for seg in row['segments']) == text for row in request['items'])
         assert all(row['id'] in prompt for row in request['items'])
         assert '“items”' not in prompt  # no host answers embedded
@@ -184,17 +191,18 @@ def test_completed_invalid_json_feedback_is_recoverable_but_transport_failure_is
 
 
 def test_invalid_synthesis_repairs_only_summary_preserving_native_claims(tmp_path):
-    packet, decisions, valid = fixture()
+    packet, decisions, _ = fixture()
+    valid = flat_response()
     request = synthesis_packet(packet, decisions)
     invalid = copy.deepcopy(valid)
-    invalid['items'][0]['claims'] = [{'claim': '模型改写不允许进入原判断'}]
+    invalid['claims'] = [{'claim': '模型改写不允许进入原判断'}]
     calls = []
     def model(packet, prompt, command, workspace, label, timeout, reuse_cache):
         calls.append((copy.deepcopy(packet), label, timeout, reuse_cache))
         return (invalid if len(calls) == 1 else valid), {'session_id': label, 'seconds': 2}
     result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=True)
     assert [row[1] for row in calls] == ['topic-synthesis', 'synthesis-shape-repair']
-    assert calls[0][0] == calls[1][0] == request
+    assert calls[0][0] == calls[1][0] == flat_packet(request)[0]
     assert calls[1][2] <= 45 and calls[1][3] is False
     assert result['items'][0]['claims'][0]['claim'] == decisions[0]['claims'][0]['claim']
     assert result['transport_repairs'][-1]['original_response'] == invalid
@@ -224,7 +232,8 @@ def test_synthesis_index_feedback_names_exact_item_and_missing_claim():
 
 
 def test_synthesis_retry_workspace_retains_hash_bound_original_inputs(tmp_path):
-    packet, decisions, valid = fixture()
+    packet, decisions, _ = fixture()
+    valid = flat_response()
     request = synthesis_packet(packet, decisions)
     def model(*args, **kwargs):
         return valid, {'session_id': 'native', 'seconds': 1}

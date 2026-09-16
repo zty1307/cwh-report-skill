@@ -35,12 +35,17 @@ def test_different_named_identities_not_mechanically_merged(field, value):
 
 
 def test_distinct_judgments_do_not_trigger_needless_native_repair(tmp_path):
-    decisions, response = fixture()
+    decisions, _ = fixture()
+    request = {'topic': '动态议题', 'eligible_items': [{'id': 'r1', 'claims': [
+        {'index': index, **claim} for index, claim in enumerate(decisions[0]['claims'])]}]}
+    response = {'heading': '中心判断', 'selected': [
+        {'key': 'k1', 'heading': '判断一', 'claim_ids': ['c1']},
+        {'key': 'k2', 'heading': '判断二', 'claim_ids': ['c2']}], 'excluded': []}
     calls = []
     def model(request, prompt, command, workspace, label, timeout, reuse_cache):
         calls.append(label)
         return response, {'session_id': label, 'seconds': 1}
-    result, run = native_topic_synthesis({'eligible_items': []}, decisions, [], tmp_path, 90, model, reuse_cache=False)
+    result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=False)
     assert calls == ['topic-synthesis']
     assert result['items'][0]['claims'][0]['claim'] == decisions[0]['claims'][0]['claim']
     assert len(result['items'][0]['claims']) == 2
