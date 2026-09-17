@@ -110,8 +110,18 @@ def path_from(value: Any) -> Path | None:
 
 def image_data_uri(value: Any) -> str:
     path = path_from(value)
-    if not path or not path.exists() or not path.is_file():
+    if not path or not path.is_file() or path.stat().st_size == 0:
         return ""
+    from cwh_chart_style import valid_image
+    if path.suffix.lower() == '.svg':
+        import xml.etree.ElementTree as ET
+        try:
+            if ET.fromstring(path.read_bytes()).tag.split('}')[-1] != 'svg':
+                return ''
+        except (OSError, ET.ParseError):
+            return ''
+    elif not valid_image(path):
+        return ''
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime};base64,{encoded}"
@@ -895,15 +905,13 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
         for key in ("trend_distribution", "topic_distribution")
     }
     images = {
-        "trend": image_data_uri(
-            local_system_charts["trend_distribution"]
-            if local_system_charts["trend_distribution"].exists()
-            else chart_artifacts.get("trend_distribution") or fallback_charts.get("trend_distribution")
+        "trend": first_image_data_uri(
+            local_system_charts["trend_distribution"],
+            chart_artifacts.get("trend_distribution"), fallback_charts.get("trend_distribution")
         ),
-        "topic": image_data_uri(
-            local_system_charts["topic_distribution"]
-            if local_system_charts["topic_distribution"].exists()
-            else chart_artifacts.get("topic_distribution") or fallback_charts.get("topic_distribution")
+        "topic": first_image_data_uri(
+            local_system_charts["topic_distribution"],
+            chart_artifacts.get("topic_distribution"), fallback_charts.get("topic_distribution")
         ),
         "hotword": first_image_data_uri(
             (data.get("artifacts") or {}).get("wordcloud_image"),

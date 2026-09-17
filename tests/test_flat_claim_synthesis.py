@@ -10,6 +10,16 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from cwh_claim_synthesis import flat_packet, restore_synthesis, duplicate_assignment_request, apply_duplicate_assignments
 
 
+def test_ranked_prompt_requires_incremental_information_not_source_count():
+    from cwh_claim_synthesis import flat_prompt
+    prompt = flat_prompt(ranked=True)
+    for text in ('来源不同不等于观点不同', '不是最低配额', '实质信息增量',
+                 '完整保留备选', '不同意见、必要限定', '另一项独立判断'):
+        assert text in prompt
+    # This is a bounded shortlist rule, not an added cap for exhaustive mode.
+    assert '超过4个主体只在' not in flat_prompt(ranked=False)
+
+
 def fixture():
     claims = [{'index': i, 'speaker': '专家甲', 'role': '研究员', 'speaker_type': 'named_person',
         'claim': '完整判断' + str(i), 'original_excerpt': '完整原文'+str(i)} for i in range(2)]
