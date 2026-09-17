@@ -35,8 +35,8 @@ def fetch_text(url: str, referer: str = "", timeout: int = 30) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
-def discover(query: str) -> dict[str, str]:
-    page = fetch_text(SEARCH_URL.format(quote(query)))
+def discover(query: str, *, timeout: float = 30) -> dict[str, str]:
+    page = fetch_text(SEARCH_URL.format(quote(query)), timeout=timeout)
     found: dict[str, str] = {}
     for match in re.finditer(r'cr-params="([^"]+)"', page):
         params = html.unescape(match.group(1))

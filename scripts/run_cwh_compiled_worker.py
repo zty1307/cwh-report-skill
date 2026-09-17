@@ -537,6 +537,11 @@ def author(task, deadline):
     search_command = json.loads(os.environ["CWH_SEARCH_COMMAND_JSON"])
     parts, packets, topic_plans, observed = [], [], [], []
     author_id = str(uuid.uuid4())
+    policy = read(inputs['execution_policy'])['profiles'][task['execution_profile']]
+    delivery_policy = (policy.get('model_contract') or {}).get('on_missing_evidence') or ''
+    available = delivery_policy == 'deliver_available_with_gaps'
+    # Discovery and optional ranking may not consume the whole writing budget.
+    preparation_deadline = time.monotonic() + max(0, deadline - time.monotonic() - 30) * .45
     raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
     from cwh_reading_budget import frozen_reading_allocation
     raw_read_limit, page_fetch_limit = frozen_reading_allocation(
@@ -545,28 +550,33 @@ def author(task, deadline):
     for position, indexed in enumerate(index["topics"]):
         workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
         workspace.mkdir(parents=True, exist_ok=True)
-        if deadline - time.monotonic() < 60:
+        if deadline - time.monotonic() < 60 and not available:
             raise TimeoutError("No remaining topic budget")
+        topic_prepare_deadline = (time.monotonic() + max(0, preparation_deadline - time.monotonic()) / (len(index['topics']) - position)
+                                  if available else deadline)
+        prepare_seconds = max(0, topic_prepare_deadline - time.monotonic())
         topic_plan = next(row for row in plan["topics"] if row["topic"] == indexed["topic"])
         raw_order = indexed['shortlist'][:raw_read_limit]
         if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
             from cwh_raw_reading_discovery import prioritize_raw_articles
             raw_order = prioritize_raw_articles(indexed, raw_read_limit, command, workspace,
-                min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
+                min(45, max(0, prepare_seconds * .2)) if available else min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
         source_rows = [read(row['full_text_path']) for row in raw_order]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
-                                     min(65, (deadline - time.monotonic()) * .12))
+                                     (min(65, max(0, topic_prepare_deadline - time.monotonic()) * .65)
+                                      if available else min(65, (deadline - time.monotonic()) * .12)))
         urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
         if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
             from cwh_reading_priority import prioritize_pages
             urls = prioritize_pages(observations, indexed['topic'], page_fetch_limit, urls,
-                command, workspace, min(30, max(0, deadline - time.monotonic() - 60)), semantic_json)
-        pages = cached_public_pages(workspace, urls, timeout=8)
+                command, workspace, (min(30, max(0, topic_prepare_deadline - time.monotonic()) * .25)
+                    if available else min(30, max(0, deadline - time.monotonic() - 60))), semantic_json)
+        read_timeout = min(8, max(.1, topic_prepare_deadline - time.monotonic()) / max(1, (len(urls) + 3) // 4)) if available else 8
+        pages = cached_public_pages(workspace, urls, timeout=read_timeout)
         pages = recover_failed_page_slots(workspace, observations, urls, pages, plan,
-                                          deadline, topic=indexed['topic'])
+                                          topic_prepare_deadline, topic=indexed['topic'])
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
-        policy = read(inputs['execution_policy'])['profiles'][task['execution_profile']]
-        packet['delivery_policy'] = (policy.get('model_contract') or {}).get('on_missing_evidence') or ''
+        packet['delivery_policy'] = delivery_policy
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
         selection = topic_plan.get('candidate_pool_contract') or {}

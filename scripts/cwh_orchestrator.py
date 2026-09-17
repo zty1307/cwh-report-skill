@@ -3818,6 +3818,13 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
         from formalize_cwh_report import apply_hotword_audit
 
         apply_hotword_audit(data, Path(args.hotword_audit))
+    for notice in (sentiment_summary.get('notice'), supplied_foreign_audit.get('notice')):
+        if notice:
+            audit = data.setdefault('audit', {})
+            audit.setdefault('data_gaps', []).append(notice)
+            acceptance = audit.setdefault('acceptance', {})
+            acceptance['ready_for_formal_delivery'] = False
+            acceptance.setdefault('blockers', []).append(notice)
     write_outputs(data, out_dir)
     return data
 

@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
@@ -94,6 +95,7 @@ def discover_topic(
     max_articles: int = 3,
     timeout: int = 15,
     aliases=(),
+    deadline=None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     left = parse_bound(start)
     right = parse_bound(end, end=True)
@@ -101,8 +103,12 @@ def discover_topic(
     searches: list[dict[str, Any]] = []
     tried: set[str] = set()
     for query in query_variants(topic, aliases)[:max_queries]:
+        if deadline is not None and deadline - time.monotonic() < 1:
+            searches.append({'query': query, 'status': 'access_failed', 'result_count': 0,
+                             'error': 'Topic collection budget exhausted; query not executed', 'model_invoked': False})
+            break
         try:
-            found = discover(query)
+            found = discover(query) if deadline is None else discover(query, timeout=min(timeout, max(.1, deadline - time.monotonic())))
             search_record = {"query": query, "status": "completed", "result_count": len(found),
                              "error": "", "candidate_outcomes": []}
             searches.append(search_record)
@@ -112,8 +118,13 @@ def discover_topic(
             continue
         candidates = [(gid, title) for gid, title in found.items() if gid not in tried][:max_candidates_per_query]
         tried.update(gid for gid, _ in candidates)
+        def bounded_fetch(gid, title):
+            remaining = timeout if deadline is None else min(timeout, deadline - time.monotonic())
+            if remaining < .1:
+                raise TimeoutError('Candidate collection budget exhausted; request not executed')
+            return fetch_candidate(gid, title, remaining)
         with ThreadPoolExecutor(max_workers=6) as pool:
-            futures = [pool.submit(fetch_candidate, gid, title, timeout) for gid, title in candidates]
+            futures = [pool.submit(bounded_fetch, gid, title) for gid, title in candidates]
             for future in futures:
                 try:
                     item = future.result()
@@ -277,8 +288,13 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     searches_by_topic: dict[str, list[dict[str, Any]]] = {}
     claimed_urls: set[str] = set()
     observations = {"checks": []}
-    for topic in topics:
-        accepted, searches = discover_topic(topic, start, end, raw_dir, aliases=alias_map.get(topic, []))
+    available = (task.get('repair_contract') or {}).get('missing_evidence') == 'deliver_available_with_gaps'
+    remaining = float(task.get('remaining_budget_seconds') or task.get('time_budget_seconds') or 300)
+    collection_deadline = time.monotonic() + max(0, (remaining - 15) * .5)
+    for number, topic in enumerate(topics):
+        topic_deadline = time.monotonic() + max(0, collection_deadline - time.monotonic()) / (len(topics) - number)
+        accepted, searches = discover_topic(topic, start, end, raw_dir, aliases=alias_map.get(topic, []),
+            **({'deadline': topic_deadline} if available else {}))
         # One parent URL may not be routed to multiple topics.
         accepted = [row for row in accepted if row["url"] not in claimed_urls]
         claimed_urls.update(row["url"] for row in accepted)

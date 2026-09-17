@@ -10,6 +10,29 @@ from cwh_comment_semantics import (compile_results, review_packet, label_decisio
 from run_cwh_inline_review import response_object
 
 
+def test_comment_review_timeout_preserves_capture_without_fabricating_sentiment(tmp_path):
+    import json
+    from cwh_comment_semantics import write_unreviewed_capture
+    capture = {'rows': [{'comment_id': 'real-1', 'text': '真实原话', 'sample_id': 'sample-1'}]}
+    frozen = copy.deepcopy(capture)
+    source = tmp_path / 'capture.json'
+    source.write_text(json.dumps(capture), encoding='utf-8')
+    coverage = {'coverage_by_topic': [{'topic': '公共服务', 'checks': [
+        {'source_id': 'toutiao_public_comments', 'eligible_comment_ids': ['real-1'], 'status': 'hit'}]}]}
+    failure = {'kind': 'model_timeout', 'actual_run': {'session_id': 'timeout', 'exit_code': 124}}
+    write_unreviewed_capture(capture, ['公共服务'], coverage, tmp_path, source, failure)
+    summary = json.loads((tmp_path / 'sentiment_workbook_summary.json').read_text('utf-8'))
+    assert summary['topics'][0]['status'] == 'pending'
+    assert summary['topics'][0]['positive'] is None
+    assert summary['captured_count'] == 1
+    check = summary['collection_audit']['coverage_by_topic'][0]['checks'][0]
+    assert check['captured_comment_ids'] == ['real-1'] and check['eligible_comment_ids'] == []
+    assert capture == frozen and coverage['coverage_by_topic'][0]['checks'][0]['eligible_comment_ids'] == ['real-1']
+    audit = json.loads((tmp_path / 'comment_review_audit.json').read_text('utf-8'))
+    assert audit['unreviewed_comment_ids'] == ['real-1']
+    assert audit['status'] == 'review_deferred'
+
+
 def test_lossy_comment_capture_is_detected_before_model_review():
     assert capture_has_replacement_characters({'rows': [{'text': '城\ufffd更新'}], 'posts': []})
     assert not capture_has_replacement_characters({'rows': [{'text': '城市更新'}], 'posts': []})

@@ -23,6 +23,31 @@ def valid_raw_deferrals(review, expected, reviewed):
             and all(valid_interruption(row) for row in rows))
 
 
+def valid_partial_foreign(audit):
+    """Accept an honestly incomplete artifact, never a fabricated successful search."""
+    import hashlib
+    import json
+    from pathlib import Path
+    observations = audit.get('search_observations') or {}
+    queries = observations.get('queries') or []
+    run = observations.get('host_run') or {}
+    log = Path(str(run.get('log') or ''))
+    if not (audit.get('delivery_policy') == POLICY and audit.get('collection_status') == 'partial_completed'
+            and audit.get('collection_completed') is False and audit.get('notice')
+            and run.get('session_id') and run.get('exit_code') in (0, 124) and log.is_file()
+            and observations.get('log_sha256') == hashlib.sha256(log.read_bytes()).hexdigest()):
+        return False
+    if not queries or not any(q.get('kind') == 'comments' for q in queries):
+        return False
+    registry = json.loads((Path(__file__).resolve().parents[1] / 'config' / 'source_registry.v1.json').read_text('utf-8-sig'))
+    expected = {r['id'] for r in registry['sources'] if r.get('must_check') and r.get('tier') == 'overseas_media'}
+    if audit.get('registry_version') != registry.get('version') or not expected <= {q.get('source_id') for q in queries}:
+        return False
+    return (all(q.get('query') and q.get('status') in {'completed', 'access_failed'}
+                and (q.get('status') != 'access_failed' or q.get('blocker')) for q in queries)
+            and all(valid_interruption(row) for row in audit.get('review_deferred_records') or []))
+
+
 def deferred_hotwords(failure):
     return {'status': 'review_deferred', 'review_method': 'host_unreviewed', 'method': 'host_unreviewed',
             'delivery_policy': POLICY, 'selected': [], 'second_pass_completed': False,

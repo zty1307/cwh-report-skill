@@ -97,8 +97,13 @@ def main():
         capture = task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')
         if not capture:
             from cwh_fast_comment_collection import prepare_task
+            collection_started = time.monotonic()
             try:
                 prepare_task(task_path)
+                refreshed = json.loads(task_path.read_text('utf-8-sig'))
+                original_budget = float(task.get('remaining_budget_seconds') or task['time_budget_seconds'])
+                refreshed['remaining_budget_seconds'] = max(.001, original_budget - (time.monotonic() - collection_started))
+                atomic_write_json(task_path, refreshed)
             except Exception as exc:
                 workspace = Path(task['stage_workspace']).resolve()
                 atomic_write_json(workspace / 'blocker.json', {

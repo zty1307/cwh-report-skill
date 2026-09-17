@@ -6,6 +6,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_overseas_semantics import PROMPT, compile_review, media_candidates, social_audit, query_plan, partition_reviewable
 
 
+def test_partial_foreign_requires_real_search_log_and_preserves_failure_status(tmp_path):
+    import json
+    import hashlib
+    from cwh_semantic_recovery import POLICY, valid_partial_foreign
+    from run_cwh_resumable_pipeline import validate_foreign
+    registry = json.loads((Path(__file__).resolve().parents[1] / 'config/source_registry.v1.json').read_text('utf-8-sig'))
+    queries = query_plan({'topics': [{'topic': '公共服务'}]}, registry)
+    for query in queries:
+        query.update(status='access_failed', blocker='search deadline exceeded')
+    log = tmp_path / 'actual-search.jsonl'
+    log.write_text('test timeout log', encoding='utf-8')
+    audit = {'attempted': True, 'dry_run': False, 'registry_version': registry['version'],
+        'collection_completed': False, 'collection_status': 'partial_completed',
+        'command_exit_code': 1, 'collector_exit_code': 1, 'delivery_policy': POLICY,
+        'notice': '尚未完成，不代表无报道', 'search_observations': {'queries': queries,
+            'host_run': {'session_id': 'timeout-id', 'exit_code': 124, 'log': str(log)},
+            'log_sha256': hashlib.sha256(log.read_bytes()).hexdigest()}}
+    assert valid_partial_foreign(audit)
+    target = tmp_path / 'audit.json'
+    target.write_text(json.dumps(audit), encoding='utf-8')
+    supplements = tmp_path / 'supplements.json'
+    supplements.write_text('{"media":[],"comments":[]}', encoding='utf-8')
+    assert validate_foreign(target, supplements)
+    assert validate_foreign(target, supplements, allow_partial=True) == []
+    log.write_text('modified', encoding='utf-8')
+    assert not valid_partial_foreign(audit)
+    assert validate_foreign(target, supplements, allow_partial=True)
+
+
 def test_media_candidates_prioritize_registered_overseas_domains():
     observations = {'queries': [{'kind': 'media', 'status': 'completed', 'results': [
         {'title': '国常会报道', 'url': 'https://www.gov.cn/a', 'snippet': '国务院常务会议'},

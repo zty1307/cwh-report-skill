@@ -879,7 +879,7 @@ def validate_sentiment(summary_path: Path, handoff_path: Path, topics: list[str]
     return problems
 
 
-def validate_foreign(audit_path: Path, supplements_path: Path) -> list[str]:
+def validate_foreign(audit_path: Path, supplements_path: Path, *, allow_partial=False) -> list[str]:
     problems: list[str] = []
     try:
         audit = read_json(audit_path)
@@ -898,7 +898,9 @@ def validate_foreign(audit_path: Path, supplements_path: Path) -> list[str]:
     )
     if not attempted:
         problems.append("境外媒体与境外网民评论尚未实际执行采集")
-    if exit_code not in (None, 0, "0") and not verified_completed:
+    from cwh_semantic_recovery import valid_partial_foreign
+    partial = allow_partial and valid_partial_foreign(audit)
+    if exit_code not in (None, 0, "0") and not verified_completed and not partial:
         problems.append(f"境外采集退出码为{exit_code}")
     try:
         supplements = read_json(supplements_path)
@@ -1559,7 +1561,8 @@ class CwhPipeline:
             supplied = str(self.contract.get(key) or "").strip()
             if supplied and not target.exists():
                 shutil.copy2(supplied, target)
-        problems = validate_foreign(audit, supplements) if audit.exists() and supplements.exists() else ["尚未生成境外采集与审核产物"]
+        allow_partial = self.contract.get('execution_profile') in {'bounded_40m', 'bounded_60m'}
+        problems = validate_foreign(audit, supplements, allow_partial=allow_partial) if audit.exists() and supplements.exists() else ["尚未生成境外采集与审核产物"]
         if not problems:
             return StageOutcome.succeeded("境外媒体与境外网民评论已分开采集、审核并保留来源。")
         task = ai_task(
@@ -1586,7 +1589,7 @@ class CwhPipeline:
         if worker_failure:
             return worker_failure
         if supplements.exists() and audit.exists():
-            problems = validate_foreign(audit, supplements)
+            problems = validate_foreign(audit, supplements, allow_partial=allow_partial)
             if not problems:
                 return StageOutcome.succeeded("AI工作器已完成境外媒体与网民评论的独立采集审核。")
             return StageOutcome.failed(

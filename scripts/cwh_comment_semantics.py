@@ -9,7 +9,7 @@ import shutil
 import time
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-from cwh_host_research import semantic_json, HostModelError
+from cwh_host_research import semantic_json, HostModelError, SemanticResponseError
 from cwh_pipeline_runtime import atomic_write_json
 from cwh_writing_rules import writing_rules
 from run_cwh_sentiment_stage import (build_workbook_summary, build_report_comment_handoff, workbook_metadata,
@@ -459,6 +459,35 @@ def compile_results(capture, topics, result, run, *, classification_only=False):
     return compiled
 
 
+def write_unreviewed_capture(capture, topics, collection_audit, output_dir, capture_path, failure):
+    """Keep genuine captures pending, never assign a sentiment or a negative verdict."""
+    from cwh_semantic_recovery import POLICY, valid_interruption
+    if not valid_interruption(failure):
+        raise ValueError('Missing actual comment review interruption')
+    audit = copy.deepcopy(collection_audit or {})
+    for row in audit.get('coverage_by_topic') or []:
+        for check in row.get('checks') or []:
+            check['captured_comment_ids'] = check.get('eligible_comment_ids') or []
+            check['eligible_comment_ids'] = []
+    note = f"已保留{len(capture['rows'])}条真实评论，但本轮语义审核未完成；不输出未经审核的引用或情感比例。"
+    result_path = output_dir / 'sentiment_results.csv'
+    write_csv(result_path, [], ['sample_id', 'topic', 'label', 'label_source', 'needs_review', 'in_sentiment_denominator'])
+    write_csv(output_dir / 'sentiment_input.csv', capture['rows'], OUTPUT_FIELDS)
+    write_csv(output_dir / 'report_comment_handoff.csv', [], REPORT_HANDOFF_FIELDS)
+    summary = {'schema_version': '1.0', 'status': 'pending', 'delivery_policy': POLICY,
+        'notice': note, 'review_interruption': failure, 'captured_count': len(capture['rows']),
+        'result_file': str(result_path.resolve()), 'minimum_topic_denominator_for_backfill': 20,
+        'topics': [{'index': i, 'title': title, 'status': 'pending', 'denominator': 0,
+                    'positive': None, 'neutral': None, 'negative': None} for i, title in enumerate(topics, 1)],
+        'collection_audit': audit}
+    atomic_write_json(output_dir / 'sentiment_workbook_summary.json', summary)
+    atomic_write_json(output_dir / 'comment_review_audit.json', {'status': 'review_deferred',
+        'notice': note, 'review_interruption': failure, 'raw_capture': str(capture_path.resolve()),
+        'raw_capture_sha256': hashlib.sha256(capture_path.read_bytes()).hexdigest(),
+        'unreviewed_comment_ids': [r['comment_id'] for r in capture['rows']],
+        'classifier_trained': False, 'handoff': {'status': 'pending', 'eligible_rows': 0}})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--capture', type=Path, required=True)
@@ -467,6 +496,7 @@ def main():
     parser.add_argument('--collection-audit', type=Path)
     parser.add_argument('--timeout', type=int, default=290)
     parser.add_argument('--split-review', action='store_true', help='Checkpoint labels before separate formal quote selection')
+    parser.add_argument('--deliver-available', action='store_true', help='Retain actual review interruptions as explicit gaps')
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     capture = json.loads(args.capture.read_text('utf-8-sig'))
@@ -517,15 +547,28 @@ def main():
     review_deadline = time.monotonic() + args.timeout
     review_reserve = min(45, max(0, args.timeout * .2))
     author_timeout = max(1, args.timeout - review_reserve)
-    if collection_audit and not collection_audit.get('multi_topic_parents'):
-        packet = compact_review_packet(capture, topics, collection_audit)
-        result, run = semantic_json(packet, COMPACT_PROMPT, command, args.output_dir, 'comment-review-compact', author_timeout)
-        result = expand_compact_comment_result(packet, result)
-    elif args.split_review:
-        result, run, label_run = split_review(capture, topics, command, args.output_dir, author_timeout)
-    else:
-        result, run = semantic_json(review_packet(capture, topics), PROMPT, command, args.output_dir, 'comment-review', author_timeout)
-    result = complete_single_comment_heading(result)
+    run = None
+    try:
+        if collection_audit and not collection_audit.get('multi_topic_parents'):
+            packet = compact_review_packet(capture, topics, collection_audit)
+            result, run = semantic_json(packet, COMPACT_PROMPT, command, args.output_dir, 'comment-review-compact', author_timeout)
+            result = expand_compact_comment_result(packet, result)
+        elif args.split_review:
+            result, run, label_run = split_review(capture, topics, command, args.output_dir, author_timeout)
+        else:
+            result, run = semantic_json(review_packet(capture, topics), PROMPT, command, args.output_dir, 'comment-review', author_timeout)
+        result = complete_single_comment_heading(result)
+        compile_results(capture, topics, result, run, classification_only=True)
+    except (HostModelError, ValueError, TimeoutError) as exc:
+        if not args.deliver_available:
+            raise
+        from cwh_semantic_recovery import interruption
+        if isinstance(exc, ValueError) and not isinstance(exc, SemanticResponseError):
+            if not run:
+                raise  # Input/identity errors remain blocking, not model failures.
+            exc = SemanticResponseError(str(exc), run)
+        write_unreviewed_capture(capture, topics, collection_audit, args.output_dir, args.capture, interruption(exc))
+        return
     # All compact/split/legacy routes converge here before formal handoff.
     # The independent reviewer supplies its own exact retained-topic headings.
     # An author's missing/misnumbered shared heading must not discard valid
@@ -560,7 +603,7 @@ def main():
         'transport_heading_completions': result.get('transport_heading_completions') or [],
         'excluded_capture_rows': len(capture['excluded']), 'classifier_trained': False})
     print(json.dumps({'handoff': handoff_audit, 'summary_status': summary['status'], 'seconds': run['seconds']}, ensure_ascii=False))
-    if blockers or handoff_audit['status'] != 'ready':
+    if (blockers or handoff_audit['status'] != 'ready') and not args.deliver_available:
         raise SystemExit(65)
 
 
@@ -580,6 +623,8 @@ def run_task(task_path):
                     str(max(1, int(task.get('remaining_budget_seconds') or task['time_budget_seconds']) - 8))]
         if os.environ.get('CWH_COMMENT_SPLIT_REVIEW') == '1':
             sys.argv.append('--split-review')
+        if (task.get('repair_contract') or {}).get('missing_evidence') == 'deliver_available_with_gaps':
+            sys.argv.append('--deliver-available')
         main()
     finally:
         sys.argv = saved_argv

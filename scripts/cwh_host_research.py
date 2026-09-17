@@ -178,7 +178,16 @@ def collect_topic(plan, period, command_template, workspace, timeout):
               "禁止访问ydata.woa.com。所有查询执行后只回复done；任何工具失败直接保留错误，不重试。\n"
               + json.dumps(tasks, ensure_ascii=False, separators=(",", ":")))
     if log is None:
-        log, run = invoke(command_template, prompt, workspace, "search", timeout)
+        if timeout <= 0:
+            log = ''
+            path = workspace / 'search-not-invoked.jsonl'
+            path.write_text(log, encoding='utf-8')
+            now = utc_now()
+            run = {'session_id': str(uuid.uuid4()), 'model_invoked': False, 'exit_code': 124,
+                   'started_at': now, 'completed_at': now, 'log': str(path), 'seconds': 0,
+                   'reason': 'Discovery budget exhausted before call; queries were not executed'}
+        else:
+            log, run = invoke(command_template, prompt, workspace, "search", timeout)
     observations = observed_tools(log)
     records = []
     for number, task in enumerate(tasks, 1):

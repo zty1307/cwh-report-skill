@@ -1,4 +1,5 @@
 import sys
+import pytest
 from pathlib import Path
 
 
@@ -6,6 +7,17 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from cwh_fast_comment_collection import apply_review_cap, query_variants, relevant_parent_title, topic_fragments
+
+
+def test_exhausted_collection_budget_keeps_a_gap_without_network_or_zero_claim(tmp_path, monkeypatch):
+    import time
+    import cwh_fast_comment_collection as collector
+    monkeypatch.setattr(collector, 'discover', lambda *a, **kw: pytest.fail('Must not search after deadline'))
+    accepted, searches = collector.discover_topic('公共服务', '2026-01-01', '2026-01-02', tmp_path,
+                                                  deadline=time.monotonic() - 1)
+    assert accepted == []
+    assert searches[0]['status'] == 'access_failed'
+    assert 'not executed' in searches[0]['error']
 
 
 def test_topic_query_variants_are_current_topic_driven():

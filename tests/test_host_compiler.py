@@ -6,6 +6,18 @@ import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, terminal_transport_error, collect_topic, HostModelError
+
+
+def test_no_discovery_budget_keeps_explicit_unexecuted_queries(tmp_path, monkeypatch):
+    import cwh_host_research as host
+    monkeypatch.setattr(host, 'topic_search_tasks', lambda *a: [{'query': 'exact query'}])
+    def forbidden(*args, **kwargs):
+        raise AssertionError('No model call after discovery deadline')
+    monkeypatch.setattr(host, 'invoke', forbidden)
+    result = collect_topic({'topic': '公共服务'}, {}, [], tmp_path, 0)
+    assert result['queries'][0]['status'] == 'access_failed'
+    assert result['host_run']['model_invoked'] is False
+    assert result['all_queries_observed'] is False
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import labeled_publication_date, exclude_certain_period_misses
