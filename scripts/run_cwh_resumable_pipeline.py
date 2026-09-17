@@ -276,7 +276,7 @@ def maybe_run_ai_worker(
     return None
 
 
-def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_review: bool = True, allow_deferred_corpus: bool = False) -> list[str]:
+def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_review: bool = True, allow_deferred_corpus: bool = False, allow_claim_repair: bool = False) -> list[str]:
     problems: list[str] = []
     try:
         data = read_json(path)
@@ -750,7 +750,12 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
     for issue in domestic_viewpoint_quality_issues(data):
         if issue.get("severity") == "error":
             problems.append(str(issue.get("message") or issue.get("code") or "境内观点质量错误"))
-    problems.extend(mapping_problem_messages(validate_analysis_mapping(data, require_semantic_review=require_semantic_review)))
+    mapping = validate_analysis_mapping(data, require_semantic_review=require_semantic_review)
+    if allow_claim_repair and not require_semantic_review:
+        # Only author-draft wording issues proceed to the mandatory independent
+        # reviewer. Frozen source/hash/identity/coverage checks remain blocking.
+        mapping['issues'] = [i for i in mapping['issues'] if i['code'] not in {'claim_adds_numbers', 'claim_adds_quoted_terms'}]
+    problems.extend(mapping_problem_messages(mapping))
     return problems
 
 
@@ -1314,7 +1319,13 @@ class CwhPipeline:
                 return [f"analysis_bundle.json无法解析或结构无效：{type(exc).__name__}: {exc}"]
             atomic_write_json(target, normalized)
             try:
-                return validate_analysis_bundle(target, topics, require_semantic_review=False, allow_deferred_corpus=allow_deferred)
+                pending = [i for i in validate_analysis_mapping(normalized, require_semantic_review=False)['issues']
+                           if i['code'] in {'claim_adds_numbers', 'claim_adds_quoted_terms'}]
+                if pending and allow_deferred:
+                    normalized.setdefault('metadata', {})['pending_claim_repairs'] = pending
+                    atomic_write_json(target, normalized)
+                return validate_analysis_bundle(target, topics, require_semantic_review=False, allow_deferred_corpus=allow_deferred,
+                                                allow_claim_repair=allow_deferred)
             except (ValueError, TypeError, AttributeError) as exc:
                 return [f"analysis_bundle.json字段类型无效：{type(exc).__name__}: {exc}"]
 

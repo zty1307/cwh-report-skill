@@ -99,8 +99,6 @@ def combine(analysis, earlier, later, repaired_ids, source_hash):
 def validate_combined(original, repaired, initial, combined):
     provenance = combined['repair_provenance']
     failed = {r['evidence_id'] for r in initial['reviews'] if r['verdict'] != 'fully_supported'}
-    if failed != set(provenance['repaired_evidence_ids']):
-        raise ValueError('Repair list differs from actual independent rejections')
     digest = hashlib.sha256(json.dumps(initial, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if digest != provenance['earlier_review_sha256'] or initial['source_bundle_sha256'] != provenance['original_source_bundle_sha256']:
         raise ValueError('Initial independent review provenance mismatch')
@@ -108,6 +106,8 @@ def validate_combined(original, repaired, initial, combined):
         from cwh_review_retention import validate_retention
         validate_retention(original, repaired, initial, combined)
         return
+    if failed != set(provenance['repaired_evidence_ids']):
+        raise ValueError('Repair list differs from actual independent rejections')
     validate_identity(original, repaired, failed)
     rows = {r['evidence_id']: r for r in combined['reviews']}
     for row in initial['reviews']:

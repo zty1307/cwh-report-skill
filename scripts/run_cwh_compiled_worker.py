@@ -677,6 +677,7 @@ REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬
 REVIEW_PROMPT += '\nreport_agenda是用户声明的报告会议，仅用于对象消歧，不能当作原文论据。相关背景会议的真实判断可保留，但“会议在……新增”“会议首次重点提及”等必须展开成原文实际对象；确认属背景会议也不意味着可以不写明名称，不能把背景会议定调冒充本报告会议的新部署。'
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']
+REVIEW_PROMPT += '\nliteral_gate_findings是草稿逐字校验发现的数字或引号表述缺口，不是语义结论。逐项核对原文；确需修订时在revision中保留真实含义并删除或纠正无依据表述，不能直接忽略该缺口后认证原句。'
 REVIEW_PROMPT += '\n修订时的可选表达框架，不据示例增添事实：' + editorial_template_prompt('revision')
 REVIEW_PROMPT += '\ncross_topic_exact_duplicates是脚本发现的同一声明主体、职务及原始URL的完全相同判断跨题重用，不预设去向。结合全部agenda_topics和实际对象保留在最直接对应的一个议题；其他重复条按本题正式选材资格判unsupported或uncertain并解释，文字原文支持不自动证明本题归属。不要把同一判断稍改措辞后重复保留，也不合并同名但职务不同的人或同主体的不同判断。'
 REVIEW_PROMPT += '\ncross_topic_shared_source_spans仅标记同一声明主体、职务、URL和已核验原文哈希的跨题选材共享连续原文片段，不是重复结论。逐对核对实际论断：同一判断的长短版本或略改措辞只保留在最直接的具体议题，其他条按本题资格判unsupported或uncertain并解释；仅共享背景、却分别提出不同独立判断时可以分别保留，不能仅按重叠自动删除，也不能借另一条额外句子补成当前主体的新结论。'
@@ -806,6 +807,8 @@ def independent_packet(analysis):
                 if snapshot['source_text'][ev['source_excerpt_start']:ev['source_excerpt_end']] != ev['source_excerpt']:
                     raise ValueError('Frozen source does not contain the exact declared excerpt')
                 claims.append({"id": claim_id, "source_id": short, "topic": topic['topic'],
+                    'literal_gate_findings': [i['message'] for i in (analysis.get('metadata') or {}).get('pending_claim_repairs') or []
+                                              if i.get('evidence_id') == ev['evidence_id']],
                     "excerpt_source_span": [ev['source_excerpt_start'], ev['source_excerpt_end']],
                     "excerpt_integrity": "exact_contiguous_slice_of_frozen_full_article; sentence_splits_only",
                     "reference_expansion_required": has_ambiguous_meeting_reference(ev['formal_claim']),
@@ -850,6 +853,13 @@ def verify(task, deadline):
     output(task, packet)  # Preserve rejection even if a later repair times out.
     from cwh_review_repair import apply_reviewer_narrowing, reviewer_narrowing_packet
     rejected = [row for row in packet['reviews'] if row['verdict'] != 'fully_supported']
+    from cwh_available_delivery import available_delivery
+    use_retention = available_delivery(analysis)
+    if use_retention:
+        from domestic_evidence_mapping import validate_analysis_mapping
+        hard_ids = {i.get('evidence_id') for i in validate_analysis_mapping(analysis, require_semantic_review=False)['issues']
+                    if i['code'] in {'claim_adds_numbers', 'claim_adds_quoted_terms'}}
+        rejected = [r for r in packet['reviews'] if r['verdict'] != 'fully_supported' or r['evidence_id'] in hard_ids]
     repair_path = task['inputs'].get('expected_repaired_bundle')
     if not rejected:
         if body_batches is not None:
@@ -861,8 +871,6 @@ def verify(task, deadline):
     if Path(repair_path).resolve() not in [Path(p).resolve() for p in task['declared_outputs']]:
         raise ValueError('Repair output must be explicitly declared')
     atomic_write_json(workspace / 'initial_independent_review.json', packet)
-    from cwh_available_delivery import available_delivery
-    use_retention = available_delivery(analysis)
     if not use_retention and deadline - time.monotonic() < 15:
         return
     if use_retention:
@@ -895,7 +903,7 @@ def main():
     parser.add_argument("--task", required=True)
     args = parser.parse_args()
     task = read(args.task)
-    deadline = time.monotonic() + int(task.get("remaining_budget_seconds") or task["time_budget_seconds"]) - 8
+    deadline = time.monotonic() + int(task.get("remaining_budget_seconds") or task["time_budget_seconds"]) - (30 if task['stage_id'] == 'domestic_viewpoints' else 8)
     try:
         if task["stage_id"] == "domestic_viewpoints":
             author(task, deadline)

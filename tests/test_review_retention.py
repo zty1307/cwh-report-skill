@@ -89,6 +89,41 @@ def test_invalid_reviewer_number_is_excluded_instead_of_waiving_draft_gate():
     validate_combined(source, repaired, initial, final)
 
 
+def test_native_approval_never_waives_an_unsupported_number_or_term():
+    from normalize_cwh_analysis import normalize_analysis
+    source, initial, run = fixture()
+    evidence_rows(source)[0][1]['formal_claim'] += '三年内增长，属于“原文没有的词”。'
+    source = normalize_analysis(source)
+    frozen_review = copy.deepcopy(initial)
+    repaired, actions = retain_reviewed_content(source, initial)
+    assert not evidence_rows(repaired)
+    failed = next(a for a in actions if a['evidence_id'] == initial['reviews'][0]['evidence_id'])
+    assert failed['action'] == 'excluded' and failed['original_review']['verdict'] == 'fully_supported'
+    assert failed['host_reference_gate']
+    assert initial == frozen_review
+    final = retention_packet(repaired, initial, actions, run, 'new-hash')
+    validate_combined(source, repaired, initial, final)
+
+
+def test_only_draft_wording_can_be_deferred_not_source_integrity(tmp_path):
+    import json
+    from normalize_cwh_analysis import normalize_analysis
+    from run_cwh_resumable_pipeline import validate_analysis_bundle
+    source, _, _ = fixture()
+    evidence_rows(source)[0][1]['formal_claim'] += '三年内增长。'
+    source = normalize_analysis(source)
+    path = tmp_path / 'draft.json'
+    def check(require_review=False, allow_repair=False):
+        path.write_text(json.dumps(source, ensure_ascii=False), encoding='utf-8')
+        return validate_analysis_bundle(path, ['公共服务'], require_semantic_review=require_review,
+            allow_claim_repair=allow_repair, allow_deferred_corpus=True)
+    assert any('新增了原文片段中没有的数字' in p for p in check())
+    assert not any('新增了原文片段中没有的数字' in p for p in check(allow_repair=True))
+    assert any('新增了原文片段中没有的数字' in p for p in check(require_review=True, allow_repair=True))
+    evidence_rows(source)[0][1]['source_excerpt_start'] = -1
+    assert any('位置越界' in p for p in check(allow_repair=True))
+
+
 def test_independently_supported_narrowing_is_retained_with_real_certification():
     source, initial, run = fixture()
     initial['reviews'][1]['verdict'] = 'partially_supported'
