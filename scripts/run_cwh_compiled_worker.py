@@ -541,7 +541,9 @@ def author(task, deadline):
     delivery_policy = (policy.get('model_contract') or {}).get('on_missing_evidence') or ''
     available = delivery_policy == 'deliver_available_with_gaps'
     # Discovery and optional ranking may not consume the whole writing budget.
-    preparation_deadline = time.monotonic() + max(0, deadline - time.monotonic() - 30) * .45
+    from cwh_reading_budget import preparation_policy, optional_priority_budget
+    preparation_fraction, minimum_priority_seconds = preparation_policy(policy)
+    preparation_deadline = time.monotonic() + max(0, deadline - time.monotonic() - 30) * preparation_fraction
     raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
     from cwh_reading_budget import frozen_reading_allocation
     raw_read_limit, page_fetch_limit = frozen_reading_allocation(
@@ -560,7 +562,8 @@ def author(task, deadline):
         if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
             from cwh_raw_reading_discovery import prioritize_raw_articles
             raw_order = prioritize_raw_articles(indexed, raw_read_limit, command, workspace,
-                min(45, max(0, prepare_seconds * .2)) if available else min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
+                optional_priority_budget(prepare_seconds, .2, 45, minimum_priority_seconds)
+                if available else min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
         source_rows = [read(row['full_text_path']) for row in raw_order]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      (min(65, max(0, topic_prepare_deadline - time.monotonic()) * .65)
@@ -569,7 +572,7 @@ def author(task, deadline):
         if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
             from cwh_reading_priority import prioritize_pages
             urls = prioritize_pages(observations, indexed['topic'], page_fetch_limit, urls,
-                command, workspace, (min(30, max(0, topic_prepare_deadline - time.monotonic()) * .25)
+                command, workspace, (optional_priority_budget(topic_prepare_deadline - time.monotonic(), .25, 30, minimum_priority_seconds)
                     if available else min(30, max(0, deadline - time.monotonic() - 60))), semantic_json)
         read_timeout = min(8, max(.1, topic_prepare_deadline - time.monotonic()) / max(1, (len(urls) + 3) // 4)) if available else 8
         pages = cached_public_pages(workspace, urls, timeout=read_timeout)

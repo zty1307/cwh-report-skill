@@ -5,6 +5,22 @@ import math
 from cwh_pipeline_runtime import atomic_write_json
 
 
+def preparation_policy(profile):
+    research = profile.get('research') or {}
+    fraction = research.get('preparation_fraction', .45)
+    minimum = research.get('minimum_optional_priority_seconds', 10)
+    if (type(fraction) not in (int, float) or not math.isfinite(fraction) or not 0 < fraction < 1
+            or type(minimum) not in (int, float) or not math.isfinite(minimum) or minimum < 10):
+        raise ValueError('Invalid preparation budget policy')
+    return fraction, minimum
+
+
+def optional_priority_budget(remaining, fraction, maximum, minimum):
+    """Do not spend scarce reading time on undersized optional ordering calls."""
+    budget = min(maximum, max(0, remaining) * fraction)
+    return budget if budget >= minimum else 0
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 

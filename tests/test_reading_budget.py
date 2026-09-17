@@ -4,10 +4,28 @@ from pathlib import Path
 import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from cwh_reading_budget import allocate_reading, frozen_reading_allocation
+from cwh_reading_budget import allocate_reading, frozen_reading_allocation, preparation_policy, optional_priority_budget
 
 POLICY = {'base_monitoring_articles': 12, 'base_public_pages': 4,
           'baseline_topic_seconds': 360, 'expanded_topic_seconds': 660}
+
+
+def test_preparation_reserves_most_author_time_for_intact_reading():
+    from cwh_model_contract import execution_profile
+    fraction, minimum = preparation_policy(execution_profile('bounded_60m')[1])
+    assert fraction == .25 and minimum == 30
+    assert preparation_policy(execution_profile('bounded_40m')[1]) == (.45, 10)
+    assert optional_priority_budget(60, .2, 45, minimum) == 0
+    assert optional_priority_budget(200, .2, 45, minimum) == 40
+    assert optional_priority_budget(900, .2, 45, minimum) == 45
+    assert optional_priority_budget(-1, .2, 45, minimum) == 0
+
+
+@pytest.mark.parametrize('field,value', [('preparation_fraction', 1), ('preparation_fraction', True),
+    ('preparation_fraction', float('nan')), ('minimum_optional_priority_seconds', 0)])
+def test_invalid_preparation_policy_is_not_silently_used(field, value):
+    with pytest.raises(ValueError, match='preparation budget'):
+        preparation_policy({'research': {field: value}})
 
 
 def test_ceilings_are_not_mandatory_quotas_and_minimum_review_is_preserved():

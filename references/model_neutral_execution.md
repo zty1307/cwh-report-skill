@@ -2,7 +2,7 @@
 
 Bounded missing-evidence delivery now uses `deliver_available_with_gaps`: return usable evidence plus honest gaps, independently review existing claims and continue all output stages. Quantity targets must not stop Word/Excel/HTML delivery. The final audit may say `delivered_with_gaps` while preserving `ready_for_formal_delivery=false`; no claim of complete coverage is required for users to receive files. Source integrity and cross-output consistency still apply. Earlier references to missing-evidence blockers below describe hard access/structural failures, not a requirement to withhold all available content.
 
-The default formal profile is `bounded_60m`, with a 3600-second limit and a 2700-second research cutoff that preserves delivery time. `bounded_40m` remains an explicit tighter option and `exhaustive` keeps uncapped research. These are engineering budgets, not evidence that every model can complete within them or permission to bypass a failed gate.
+The default formal profile is `bounded_60m`, with a 3600-second limit and a 3000-second research cutoff that preserves delivery time. `bounded_40m` remains an explicit tighter option and `exhaustive` keeps uncapped research. These are engineering budgets, not evidence that every model can complete within them or permission to bypass a failed gate.
 
 ## Division of work
 
@@ -22,13 +22,15 @@ For `bounded_60m`, allocate time where each input mode actually performs the wor
 
 | Stage seconds | Raw workbook | Standard workbook |
 | --- | ---: | ---: |
-| Workbook and raw semantic reviews | 1260 | 30 |
-| Domestic authoring | 600 | 1290 |
-| Independent claim verification | 300 | 600 |
+| Workbook and raw semantic reviews | 600 | 30 |
+| Domestic authoring | 1080 | 1290 |
+| Independent claim verification | 780 | 600 |
 | Overseas evidence handoff/collection | 60 | 240 |
 | Hotword preparation | 30 | 90 |
 
-Both modes keep domestic comments at 300, rendering at 180, final delivery checks at 120, and all other stage allocations identical. Each mode totals 2925 stage seconds plus the same 675-second reserve. The 2700-second research cutoff and 3600-second total stay unchanged; material shortages remain audited gaps, not invented evidence. The input-mode allocation is resolved once into the persisted contract and propagated to worker timeouts. Overrides cannot inflate the total or reduce independent review, rendering or final-gate allocations. This is an allocation, not a measured completion guarantee; reconfiguration of an existing diagnostic run must be disclosed, including its original wall-clock start.
+Both modes keep domestic comments at 300, rendering at 180 and final delivery checks at 120. Raw mode totals 3225 stage seconds; standard mode totals 2925. Each retains at least the configured 375-second additional reserve inside the 3600-second total. New jobs stop research at 3000 seconds. This revision reallocates time from appendix review and excess reserve to actual body reading and independent verification; it does not relax evidence checks. Unfinished appendix review retains exact pending IDs and original quantities. The input-mode allocation is resolved once into the persisted contract and propagated to worker timeouts. Overrides cannot exceed the base allocation or reduce independent review, rendering or final-gate allocations. Existing jobs keep their original contract and clocks; never relabel a resumed run as a fresh test or a measured guarantee.
+
+In the 60-minute available-delivery profile, discovery preparation receives at most 25% of remaining author time after the compilation reserve. Optional raw/web ranking calls are dispatched only when their computed allowance is at least 30 seconds; otherwise the existing discovery order is retained with no model approval claimed. The complete source bodies, bounded search lanes, native extraction, exact deferred IDs and independent review remain unchanged. This prevents short optional calls from spending the time needed to produce report prose. The 40-minute profile retains its existing preparation policy.
 
 The executable limits live in `config/execution_policy.v1.json`. Both bounded profiles use one active model worker and serial stages. Stage limits are not increased by the reserve. Research lanes are bounded by query, page-fetch and formal-voice limits. Monitoring-system full text is always processed first. Independent review is a separate sequential run. See `model_worker_host.md` for permission-aware transports and honest review-only delivery. Models do not need to run shell commands or edit pipeline state.
 
