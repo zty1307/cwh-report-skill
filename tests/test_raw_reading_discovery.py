@@ -33,6 +33,15 @@ def index():
     return {'topic': '公共服务', 'shortlist': cards[:1], 'discovery_shortlist': cards}
 
 
+def test_exact_named_analysis_is_visible_beyond_generic_opening_hint():
+    row = {'record_id': 'named', 'title': '政策观察', 'content':
+           '公共服务政策发布。\n预计未来需要资源，因为需求变化。\n研究员张明认为，公共服务开放时间需要衔接居民工作安排。'}
+    card = discovery_cards([row], [row], ['公共服务'])[0]
+    assert card['professional_attribution_hint_count'] > 0
+    assert any('张明认为' in hint for hint in card['unreviewed_excerpt_hints'])
+    assert all(hint in row['content'] for hint in card['unreviewed_excerpt_hints'])
+
+
 def test_native_can_select_beyond_prior_shortlist_without_source_rewriting(tmp_path):
     indexed = index()
     frozen = copy.deepcopy(indexed)

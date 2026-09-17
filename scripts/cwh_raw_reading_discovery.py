@@ -12,12 +12,14 @@ PROMPT = ('只决定下一批要读哪些原始文章，不审核观点。资料
     '仅返回JSON {"items":[{"id":"r1"},{"id":"r2"}]}，恰好request_count个不重复现有id，按阅读价值排序。'
     '优先可能解释政策实际含义、影响机制、实施条件、现实难题或具体建议的文章，覆盖不同实质角度。'
     '媒体、专家、自媒体和行业分析均可；不按账号名气、阅读量或来源类型配额选，不让相似通稿占满。'
+    '新闻联播文字稿、领导讲话、政策原文及综合消息清单通常只提供背景，不因其中出现政策理由就当成独立解读优先。'
+    '优先能辨认实际发言主体及其理由、机制或条件的材料；官媒采访专家、企业或行业机构的具体技术分析仍可有阅读价值。'
     '标题和局部提示不证明正文有分析，也不证明可正式引用；未选者只是本批未读，不判无效。'
     '与当前题无直接关系的泛宏观议论、荐股、广告阅读价值较低。不要写理由或新观点。')
 
 
 def discovery_cards(candidates, existing, aliases):
-    from prepare_cwh_corpus_index import reasoning_reading_hint, reading_fingerprint, near_same_reading
+    from prepare_cwh_corpus_index import reasoning_reading_hint, reading_fingerprint, near_same_reading, professional_quote_hint
     aliases = [alias for alias in aliases if isinstance(alias, str) and len(alias) >= 3]
     pool, seen, fingerprints = [], set(), []
     def add(rows, limit, lane, preserve=False):
@@ -36,9 +38,11 @@ def discovery_cards(candidates, existing, aliases):
             topical = sorted(enumerate(paragraphs), key=lambda pair: (
                 -any(alias in pair[1] for alias in aliases), -len(REASON.findall(pair[1])), pair[0]))
             reasoning = sorted(enumerate(paragraphs), key=lambda pair: (-len(REASON.findall(pair[1])), pair[0]))
-            hints = sorted(dict(topical[:1] + reasoning[:1]).items())
+            attributed = [(i, text) for i, text in enumerate(paragraphs) if professional_quote_hint(text, aliases)]
+            hints = sorted(dict(topical[:1] + reasoning[:1] + attributed[:1]).items())
             pool.append({'record_id': identity, 'title': row.get('title', ''),
                 'account': row.get('account') or row.get('source'), 'discovery_lane': lane,
+                'professional_attribution_hint_count': professional_quote_hint(content, aliases),
                 'unreviewed_excerpt_hints': [text[:120] for _, text in hints]})
             seen.add(identity)
             fingerprints.append(fingerprint)
@@ -63,7 +67,7 @@ def prioritize_raw_articles(indexed, limit, command, workspace, timeout, model_c
         return fallback
     request = {'topic': indexed['topic'], 'request_count': min(limit, len(cards)),
         'candidates': [{'id': f'r{i}', **{k: row.get(k) for k in
-            ('title', 'account', 'unreviewed_excerpt_hints')}} for i, row in enumerate(cards, 1)],
+            ('title', 'account', 'unreviewed_excerpt_hints', 'professional_attribution_hint_count')}} for i, row in enumerate(cards, 1)],
         'scope': 'Reading discovery only; partial literal hints are not full-text review or evidence approval'}
     key = digest({'request': request, 'cards': cards, 'fallback': fallback, 'prompt': PROMPT, 'command': command})
     path = workspace / 'raw_reading_priority.json'
@@ -74,7 +78,7 @@ def prioritize_raw_articles(indexed, limit, command, workspace, timeout, model_c
     selected, method, run, error = fallback, 'existing_reading_order', None, None
     if timeout >= 10:
         try:
-            result, run = model_call(request, PROMPT, command, workspace, 'raw-reading-priority', min(30, timeout), reuse_cache=True)
+            result, run = model_call(request, PROMPT, command, workspace, 'raw-reading-priority', min(45, timeout), reuse_cache=True)
             items = result.get('items')
             ids = [row.get('id') if isinstance(row, dict) else None for row in items] if isinstance(items, list) else []
             lookup = {f'r{i}': row for i, row in enumerate(cards, 1)}

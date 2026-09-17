@@ -69,6 +69,11 @@ def retain_reviewed_content(original, initial):
         'reviewer_run_id': initial['reviewer_run_id'], 'actions': actions,
         'candidate_actions': candidate_actions,
         'scope': 'Actual rejected claims only; not zero-result research or semantic certification by controller'}
+    unreviewed = [a['evidence_id'] for a in actions if a['original_review'].get('host_unreviewed')]
+    if unreviewed:
+        result.setdefault('metadata', {}).setdefault('independent_review_gaps', []).append({
+            'unreviewed_evidence_ids': unreviewed,
+            'notice': f'{len(unreviewed)}条已提取观点未完成独立核验，保留原文和草稿，不进入本次正式正文。'})
     result = normalize_analysis(prepare_available_delivery(result))
     return result, actions
 

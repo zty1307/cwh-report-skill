@@ -9,15 +9,26 @@ import time
 
 def run_scoped_command(command, *, cwd=None, env=None, stdout=None, stderr=None,
                        timeout=None, input_text=None):
-    process = subprocess.Popen(
-        command, cwd=cwd, env=env, stdout=stdout, stderr=stderr,
-        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-        text=True, encoding="utf-8", errors="replace",
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        start_new_session=os.name != "nt",
-    )
-    communication = None
+    communication, owned_job, job_assigned = None, None, False
+    if os.name == 'nt':
+        from cwh_windows_job import OwnedWindowsJob
+        owned_job = OwnedWindowsJob()
     try:
+        process = subprocess.Popen(
+            command, cwd=cwd, env=env, stdout=stdout, stderr=stderr,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            start_new_session=os.name != "nt",
+        )
+    except BaseException:
+        if owned_job is not None:
+            owned_job.close()
+        raise
+    try:
+        if owned_job is not None:
+            owned_job.assign(process)
+            job_assigned = True
         if timeout is None:
             process.communicate(input=input_text)
         else:
@@ -49,14 +60,19 @@ def run_scoped_command(command, *, cwd=None, env=None, stdout=None, stderr=None,
         return process.returncode
     except BaseException:
         # Never enumerate or terminate other sessions by executable/model name.
+        if job_assigned:
+            owned_job.terminate()
         if process.poll() is None:
-            if os.name == "nt":
+            if os.name == "nt" and not job_assigned:
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                timeout=10, creationflags=subprocess.CREATE_NO_WINDOW, check=False)
-            else:
+            elif os.name != 'nt':
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
         if communication is not None:
             communication.join(timeout=10)
         raise
+    finally:
+        if owned_job is not None:
+            owned_job.close()

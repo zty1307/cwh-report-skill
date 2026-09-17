@@ -207,7 +207,7 @@ def make_packet(topic, period, raw_rows, observations, fetched):
     return {"topic": topic, "period": period, "items": items}
 
 
-def compile_topic(packet, decision, observations, topic_plan, profile, registry_version, run_id):
+def compile_topic(packet, decision, observations, topic_plan, profile, registry_version, run_id, *, reading_deferrals=None):
     topic = packet["topic"]
     topic_id = hashlib.sha256(topic.encode("utf-8")).hexdigest()[:12]
     supplied = decision.get("items") or []
@@ -216,6 +216,12 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
     if len(set(ids)) != len(ids) or set(ids) != set(expected):
         raise ValueError("Semantic output must review each supplied item exactly once")
     choices = {row["id"]: row for row in supplied}
+    deferred = {row['id']: row for row in reading_deferrals or []}
+    from cwh_semantic_recovery import valid_interruption
+    if (len(deferred) != len(reading_deferrals or []) or set(deferred) - set(expected)
+            or (deferred and packet.get('delivery_policy') != 'deliver_available_with_gaps')
+            or any(not valid_interruption(row) for row in deferred.values())):
+        raise ValueError('Reading deferral requires actual timeout provenance and available-delivery policy')
     clusters = {row["key"]: {"cluster_key": row["key"], "summary": row["heading"], "evidence": []}
                 for row in decision.get("clusters") or []}
     candidates, retained, excluded, reviewed = [], [], [], []
@@ -236,6 +242,8 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         if choice.get("decision") not in {"eligible", "duplicate", "excluded"} or not choice.get("reason"):
             raise ValueError(f'Missing semantic disposition: {item["id"]}')
         claims = choice.get("claims") or []
+        if item['id'] in deferred and (claims or choice['decision'] != 'excluded'):
+            raise ValueError('Unread timed-out article cannot supply semantic claims')
         if choice["decision"] == "eligible" and (not claims or not item.get("content")):
             raise ValueError(f'Eligible item needs full text and atomic claims: {item["id"]}')
         if choice["decision"] != "eligible" and claims:
@@ -254,7 +262,7 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                                  if item.get('full_text_status') == 'access_failed' else
                                  '限时阅读名额内未读取完整正文，不能判断是否含独立解读')}
         item_queries = [raw_query] if raw else by_url[item["url"]]
-        if raw:
+        if raw and item['id'] not in deferred:
             reviewed.append(item["record_id"])
             if choice["decision"] == "eligible":
                 retained.append(item["record_id"])
@@ -275,6 +283,11 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                        "discovery_route": query["route"], "source_type": "expert" if claim and claim["speaker_type"] == "named_person" else "mainstream_media",
                        "source_tier": "monitoring_export" if raw else "public_web", "content_summary": choice["reason"]}
                 row['review_scope'] = 'discovery_metadata_only' if metadata_only else 'full_text_semantic_review'
+                if item['id'] in deferred:
+                    row.update(review_scope='full_text_available_semantic_review_deferred',
+                        decision_reason='模型阅读未完成，原文保留待审；只暂缓正式选材，不认定原文缺乏解读。',
+                        content_summary='完整原文保留，尚未完成语义审核。',
+                        machine_disposition={'origin': 'actual_article_reading_interruption', **copy.deepcopy(deferred[item['id']])})
                 if choice.get('classification_origin') == 'deterministic_web_metadata_gate':
                     row.update(review_scope='full_text_review_with_unverified_formal_metadata',
                                formal_metadata_verified=False, machine_disposition=copy.deepcopy(choice))
@@ -382,6 +395,8 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         'web_access_failed_count': sum(row.get('full_text_status') == 'access_failed' for row in web_items),
         'web_not_fetched_count': sum(row.get('full_text_status') == 'not_fetched_bounded_budget' for row in web_items),
         'full_text_item_ids': [row['id'] for row in packet['items'] if row.get('content')],
+        'semantic_reading_deferred_item_ids': list(deferred),
+        'semantic_reading_deferrals': copy.deepcopy(reading_deferrals or []),
         'scope': 'discovery counts are not full-text reads or qualified voice counts',
     }
     search_evidence += (f"; reading_scope: raw full text {reading_scope['raw_full_text_count']}; "

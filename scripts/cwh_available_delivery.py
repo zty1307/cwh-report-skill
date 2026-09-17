@@ -33,7 +33,17 @@ def prepare_available_delivery(data: dict) -> dict:
     reviews = {p["topic"]: p for p in (research.get("public_article_corpus_review") or {}).get("topic_reviews") or []}
     from cwh_search_budget import query_budget_evidence
     budget_notices = []
+    for topic, review in reviews.items():
+        completed = len(set(review.get('reviewed_record_ids') or []))
+        deferred = len(set(review.get('deferred_record_ids') or []))
+        if deferred and completed < min(12, completed + deferred):
+            notice = f'{topic}本轮仅完成{completed}篇原文审核，另有{deferred}篇待审；未达到阅读目标，仅交付已核验内容。'
+            review['reading_shortfall_notice'] = notice
+            budget_notices.append(notice)
     for pool in pools.values():
+        delayed = (pool.get('reading_scope') or {}).get('semantic_reading_deferred_item_ids') or []
+        if delayed:
+            budget_notices.append(f"{pool['topic']}有{len(delayed)}篇已取得原文但模型阅读未完成的材料暂未审完；现稿不包含其未获核验的观点，不代表相关解读不存在。")
         saturation = pool.get('saturation') or {}
         rounds = saturation.get('rounds') or []
         if rounds and int(rounds[-1].get('new_independent_viewpoints') or 0) > 0:
@@ -44,6 +54,16 @@ def prepare_available_delivery(data: dict) -> dict:
                 budget_notices.append(f"{pool['topic']}已达到本轮{proof['configured_max_queries']}次查询上限，但最后一轮仍有新增观点；检索未证明饱和，保留现有证据交付。")
     if budget_notices:
         result['metadata']['research_budget_gaps'] = budget_notices
+    synthesis_gaps = [t['topic'] + '：分组未完成，已提取观点暂按来源顺序排列，待独立核验。'
+        for t in (result.get('viewpoints') or {}).get('by_topic') or []
+        if any(c.get('cluster_key') == 'source_order' for c in t.get('clusters') or [])]
+    if synthesis_gaps:
+        result['metadata']['research_budget_gaps'] = list(dict.fromkeys(
+            result['metadata'].get('research_budget_gaps', []) + synthesis_gaps))
+    review_gaps = [row['notice'] for row in result['metadata'].get('independent_review_gaps', [])]
+    if review_gaps:
+        result['metadata']['research_budget_gaps'] = list(dict.fromkeys(
+            result['metadata'].get('research_budget_gaps', []) + review_gaps))
     for topic in (result.get("viewpoints") or {}).get("by_topic") or []:
         pool = pools.get(topic["topic"], {})
         executions = [q for r in (pool.get("saturation") or {}).get("rounds") or [] for q in r.get("executions") or []]

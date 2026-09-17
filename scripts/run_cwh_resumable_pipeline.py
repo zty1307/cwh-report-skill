@@ -340,8 +340,11 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             excluded_ids = {str(row.get("record_id") or "").strip() for row in excluded_rows}
             missing_review = sorted(expected_ids - reviewed_ids)
             deferred = set(review_row.get("deferred_record_ids") or [])
+            reading_shortfall = (available_delivery(data)
+                                 and bool(str(review_row.get('reading_shortfall_notice') or '').strip()))
             valid_deferral = (allow_deferred_corpus and indexed_ids.get(topic) == expected_ids
-                              and deferred == set(missing_review) and len(reviewed_ids) >= min(12, len(expected_ids))
+                              and deferred == set(missing_review)
+                              and (len(reviewed_ids) >= min(12, len(expected_ids)) or reading_shortfall)
                               and bool(str(review_row.get("deferral_reason") or "").strip()))
             if deferred and not valid_deferral:
                 problems.append(f"{topic}公众文章待审清单缺少完整索引、最低实审量或与未审记录不一致")

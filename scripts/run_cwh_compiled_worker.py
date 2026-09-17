@@ -297,7 +297,7 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
     synthesis_feedback = [item for item in feedback if is_synthesis_feedback(item)]
     started = time.monotonic()
     originals = {item['id']: item for item in packet['items']}
-    choices, batch_runs, manifest = [], [], []
+    choices, batch_runs, manifest, deferrals = [], [], [], []
     for number, group in enumerate(transport_groups, 1):
         ids = [item['id'] for item in group['items']]
         local = {**packet, 'items': [originals[value] for value in ids]}
@@ -306,18 +306,40 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         # Reserve a little time for every unread batch and the native synthesis;
         # never reset the cumulative stage deadline or borrow future topics.
         available = max(0, deadline - time.monotonic())
-        reserve = min(30 + 15 * (len(transport_groups) - number), available * 0.5)
+        reserve = min(45 + 15 * (len(transport_groups) - number), available * 0.5)
         local_deadline = deadline - reserve
         local_prompt = reading_prompt()
-        result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
-            local_deadline, reuse_cache=reuse_cache, feedback=article_feedback,
-            maximum_request_seconds=min(90, maximum_request_seconds) if maximum_request_seconds > 0 else 90,
-            future_topic_reserve_seconds=0, allow_article_batches=False, reading_only=True)
+        try:
+            if local_deadline - time.monotonic() < 15:
+                raise TimeoutError('Article reading budget exhausted before this batch')
+            result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
+                local_deadline, reuse_cache=reuse_cache, feedback=article_feedback,
+                maximum_request_seconds=min(180, maximum_request_seconds) if maximum_request_seconds > 0 else 180,
+                future_topic_reserve_seconds=0, allow_article_batches=False, reading_only=True)
+        except (HostModelError, SemanticResponseError, TimeoutError) as exc:
+            if packet.get('delivery_policy') != 'deliver_available_with_gaps':
+                raise
+            from cwh_semantic_recovery import interruption, defer_reading
+            failure = interruption(exc)
+            # Missing semantic results are not negative source judgments. Keep
+            # the full originals and actual timeout; do not retry the same call.
+            delayed, unread = defer_reading(ids, failure)
+            deferrals.extend(delayed)
+            atomic_write_json(workspace / 'article_reading_deferrals.json', deferrals)
+            choices.extend(unread)
+            manifest.append({'batch': number, 'item_ids': ids, 'status': 'semantic_reading_deferred',
+                             'interruption': failure})
+            continue
         choices.extend(result[0]['items'])
         batch_runs.append(run)
         manifest.append({'batch': number, 'item_ids': ids,
             'transport_characters': len(json.dumps(group, ensure_ascii=False, separators=(',', ':')))})
     request = synthesis_packet(packet, choices)
+    if deferrals:
+        delayed_ids = {row['id'] for row in deferrals}
+        request['previously_unread_items'] = [row for row in request['previously_excluded_items'] if row['id'] in delayed_ids]
+        request['previously_excluded_items'] = [row for row in request['previously_excluded_items'] if row['id'] not in delayed_ids]
+        request['scope'] = 'Only completed native readings supply claims; timed-out articles remain unread, not semantically rejected'
     if (request.get('formal_selection') or {}).get('allow_reserve'):
         request['formal_selection'] = {**request['formal_selection'], 'selection_mode': 'ranked_positive_v1'}
     if synthesis_feedback:
@@ -328,13 +350,23 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         synthesis_run = {'model_invoked': False, 'seconds': 0, 'session_id': str(uuid.uuid4())}
     else:
         remaining = deadline - time.monotonic()
-        if remaining < 15:
-            raise TimeoutError('No remaining native topic synthesis budget')
-        result, synthesis_run = native_topic_synthesis(request, choices, command, workspace,
-            remaining, semantic_json, reuse_cache=reuse_cache)
+        try:
+            if remaining < 15:
+                raise TimeoutError('No remaining native topic synthesis budget')
+            result, synthesis_run = native_topic_synthesis(request, choices, command, workspace,
+                remaining, semantic_json, reuse_cache=reuse_cache)
+        except (HostModelError, SemanticResponseError, TimeoutError, ValueError) as exc:
+            if packet.get('delivery_policy') != 'deliver_available_with_gaps':
+                raise
+            from cwh_semantic_recovery import interruption, preserve_extracted_claims
+            failure = ({'kind': 'invalid_synthesis_output', 'reason': str(exc)}
+                       if isinstance(exc, ValueError) and not isinstance(exc, SemanticResponseError) else interruption(exc))
+            result, synthesis_run = preserve_extracted_claims(packet, choices, failure)
+            atomic_write_json(workspace / 'synthesis_interruption.json', synthesis_run)
     run = {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
         'transport': 'lossless_article_batches_native_topic_synthesis',
         'batch_manifest': manifest, 'batch_runs': batch_runs, 'synthesis_run': synthesis_run,
+        'article_reading_deferrals': deferrals,
         'original_packet_sha256': hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
         'seconds': round(time.monotonic() - started, 3)}
     return result, run
@@ -351,7 +383,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
     if feedback and not targets:
         targets = {p['topic'] for p in packets}  # Unscoped errors must not be guessed.
     for number, packet in enumerate(packets, 1):
-        if deadline - time.monotonic() < 15:
+        if deadline - time.monotonic() < 15 and packet.get('delivery_policy') != 'deliver_available_with_gaps':
             raise TimeoutError("No remaining single-topic semantic budget")
         model_packet, fixed_unread = author_transport_with_fixed_unread_web(packet)
         ids = [row['id'] for row in model_packet['items']]
@@ -392,13 +424,16 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                        'transport': 'fixed_unread_web_only'}
             else:
                 input_characters = len(json.dumps(model_packet, ensure_ascii=False, separators=(',', ':')))
+                use_recoverable_reading = packet.get('delivery_policy') == 'deliver_available_with_gaps'
                 transport_groups = (partition_author_packet(model_packet)
-                    if allow_article_batches and input_characters > MAX_AUTHOR_PACKET_CHARACTERS else [])
-                if len(transport_groups) > 1:
+                    if allow_article_batches and (input_characters > MAX_AUTHOR_PACKET_CHARACTERS or use_recoverable_reading) else [])
+                if len(transport_groups) > 1 or (transport_groups and use_recoverable_reading):
                     readable_ids = set(ids)
                     readable = {**packet, 'items': [row for row in packet['items'] if row['id'] in readable_ids]}
-                    reserved = min(max(0, future_topic_reserve_seconds),
-                        (deadline - time.monotonic()) / (len(packets) - number + 1)) * (len(packets) - number)
+                    remaining_topics = len(packets) - number + 1
+                    reserved = ((deadline - time.monotonic()) * (remaining_topics - 1) / remaining_topics
+                        if use_recoverable_reading else min(max(0, future_topic_reserve_seconds),
+                        (deadline - time.monotonic()) / remaining_topics) * (remaining_topics - 1))
                     batch_workspace = workspace / f'a{number}'
                     batch_workspace.mkdir(parents=True, exist_ok=True)
                     batch_prompt = prompt
@@ -421,6 +456,8 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                     else:
                         result, run = semantic_json(model_packet, local_prompt, command, workspace,
                             f"author-topic-{number}", request_timeout, reuse_cache=reuse_cache)
+        except SemanticResponseError:
+            raise
         except ValueError as exc:
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if result.get('topic') not in (None, packet['topic']):
@@ -515,7 +552,7 @@ def author(task, deadline):
         if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
             from cwh_raw_reading_discovery import prioritize_raw_articles
             raw_order = prioritize_raw_articles(indexed, raw_read_limit, command, workspace,
-                min(30, max(0, deadline - time.monotonic() - 60)), semantic_json)
+                min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
         source_rows = [read(row['full_text_path']) for row in raw_order]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      min(65, (deadline - time.monotonic()) * .12))
@@ -528,6 +565,8 @@ def author(task, deadline):
         pages = recover_failed_page_slots(workspace, observations, urls, pages, plan,
                                           deadline, topic=indexed['topic'])
         packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
+        policy = read(inputs['execution_policy'])['profiles'][task['execution_profile']]
+        packet['delivery_policy'] = (policy.get('model_contract') or {}).get('on_missing_evidence') or ''
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
         selection = topic_plan.get('candidate_pool_contract') or {}
@@ -585,7 +624,10 @@ def author(task, deadline):
             compilation_errors.extend(f'[{packet["topic"]}] {error}' for error in metadata_errors)
             continue
         try:
-            part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"])
+            provenance_runs = run.get('topic_runs') or (prior.get('run') or {}).get('topic_runs') or []
+            topic_run = provenance_runs[position] if position < len(provenance_runs) else {}
+            part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"],
+                                 reading_deferrals=topic_run.get('article_reading_deferrals'))
             if decision.get('transport_repairs'):
                 part['transport_repairs'] = decision['transport_repairs']
         except (ValueError, KeyError, TypeError) as exc:
@@ -645,7 +687,7 @@ REVIEW_PROMPT = (
     + REVIEW_PROMPT)
 
 
-def compile_review(analysis, result, run, digest):
+def compile_review(analysis, result, run, digest, *, claim_review_runs=None):
     evidence = [(topic["topic"], e) for topic in analysis["viewpoints"]["by_topic"] for cl in topic["clusters"] for e in cl["evidence"]]
     candidates = {(pool["topic"], c["candidate_id"]): c for pool in analysis["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"] for c in pool["candidates"]}
     by_short = {f"e{n}": row for n, row in enumerate(evidence, 1)}
@@ -666,8 +708,18 @@ def compile_review(analysis, result, run, digest):
         row_run = run
         if 'retried_claim_ids' in retry:
             row_run = retry['retry_run'] if short_id in retry['retried_claim_ids'] else retry['original_run']
+        if claim_review_runs is not None:
+            if set(claim_review_runs) != set(by_short):
+                raise ValueError('Per-claim actual review runs must cover the frozen bundle')
+            row_run = claim_review_runs[short_id]
         row.update(evidence_id=ev["evidence_id"], reviewed_by="configured_model:" + row_run["session_id"], reviewed_at=row_run["completed_at"])
-        if 'retried_claim_ids' in retry:
+        if row.get('host_unreviewed'):
+            if (row_run.get('model_invoked') is not False or row['verdict'] != 'uncertain'
+                    or row.get('revision') is not None
+                    or row_run.get('interruption') != row['host_unreviewed']):
+                raise ValueError('Host uncertainty cannot certify a semantic review')
+            row['reviewed_by'] = 'host_unreviewed:' + row_run['session_id']
+        if 'retried_claim_ids' in retry or claim_review_runs is not None:
             row['reviewer_run_id'] = row_run['session_id']
         if (row.get('host_reference_gate') or {}).get('origin') == 'deterministic_reference_gate':
             if row['verdict'] != 'uncertain' or row.get('revision') is not None:
@@ -709,6 +761,9 @@ def compile_review(analysis, result, run, digest):
     if 'retried_claim_ids' in (result.get('review_field_retry') or {}):
         packet['reviewer_run_ids'] = list(dict.fromkeys(
             [result['review_field_retry']['original_run']['session_id'], run['session_id']]))
+    if claim_review_runs is not None:
+        packet['reviewer_run_ids'] = list(dict.fromkeys([run['session_id'],
+            *(r['session_id'] for r in claim_review_runs.values())]))
     if 'heading_reviews' in result:
         packet['heading_reviews'] = result['heading_reviews']
     if 'heading_repair_run' in result:
@@ -761,8 +816,14 @@ def verify(task, deadline):
     command = json.loads(os.environ["CWH_SEMANTIC_COMMAND_JSON"])
     workspace = Path(task["stage_workspace"])
     request_packet = independent_packet(analysis)
-    result, run = semantic_json(request_packet, REVIEW_PROMPT,
-        command, workspace, "independent-review", deadline-time.monotonic())
+    claim_runs, body_batches = None, None
+    if len(request_packet['claims']) > 12 or request_packet.get('delivery_policy') == 'deliver_available_with_gaps':
+        from cwh_body_review_batches import review_body_batches
+        result, run, claim_runs, body_batches = review_body_batches(request_packet,
+            REVIEW_PROMPT.replace(HEADING_REVIEW_PROMPT, ''), command, workspace, deadline, semantic_json)
+    else:
+        result, run = semantic_json(request_packet, REVIEW_PROMPT,
+            command, workspace, "independent-review", deadline-time.monotonic())
     result.pop('heading_repair_run', None)
     result.pop('heading_repair_runs', None)
     result.pop('heading_original_run', None)
@@ -771,18 +832,27 @@ def verify(task, deadline):
     result, run = retry_invalid_review_fields(request_packet, result, run,
         REVIEW_PROMPT.replace(HEADING_REVIEW_PROMPT, ''), command, workspace, deadline-time.monotonic()-15)
     result = repair_overlong_headings(request_packet, result, command, workspace, deadline-time.monotonic()-15)
-    packet = compile_review(analysis, result, run, digest)
+    packet = compile_review(analysis, result, run, digest, claim_review_runs=claim_runs)
+    if body_batches is not None:
+        packet['body_review_batches'] = body_batches
     output(task, packet)  # Preserve rejection even if a later repair times out.
     from cwh_review_repair import apply_reviewer_narrowing, reviewer_narrowing_packet
     rejected = [row for row in packet['reviews'] if row['verdict'] != 'fully_supported']
     repair_path = task['inputs'].get('expected_repaired_bundle')
-    if not rejected or not repair_path or deadline - time.monotonic() < 15:
+    if not rejected:
+        if body_batches is not None:
+            from cwh_heading_quality import review_retained_headings
+            output(task, review_retained_headings(analysis, packet, command, workspace, deadline-time.monotonic()-10))
+        return
+    if not repair_path:
         return
     if Path(repair_path).resolve() not in [Path(p).resolve() for p in task['declared_outputs']]:
         raise ValueError('Repair output must be explicitly declared')
     atomic_write_json(workspace / 'initial_independent_review.json', packet)
     from cwh_available_delivery import available_delivery
     use_retention = available_delivery(analysis)
+    if not use_retention and deadline - time.monotonic() < 15:
+        return
     if use_retention:
         from cwh_review_retention import retain_reviewed_content, retention_packet
         repaired, revisions = retain_reviewed_content(analysis, packet)
@@ -799,7 +869,9 @@ def verify(task, deadline):
                 reviewer_narrowing_packet(repaired, packet, result, revisions, run, repaired_hash))
     if packet.get('review_field_retry'):
         combined['review_field_retry'] = packet['review_field_retry']
-    if use_retention and revisions:
+    if body_batches is not None:
+        combined['body_review_batches'] = body_batches
+    if (use_retention and revisions) or body_batches is not None:
         output(task, combined)  # Keep usable claims if optional heading recheck fails.
         from cwh_heading_quality import review_retained_headings
         combined = review_retained_headings(repaired, combined, command, workspace, deadline-time.monotonic()-15)
