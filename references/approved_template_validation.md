@@ -20,7 +20,7 @@ This candidate imports the human-reviewed generic Word template, preserves its a
 
 ## Verified scope
 
-The local regression suite passed 1188 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
+The local regression suite passed 1189 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
 
 Fresh two-article extraction used identical full source text and shared production instructions. DeepSeek completed in 43.578 seconds with source-span checks passing. GLM first omitted claim classification fields; after the shared required-field reminder, a fresh run completed in 24.062 seconds with those checks passing. These checks do not certify every extracted claim's editorial suitability.
 
@@ -45,6 +45,8 @@ The same 33-candidate hotword packet also returned five first-pass choices in 15
 A subsequent complete GLM hotword component reviewed all 205 candidates in 141.390 seconds, including the independent global pass, with no deferred batches. All 25 retained terms passed the original raw-article evidence scoring and rendered using the packaged font in an isolated output. The 36-term quantity target was not met; semantic term-choice quality is not certified by rendering or literal matching alone. The full original report remains unchanged. A fresh raw-input run of `61e629b` was then launched with explicitly recorded normal raw-review host settings; later chart edits were not injected into its copy.
 
 Native Excel paths also read the shared bar color, preserve complete wrapped labels and display one decimal with the same unit. On a separate saved-workbook copy, the finalizer completed and the summary values, formulas and series bindings matched the original. Native Excel PDF rendering confirmed the displayed color, labels and units. An empty native PNG export was reproduced: export success now also requires a nonempty PNG signature, rather than treating a successful COM call as a valid picture. Existing image-validation fallback remains in place. The original workbook was never overwritten.
+
+A fresh DeepSeek run at `d1d78ca` exposed a native-host compatibility defect: Windows PowerShell 5.1 read the UTF-8 chart JSON as the system ANSI code page and rejected the Chinese unit. That run initially failed in the workbook stage after 461.860 seconds; it must not be counted as uninterrupted success. `e8758b8` adds explicit UTF-8 decoding and a regression that executes the real configuration assignment through `powershell.exe`, not only modern `pwsh`. The full chart finalizer then completed on an isolated copy of the failed run's workbook. The owned test was resumed with its failed status and prior Skill preserved, original start time unchanged and repair downtime included. Its final outcome is still pending at this checkpoint.
 
 ## Release boundary
 
