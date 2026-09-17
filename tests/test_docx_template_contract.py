@@ -160,6 +160,16 @@ def test_raw_workbook_chart_uses_same_style_without_reordering_or_merging_input(
         assert (47, 111, 115) not in colors
 
 
+def test_native_workbook_chart_paths_read_the_shared_style_contract():
+    root = Path(__file__).resolve().parents[1]
+    builder = (root / 'scripts/raw_system_workbook_builder.mjs').read_text('utf-8')
+    finalizer = (root / 'scripts/finalize_cwh_workbook_charts.ps1').read_text('utf-8-sig')
+    assert 'config/chart_style.v1.json' in builder and 'series.fill = topicChartStyle.bar_color' in builder
+    assert 'config/chart_style.v1.json' in finalizer and 'Fill.ForeColor.RGB = $topicOleColor' in finalizer
+    assert "Substring(0, 4)" not in finalizer
+    assert "$point.DataLabel.NumberFormat = '0.0' + $tenThousandFormatSuffix" in finalizer
+
+
 def test_fixed_opening_accepts_sourced_role_and_learning_agenda():
     text = opening_paragraph({'chair_title': '国务院总理', 'chair_name': '测试姓名', 'chair_source': '本期通稿'},
                              '2月3日', '学习贯彻有关讲话精神，研究公共服务工作')

@@ -20,7 +20,7 @@ This candidate imports the human-reviewed generic Word template, preserves its a
 
 ## Verified scope
 
-The local regression suite passed 1187 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
+The local regression suite passed 1188 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
 
 Fresh two-article extraction used identical full source text and shared production instructions. DeepSeek completed in 43.578 seconds with source-span checks passing. GLM first omitted claim classification fields; after the shared required-field reminder, a fresh run completed in 24.062 seconds with those checks passing. These checks do not certify every extracted claim's editorial suitability.
 
@@ -41,6 +41,10 @@ GLM had 49 retained domestic claims but no final approved hotwords/cloud or form
 Separate GLM production-review diagnostics must be distinguished from the full run. An initial diagnostic used different host effort/thinking settings and timed out on six batches, retaining only two claims: a passed mapping check in that diagnostic is not report-quality success and does not establish a production regression. A further diagnostic uses the saved full-run effort/thinking settings: all seven body batches completed; the complete review took 201.110 seconds, retained 44 of 50 draft claims, approved 22 headings, and passed the current strict mapping gate. Original inputs were unchanged. No review batching policy was changed on the strength of the mismatched diagnostic. This is a new review of a saved draft, not another complete raw-input run.
 
 The same 33-candidate hotword packet also returned five first-pass choices in 15.219 seconds using the normal semantic host setting, versus the earlier 90.360-second timeout under the attempted minimal/disabled-thinking setting. This is a single controlled component observation, not proof that an advertised reasoning switch has the same behavior on all providers or that the global hotword pass is complete. Host settings must be measured and kept separate from generic Skill rules.
+
+A subsequent complete GLM hotword component reviewed all 205 candidates in 141.390 seconds, including the independent global pass, with no deferred batches. All 25 retained terms passed the original raw-article evidence scoring and rendered using the packaged font in an isolated output. The 36-term quantity target was not met; semantic term-choice quality is not certified by rendering or literal matching alone. The full original report remains unchanged. A fresh raw-input run of `61e629b` was then launched with explicitly recorded normal raw-review host settings; later chart edits were not injected into its copy.
+
+Native Excel paths also read the shared bar color, preserve complete wrapped labels and display one decimal with the same unit. On a separate saved-workbook copy, the finalizer completed and the summary values, formulas and series bindings matched the original. Native Excel PDF rendering confirmed the displayed color, labels and units. An empty native PNG export was reproduced: export success now also requires a nonempty PNG signature, rather than treating a successful COM call as a valid picture. Existing image-validation fallback remains in place. The original workbook was never overwritten.
 
 ## Release boundary
 

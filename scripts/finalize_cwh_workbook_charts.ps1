@@ -9,6 +9,11 @@ $xlLineMarkers = 65
 $xlBarClustered = 57
 $xlLegendPositionBottom = -4107
 $xlMove = 2
+$topicChartStyle = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/chart_style.v1.json') -Raw | ConvertFrom-Json).topic_distribution
+$topicHex = $topicChartStyle.bar_color.TrimStart('#')
+$topicOleColor = [Convert]::ToInt32($topicHex.Substring(0, 2), 16) +
+    256 * [Convert]::ToInt32($topicHex.Substring(2, 2), 16) +
+    65536 * [Convert]::ToInt32($topicHex.Substring(4, 2), 16)
 
 function Nice-Step {
     param([double]$Maximum, [int]$Intervals = 5)
@@ -39,6 +44,13 @@ function Chart-Geometry {
         top_left_cell = $ChartObject.TopLeftCell.Address()
         bottom_right_cell = $ChartObject.BottomRightCell.Address()
     }
+}
+
+function Test-ChartPng {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $pngBytes = [IO.File]::ReadAllBytes($Path)
+    return ($pngBytes.Length -gt 32 -and [Convert]::ToBase64String($pngBytes, 0, 8) -eq 'iVBORw0KGgo=')
 }
 
 $source = (Resolve-Path -LiteralPath $Workbook).Path
@@ -175,17 +187,20 @@ try {
     $summaryChart.HasTitle = $false
     $summaryChart.HasLegend = $false
     $labels = New-Object object[] $childCount
-    $longestIndex = 0
+    $labelCharactersPerLine = [Math]::Max(1, [Math]::Floor(($topicChartStyle.label_width - 24) / $topicChartStyle.font_size))
     for ($labelIndex = 0; $labelIndex -lt $childCount; $labelIndex++) {
         $labels[$labelIndex] = [string]$summarySheet.Cells.Item(20 + $labelIndex, 2).Value2
-        if ($labels[$labelIndex].Length -gt $labels[$longestIndex].Length) { $longestIndex = $labelIndex }
-    }
-    if ($labels[$longestIndex].Length -gt 4) {
-        $labels[$longestIndex] = $labels[$longestIndex].Substring(0, 4) + "`n" + $labels[$longestIndex].Substring(4)
+        if ($topicChartStyle.wrap_labels -and $labels[$labelIndex].Length -gt $labelCharactersPerLine) {
+            $labelLines = @()
+            for ($offset = 0; $offset -lt $labels[$labelIndex].Length; $offset += $labelCharactersPerLine) {
+                $labelLines += $labels[$labelIndex].Substring($offset, [Math]::Min($labelCharactersPerLine, $labels[$labelIndex].Length - $offset))
+            }
+            $labels[$labelIndex] = $labelLines -join "`n"
+        }
     }
     $summarySeries.XValues = $labels
     $summarySeries.Values = $summarySheet.Range("C20:C$helperLastRow")
-    $summarySeries.Format.Fill.ForeColor.RGB = 6697728
+    $summarySeries.Format.Fill.ForeColor.RGB = $topicOleColor
     $summarySeries.ApplyDataLabels()
     $tenThousandFormatSuffix = '"' + ([char]0x4E07).ToString() + '"'
     $summarySeries.DataLabels().NumberFormatLinked = $false
@@ -193,12 +208,7 @@ try {
         $value = [double]$summarySheet.Cells.Item($pointIndex + 19, 3).Value2
         $point = $summarySeries.Points($pointIndex)
         $point.DataLabel.NumberFormatLinked = $false
-        if ([Math]::Abs($value - [Math]::Round($value, 0)) -lt 0.0000001) {
-            $point.DataLabel.NumberFormat = '0' + $tenThousandFormatSuffix
-        }
-        else {
-            $point.DataLabel.NumberFormat = '0.0' + $tenThousandFormatSuffix
-        }
+        $point.DataLabel.NumberFormat = '0.0' + $tenThousandFormatSuffix
         $point.DataLabel.Position = 2
         $point.DataLabel.Font.Name = 'Microsoft YaHei'
         $point.DataLabel.Font.Size = 10
@@ -219,6 +229,8 @@ try {
     $summaryStep = [Math]::Ceiling(($maximumSummary / 4) * 10) / 10
     if ($summaryStep -le 0) { $summaryStep = 0.1 }
     $summaryCategoryAxis = $summaryChart.Axes(1, 1)
+    # Helper rows are ascending because Excel plots the first bar at the bottom.
+    $summaryCategoryAxis.ReversePlotOrder = $false
     $summaryCategoryAxis.TickLabels.NumberFormat = '@'
     $summaryCategoryAxis.TickLabels.Font.Name = 'Microsoft YaHei'
     $summaryCategoryAxis.TickLabels.Font.Size = 10
@@ -244,8 +256,11 @@ try {
     $book.Save()
     $previewExported = $true
     try {
-        [void]$totalChart.Export((Join-Path $previewPath 'total_chart_final.png'), 'PNG')
-        [void]$summaryChart.Export((Join-Path $previewPath 'summary_chart_final.png'), 'PNG')
+        $totalPng = Join-Path $previewPath 'total_chart_final.png'
+        $summaryPng = Join-Path $previewPath 'summary_chart_final.png'
+        $totalExported = $totalChart.Export($totalPng, 'PNG')
+        $summaryExported = $summaryChart.Export($summaryPng, 'PNG')
+        $previewExported = ($totalExported -and $summaryExported -and (Test-ChartPng $totalPng) -and (Test-ChartPng $summaryPng))
     }
     catch {
         # Chart export can be unavailable in non-interactive Excel sessions.
@@ -259,6 +274,7 @@ try {
         total_chart = Chart-Geometry $totalObject
         total_axis = [ordered]@{ maximum = $totalMaximum; major_unit = $totalStep }
         summary_chart = Chart-Geometry $summaryObject
+        summary_style = [ordered]@{ contract = 'chart_style.v1/topic_distribution'; bar_color = $topicChartStyle.bar_color; decimals = 1; unit = $topicChartStyle.label_unit }
         summary_axis = [ordered]@{ maximum = $summaryStep * 5; major_unit = $summaryStep }
         sentiment_cells_blank = ($excel.WorksheetFunction.CountA($summarySheet.Range("G4:I$($childCount + 3)")) -eq 0)
         preview_exported = $previewExported
