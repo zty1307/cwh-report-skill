@@ -27,7 +27,7 @@ def test_invalid_shared_heading_uses_only_an_existing_single_approved_individual
     assert row == original
 
 
-def test_invalid_shared_heading_does_not_combine_distinct_individual_judgments():
+def test_invalid_shared_heading_preserves_distinct_reviewed_clauses_without_inventing_a_summary():
     base = {'topic': '基础工程', 'platform': '境内平台', 'url': 'https://example.test/comment',
             'quote_verified': True, 'evidence_mode': 'platform_comment', 'ai_formal_include': True,
             'ai_semantic_quality': 'substantive', 'topic_comment_heading': '基础工程影响'}
@@ -36,7 +36,10 @@ def test_invalid_shared_heading_does_not_combine_distinct_individual_judgments()
             {**base, 'comment_id': 'c2', 'content': '应公开实施安排。',
              'comment_heading': '建议公开实施安排'}]
     original = copy.deepcopy(rows)
-    assert formal.comment_groups(rows) == []
+    groups = formal.comment_groups(rows)
+    assert len(groups) == 1
+    assert groups[0][0] == '希望保持基本服务覆盖；建议公开实施安排'
+    assert [row['comment_id'] for row in groups[0][1]] == ['c1', 'c2']
     assert rows == original
 
 

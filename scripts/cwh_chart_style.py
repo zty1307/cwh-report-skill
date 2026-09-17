@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def topic_chart_spec(values):
     style = json.loads((ROOT / 'config/chart_style.v1.json').read_text(encoding='utf-8'))['topic_distribution']
-    items = sorted(((str(k), int(v or 0)) for k, v in values.items()), key=lambda item: -item[1])
+    pairs = values.items() if hasattr(values, 'items') else values
+    items = sorted(((str(k), int(v or 0)) for k, v in pairs), key=lambda item: -item[1])
     return style, [(name, value, f'{value / 10000:.1f}万') for name, value in items]
 
 

@@ -139,6 +139,27 @@ def test_fixed_chart_order_units_style_and_invalid_images(tmp_path):
         assert (23, 54, 93) in {rgb for _, rgb in image.getcolors(image.width * image.height)}
 
 
+def test_raw_workbook_chart_uses_same_style_without_reordering_or_merging_input(tmp_path):
+    from raw_system_workbook_portable import render_topic_chart
+    children = [{'title': '重复标签', 'totals': {'total': 9000}},
+                {'title': '完整政策名称' * 8, 'totals': {'total': 42000}},
+                {'title': '重复标签', 'totals': {'total': 12000}}]
+    before = deepcopy(children)
+    path = tmp_path / 'raw-topic.png'
+    audit = render_topic_chart(children, path)
+    assert children == before
+    assert audit['style'] == 'chart_style.v1/topic_distribution'
+    assert audit['origin'] == 'program_raw_workbook_chart'
+    assert [row['value'] for row in audit['ordered_values']] == [42000, 12000, 9000]
+    assert audit['ordered_values'][0]['label'] == children[1]['title']
+    assert [row['display_value'] for row in audit['ordered_values']] == ['4.2万', '1.2万', '0.9万']
+    with Image.open(path) as image:
+        assert image.width == 1100
+        colors = {rgb for _, rgb in image.getcolors(image.width * image.height)}
+        assert (23, 54, 93) in colors
+        assert (47, 111, 115) not in colors
+
+
 def test_fixed_opening_accepts_sourced_role_and_learning_agenda():
     text = opening_paragraph({'chair_title': '国务院总理', 'chair_name': '测试姓名', 'chair_source': '本期通稿'},
                              '2月3日', '学习贯彻有关讲话精神，研究公共服务工作')

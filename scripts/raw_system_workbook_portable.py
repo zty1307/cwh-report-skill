@@ -106,32 +106,16 @@ def render_line_chart(rows: list[dict[str, Any]], path: Path) -> None:
     image.save(path, format="PNG")
 
 
-def render_topic_chart(children: list[dict[str, Any]], path: Path) -> None:
-    width = 1180
-    row_height = 74
-    height = 105 + row_height * max(1, len(children))
-    image = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(image)
-    title_font = load_font(26, True)
-    label_font = load_font(18)
-    value_font = load_font(17, True)
-    draw.text((42, 24), "子议题传播量", fill="#111111", font=title_font)
-    values = [number((child.get("totals") or {}).get("total")) for child in children]
-    maximum = max(values or [1]) or 1
-    label_width = 420
-    chart_left, chart_right = label_width + 35, width - 105
-    for index, child in enumerate(children):
-        y = 83 + index * row_height
-        title = str(child.get("title") or f"子议题{index + 1}")
-        if len(title) > 22:
-            title = title[:21] + "…"
-        draw.text((42, y + 14), title, fill="#222222", font=label_font)
-        value = values[index]
-        bar_width = int((chart_right - chart_left) * value / maximum)
-        draw.rounded_rectangle((chart_left, y + 7, chart_left + bar_width, y + 43), radius=3, fill="#2F6F73")
-        draw.text((chart_left + bar_width + 12, y + 13), f"{int(value):,}", fill="#173F58", font=value_font)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(path, format="PNG")
+def render_topic_chart(children: list[dict[str, Any]], path: Path) -> dict[str, Any]:
+    from cwh_chart_style import write_topic_chart
+    # Preserve every statistical group, including equal labels. Only plot order
+    # changes; workbook rows and underlying totals retain their input identity.
+    values = [(str(child.get('title') or f'子议题{index + 1}'),
+               number((child.get('totals') or {}).get('total')))
+              for index, child in enumerate(children)]
+    audit = write_topic_chart(path, values)
+    audit['origin'] = 'program_raw_workbook_chart'
+    return audit
 
 
 def apply_cell_style(cell, *, fill: str = "", bold: bool = False, size: int = 11, align: str = "center") -> None:
@@ -412,7 +396,7 @@ def build_portable_workbook(normalized_path: Path, output_path: Path, verificati
     topic_path = run_directory / "topic_distribution_portable.png"
     wordcloud_path = Path(str((data.get("hotwords") or {}).get("image_path") or run_directory / "cwh_wordcloud.png"))
     render_line_chart((data.get("total_event") or {}).get("summary") or [], trend_path)
-    render_topic_chart(data.get("children") or [], topic_path)
+    topic_chart_audit = render_topic_chart(data.get("children") or [], topic_path)
 
     workbook = Workbook()
     write_keywords(workbook, data)
@@ -446,6 +430,7 @@ def build_portable_workbook(normalized_path: Path, output_path: Path, verificati
         "key_range_checks": "通过",
         "formula_error_count": 0,
         "chart_count": 2,
+        "topic_chart_style": topic_chart_audit,
         "embedded_chart_images": {"trend": str(trend_path), "topic": str(topic_path),
             **({"wordcloud": str(wordcloud_path)} if not (data.get('hotwords') or {}).get('status') == 'review_deferred' else {})},
         "rendered_sheets": [],

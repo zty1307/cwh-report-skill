@@ -190,8 +190,28 @@ def flat_prompt(rules=None, *, ranked=False):
             'heading_support_rule', 'effect_object_scope_rule')))
 
 
-def restore_synthesis(decisions, mapping, response, formal_selection=None):
+def remove_exact_input_echoes(transport, response):
+    """Strip only checked, unchanged input metadata; never discard decisions."""
+    if not isinstance(response, dict):
+        return response
+    result, removed = copy.deepcopy(response), {}
+    for key in ('period', 'topic', 'agenda_topics', 'report_agenda', 'formal_selection'):
+        if key not in result:
+            continue
+        if key not in transport or result[key] != transport[key]:
+            raise ValueError('Flat synthesis echoed metadata differs from input: ' + key)
+        removed[key] = result.pop(key)
+    if removed:
+        result.setdefault('transport_repairs', []).append({
+            'kind': 'removed_exact_input_metadata_echoes', 'removed_fields': removed,
+            'scope': 'Exact input equality checked; native headings, groups and claim IDs unchanged'})
+    return result
+
+
+def restore_synthesis(decisions, mapping, response, formal_selection=None, *, transport=None):
     from cwh_author_batches import apply_synthesis
+    if transport is not None:
+        response = remove_exact_input_echoes(transport, response)
     expected = [(item['id'], index) for item in decisions if item.get('decision') == 'eligible'
                 for index in range(len(item['claims']))]
     actual = list(mapping.values())

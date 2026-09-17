@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_ranked_selection import ranked_selection
-from cwh_claim_synthesis import flat_packet, restore_synthesis
+from cwh_claim_synthesis import flat_packet, restore_synthesis, remove_exact_input_echoes
 from test_flat_claim_synthesis import fixture
 
 
@@ -117,3 +117,35 @@ def test_restore_preserves_exact_original_claims_and_ranked_audit():
     assert [row['claim'] for row in result['items'][0]['claims']] == [row['claim'] for row in decisions[0]['claims']]
     assert result['transport_repairs'][-1]['native_response']['transport_repairs'][0]['native_response'] == response
     assert decisions == original
+
+
+def test_equal_input_metadata_does_not_discard_completed_native_grouping():
+    request, decisions, response = fixture()
+    request.update(topic='本期议题', period={'start': '2030-01-01', 'end': '2030-01-03'},
+                   agenda_topics=['本期议题'], report_agenda='本期报告会议')
+    request['formal_selection'] = {'allow_reserve': True, 'max_independent_voices': 12}
+    transport, mapping = flat_packet(request)
+    response.pop('excluded')
+    response.update({key: copy.deepcopy(transport[key]) for key in
+                     ('topic', 'period', 'agenda_topics', 'report_agenda', 'formal_selection')})
+    before = copy.deepcopy(response)
+    ranked = ranked_selection(transport, response)
+    result = restore_synthesis(decisions, mapping, ranked, request['formal_selection'], transport=transport)
+    assert result['clusters'][0]['heading'] == response['selected'][0]['heading']
+    assert response == before
+    audit = result['transport_repairs'][-1]['native_response']['transport_repairs']
+    assert audit[-1]['kind'] == 'removed_exact_input_metadata_echoes'
+    assert set(audit[-1]['removed_fields']) == {'period', 'topic', 'agenda_topics', 'report_agenda', 'formal_selection'}
+
+
+@pytest.mark.parametrize('key', ['period', 'topic', 'agenda_topics', 'report_agenda', 'formal_selection'])
+def test_changed_metadata_echo_cannot_be_silently_ignored(key):
+    with pytest.raises(ValueError, match='differs from input'):
+        remove_exact_input_echoes({key: '真实输入'}, {key: '被模型改写的输入'})
+    with pytest.raises(ValueError, match='differs from input'):
+        remove_exact_input_echoes({}, {key: '额外生成的输入'})
+
+
+def test_unknown_fields_and_native_decisions_are_never_removed_as_echoes():
+    response = {'selected': [{'key': 'k1', 'claim_ids': ['c1']}], 'unknown': 'not an allowed echo'}
+    assert remove_exact_input_echoes({}, response) == response

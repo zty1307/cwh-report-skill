@@ -664,7 +664,10 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         unique_row_headings = list(dict.fromkeys(
             row.get("_reviewed_comment_heading") for row in deduped if row.get("_reviewed_comment_heading")
         ))
-        heading = group_headings[0] if group_headings else (unique_row_headings[0] if len(unique_row_headings) == 1 else "")
+        # A missing shared heading is not permission to drop approved quotes.
+        # Preserve the reviewed individual headings verbatim as coordinated
+        # clauses; do not invent a new stance or create extra numbered topics.
+        heading = group_headings[0] if group_headings else "；".join(unique_row_headings)
         if heading:
             output.append((heading, deduped))
     output.sort(key=lambda item: min(int(row.get("report_order") or 999) for row in item[1]))

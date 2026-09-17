@@ -135,7 +135,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
         if ranked:
             from cwh_ranked_selection import ranked_selection
             response = ranked_selection(transport, response)
-        return restore_synthesis(decisions, mapping, response, request.get('formal_selection')), {**original_run, **provenance}
+        return restore_synthesis(decisions, mapping, response, request.get('formal_selection'), transport=transport), {**original_run, **provenance}
     except SemanticResponseError as exc:
         original_run, problem = exc.run, str(exc)
     except ValueError as exc:
@@ -152,7 +152,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
         response, repair_run = model_call({**transport, 'previous_selection': original_response},
             prompt + '\n仅修正本次入选清单格式或无效编号：' + problem,
             command, workspace, 'ranked-selection-repair', min(45, remaining), reuse_cache=False)
-        result = restore_synthesis(decisions, mapping, ranked_selection(transport, response), request.get('formal_selection'))
+        result = restore_synthesis(decisions, mapping, ranked_selection(transport, response), request.get('formal_selection'), transport=transport)
         result['transport_repairs'].append({'kind': 'native_ranked_selection_repair', **failure, 'repair_run': repair_run})
         return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
                        'seconds': (original_run or {}).get('seconds', 0) + repair_run.get('seconds', 0)}
@@ -167,7 +167,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
                 '{"choices":[{"id":"v1","reason":"本稿不选的具体理由"}]}。',
                 command, workspace, 'synthesis-voice-reserve', min(45, remaining), reuse_cache=False)
             response = apply_voice_reserves(original_response, reserve_request, patch)
-            result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'))
+            result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'), transport=transport)
             result['transport_repairs'].append({'kind': 'native_voice_reserve_repair',
                 **failure, 'reserve_request': reserve_request, 'reserve_patch': patch, 'repair_run': repair_run})
             return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
@@ -196,7 +196,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
             response = apply_voice_reserves(response, reserve_request, {'choices': patch['voice_reserves']})
         else:
             response = apply_duplicate_assignments(original_response, ownership, patch)
-        result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'))
+        result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'), transport=transport)
         result['transport_repairs'].append({'kind': 'native_synthesis_ownership_repair',
             **failure, 'ownership_patch': patch, 'repair_run': repair_run})
         return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
@@ -209,7 +209,7 @@ def native_topic_synthesis(request, decisions, command, workspace, timeout, mode
         + '。本次只返回heading、selected、excluded、reserved及真实缺口理由。所有候选编号在三种去向中合计恰好出现一次；reserved是不入正文的有效备选，不能同时放selected。原判断不可改写；禁止返回原文作者items/claims或嵌套topics。'
         + '若提供previous_synthesis，只修正错误字段或编号的必要归属，保留无关取舍、已有标题和分组；不得为了避免重复编号而把每条观点拆为独立一组。',
         command, workspace, 'synthesis-shape-repair', min(45, remaining), reuse_cache=False)
-    result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'))
+    result = restore_synthesis(decisions, mapping, response, request.get('formal_selection'), transport=transport)
     result['transport_repairs'].append({'kind': 'native_synthesis_shape_repair', **failure, 'repair_run': repair_run})
     return result, {**repair_run, **provenance, 'synthesis_initial_run': original_run,
                    'seconds': (original_run or {}).get('seconds', 0) + repair_run.get('seconds', 0)}

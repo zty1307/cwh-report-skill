@@ -83,3 +83,25 @@ def test_explicit_user_override_is_not_falsely_certified(monkeypatch):
     monkeypatch.setattr(report, 'section_override', lambda *args: '用户指定正文')
     result = report.audit_formal_comment_quotes(source(), xml())
     assert not result['applicable'] and 'passed' not in result
+
+
+def test_different_reviewed_headings_in_one_topic_preserve_approved_quotes():
+    import copy
+    data = source()
+    base = data['comments']['selected'][0]
+    data['comments']['selected'].append({**base, 'comment_id': 'c2',
+        'content': '具体管理办法是什么？什么时候公示',
+        'ai_comment_heading': '希望明确管理办法及公示时间'})
+    original = copy.deepcopy(data)
+    groups = report.report_comment_groups(data)
+    assert len(groups) == 1 and len(groups[0][1]) == 2
+    assert groups[0][0] == '希望扩大制度覆盖；希望明确管理办法及公示时间'
+    doc = Document()
+    doc.add_paragraph(report.writing_rules()['document']['domestic_subsections'][1])
+    report.add_comment_group_paragraph(doc, '一是', *groups[0])
+    doc.add_paragraph(report.writing_rules()['document']['domestic_subsections'][2])
+    audit = report.audit_formal_comment_quotes(data, ET.tostring(doc.element))
+    assert audit['passed'] and audit['grouped_unique_quote_count'] == 2
+    wording = report.comment_wording(groups[0][1])
+    assert all(report.clean_formal_comment(row['content']) in wording for row in data['comments']['selected'])
+    assert data == original
