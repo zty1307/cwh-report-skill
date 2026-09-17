@@ -17,6 +17,10 @@ def reading_prompt():
         '"claim_kind":"policy_reasoning","claim":"忠实的具体判断",'
         '"quote_range":["本篇起始片段ID","本篇终止片段ID"]}]}]}。'
         '每个输入ID恰好一次，不添加其他ID；排除/重复项claims=[]，eligible必须有非空claims。'
+        '原话已清楚表达独立判断及必要条件时优先保留，不为体现写作而改写。'
+        '可用claim_range:[起始片段ID,结束片段ID]代替claim字符串，由脚本复制该连续原句；'
+        'claim_range必须在quote_range之内，不跨句拼接、不删否定或限定，也不把旁人的话移给当前主体。'
+        '只有原句过长、指代不明或混含无关内容时才写claim概括；两种方式都仍须通过选材和语义复核。'
         '片段范围必须连续、来自同篇，并同时包含姓名、原文职务/机构和判断依据；'
         '同一人后文再次发言也不能把职务留在摘录外，需向前扩展到其身份段落。不输出cluster、heading、clusters。'
         '单纯说明会议首次核准、通过某项文件、项目数字、规划指标或实施清单，是事实，不是独立观点；'
@@ -42,4 +46,35 @@ def reading_input_packet(packet):
     """Hide only later-stage selection instructions; keep all reading evidence intact."""
     result = copy.deepcopy(packet)
     result.pop('formal_selection', None)
+    return result
+
+
+def materialize_literal_claims(packet, response):
+    """Copy model-selected continuous sentences; never infer speaker or eligibility."""
+    result = copy.deepcopy(response)
+    originals = {row['id']: row for row in packet.get('items', [])}
+    for item in result.get('items', []):
+        for claim in item.get('claims') or []:
+            if 'claim_range' not in claim:
+                continue
+            if item.get('decision') != 'eligible' or item.get('id') not in originals:
+                raise ValueError('Literal claim range requires a known eligible item')
+            segments = originals[item['id']].get('segments') or []
+            ids = [row['id'] for row in segments]
+            def bounds(span):
+                if (not isinstance(span, list) or len(span) != 2
+                        or any(value not in ids for value in span)):
+                    raise ValueError('Literal claim range must use this article segment IDs')
+                start, end = ids.index(span[0]), ids.index(span[1])
+                if start > end:
+                    raise ValueError('Literal claim range must be continuous and ordered')
+                return start, end
+            start, end = bounds(claim['claim_range'])
+            quote_start, quote_end = bounds(claim.get('quote_range'))
+            if not quote_start <= start <= end <= quote_end:
+                raise ValueError('Literal claim range must remain within the evidence excerpt')
+            text = ''.join(row['text'] for row in segments[start:end + 1])
+            if not text.strip() or ('claim' in claim and claim['claim'] != text):
+                raise ValueError('Literal claim text conflicts with the selected source range')
+            claim['claim'] = text
     return result

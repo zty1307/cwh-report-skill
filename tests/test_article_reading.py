@@ -3,6 +3,71 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_article_reading import reading_prompt, reading_contract, reading_input_packet
+from cwh_article_reading import materialize_literal_claims
+import copy
+import pytest
+
+
+def literal_fixture():
+    return ({'items': [{'id': 'r1', 'segments': [
+        {'id': 'r1/1', 'text': '甲研究院副院长张三表示，'},
+        {'id': 'r1/2', 'text': '只有配套到位，措施才可能有效。'},
+        {'id': 'r1/3', 'text': '不能保证立即见效。'}]}]},
+        {'items': [{'id': 'r1', 'decision': 'eligible', 'claims': [{'speaker': '张三',
+            'role': '甲研究院副院长', 'speaker_type': 'named_person',
+            'quote_range': ['r1/1', 'r1/3'], 'claim_range': ['r1/2', 'r1/3']}]}]})
+
+
+def test_script_copies_selected_original_sentences_without_changing_identity_or_conditions():
+    packet, response = literal_fixture()
+    original = copy.deepcopy((packet, response))
+    result = materialize_literal_claims(packet, response)
+    claim = result['items'][0]['claims'][0]
+    assert claim['claim'] == '只有配套到位，措施才可能有效。不能保证立即见效。'
+    assert {k:v for k,v in claim.items() if k != 'claim'} == response['items'][0]['claims'][0]
+    assert (packet, response) == original
+    assert materialize_literal_claims(packet, result) == result
+    assert 'semantic_review' not in claim and 'wording_fidelity' not in claim
+
+
+@pytest.mark.parametrize('change', ['cross_article', 'reversed', 'outside_excerpt', 'conflicting_text', 'unknown_item'])
+def test_literal_selection_does_not_guess_or_silently_rewrite_invalid_ranges(change):
+    packet, response = literal_fixture()
+    claim = response['items'][0]['claims'][0]
+    if change == 'cross_article': claim['claim_range'] = ['other/2', 'other/3']
+    elif change == 'reversed': claim['claim_range'] = ['r1/3', 'r1/2']
+    elif change == 'outside_excerpt': claim['quote_range'] = ['r1/1', 'r1/2']
+    elif change == 'conflicting_text': claim['claim'] = '措施必然有效。'
+    elif change == 'unknown_item': response['items'][0]['id'] = 'other'
+    with pytest.raises(ValueError): materialize_literal_claims(packet, response)
+
+
+def test_existing_paraphrases_are_never_silently_replaced_by_source_text():
+    packet, response = literal_fixture()
+    claim = response['items'][0]['claims'][0]
+    claim.pop('claim_range')
+    claim['claim'] = '效果取决于配套措施，不能保证立即见效。'
+    assert materialize_literal_claims(packet, response) == response
+
+
+def test_production_reading_materializes_native_range_before_synthesis(tmp_path, monkeypatch):
+    import time
+    import run_cwh_compiled_worker as worker
+    original_text = '甲研究院副院长张三表示，配套完成后可能改善服务。仍须观察实施效果。'
+    def model(request, *args, **kwargs):
+        ids = [s['id'] for s in request['items'][0]['segments']]
+        return {'items': [{'id': 'r1', 'decision': 'eligible', 'reason': '具有条件限制的判断',
+            'claims': [{'speaker': '张三', 'role': '甲研究院副院长', 'speaker_type': 'named_person',
+                'claim_kind': 'policy_reasoning', 'quote_range': [ids[0], ids[-1]],
+                'claim_range': [ids[0], ids[-1]]}]}]}, {'session_id': 'native-range-selection'}
+    monkeypatch.setattr(worker, 'semantic_json', model)
+    packet = {'topic': '公共服务', 'items': [{'id': 'r1', 'origin': 'monitoring', 'content': original_text}]}
+    result, _ = worker.author_topic_decisions([packet], reading_prompt(), [], tmp_path, time.monotonic() + 60,
+        reuse_cache=False, allow_article_batches=False, reading_only=True)
+    claim = result[0]['items'][0]['claims'][0]
+    assert claim['claim'] == original_text
+    assert claim['claim_range'] == claim['quote_range']
+    assert packet['items'][0]['content'] == original_text
 
 
 def test_reading_contract_does_not_request_provisional_topic_composition():

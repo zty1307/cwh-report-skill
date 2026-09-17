@@ -459,9 +459,14 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                     if not allow_article_batches:
                         reading_call = semantic_json
                         if reading_only:
-                            from cwh_article_reading import reading_input_packet
+                            from cwh_article_reading import reading_input_packet, materialize_literal_claims
                             def reading_call(request, *args, **kwargs):
-                                return semantic_json(reading_input_packet(request), *args, **kwargs)
+                                response, actual_run = semantic_json(reading_input_packet(request), *args, **kwargs)
+                                try:
+                                    response = materialize_literal_claims(request, response)
+                                except ValueError as exc:
+                                    raise SemanticResponseError(str(exc), actual_run) from exc
+                                return response, actual_run
                         result, run = native_article_batch(model_packet, local_prompt, command, workspace,
                             f"author-topic-{number}", request_timeout, reading_call, reuse_cache=reuse_cache)
                     else:
@@ -484,6 +489,12 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             raise SemanticResponseError(f"[{packet['topic']}] {exc}", run) from exc
         if coverage_run:
             run = {**run, 'missing_item_completion_run': coverage_run}
+        if reading_only:
+            from cwh_article_reading import materialize_literal_claims
+            try:
+                result = materialize_literal_claims(model_packet, result)
+            except ValueError as exc:
+                raise SemanticResponseError(str(exc), run) from exc
         if fixed_unread:
             by_id = {row['id']: row for row in result['items']}
             result = {**result, 'items': [by_id.get(row['id'], fixed_unread.get(row['id']))
