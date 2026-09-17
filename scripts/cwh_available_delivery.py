@@ -31,6 +31,19 @@ def prepare_available_delivery(data: dict) -> dict:
     research = (result.get("research_audit") or {}).get("domestic_media_research") or {}
     pools = {p["topic"]: p for p in research.get("candidate_pool_by_topic") or []}
     reviews = {p["topic"]: p for p in (research.get("public_article_corpus_review") or {}).get("topic_reviews") or []}
+    from cwh_search_budget import query_budget_evidence
+    budget_notices = []
+    for pool in pools.values():
+        saturation = pool.get('saturation') or {}
+        rounds = saturation.get('rounds') or []
+        if rounds and int(rounds[-1].get('new_independent_viewpoints') or 0) > 0:
+            proof = query_budget_evidence(saturation, research.get('execution_profile'))
+            if proof:
+                saturation['completed'] = False
+                saturation['budget_stop'] = proof
+                budget_notices.append(f"{pool['topic']}已达到本轮{proof['configured_max_queries']}次查询上限，但最后一轮仍有新增观点；检索未证明饱和，保留现有证据交付。")
+    if budget_notices:
+        result['metadata']['research_budget_gaps'] = budget_notices
     for topic in (result.get("viewpoints") or {}).get("by_topic") or []:
         pool = pools.get(topic["topic"], {})
         executions = [q for r in (pool.get("saturation") or {}).get("rounds") or [] for q in r.get("executions") or []]

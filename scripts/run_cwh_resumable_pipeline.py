@@ -540,7 +540,10 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             saturation = pool.get("saturation") or {}
             rounds = [row for row in saturation.get("rounds") or [] if isinstance(row, dict)]
             query_executions: dict[str, dict[str, Any]] = {}
-            if saturation.get("completed") is not True:
+            from cwh_search_budget import valid_query_budget_stop
+            budget_limited = (allow_deferred_corpus and available_delivery(data)
+                              and valid_query_budget_stop(saturation, research.get('execution_profile')))
+            if saturation.get("completed") is not True and not budget_limited:
                 problems.append(f"{topic}尚未完成候选池饱和检索")
             stop_reason = str(saturation.get("stop_reason") or "")
             bounded_profile = stop_reason == "coverage_minimum_then_one_zero_new_round_or_budget_exhausted"
@@ -548,10 +551,10 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             if required_zero_rounds is None:
                 problems.append(f"{topic}候选池没有按受支持的检索停止规则结束")
                 required_zero_rounds = 2
-            if len(rounds) < required_zero_rounds or any(
+            if not budget_limited and (len(rounds) < required_zero_rounds or any(
                 int(row.get("new_independent_viewpoints") or 0) != 0
                 for row in rounds[-required_zero_rounds:]
-            ):
+            )):
                 problems.append(f"{topic}缺少{required_zero_rounds}轮无新增高相关独立观点的检索记录")
             for round_index, round_row in enumerate(rounds, 1):
                 executions = [row for row in round_row.get("executions") or [] if isinstance(row, dict)]

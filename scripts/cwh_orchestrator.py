@@ -3292,6 +3292,9 @@ def build_system_audit(
 ) -> dict[str, Any]:
     gaps = list(collection_gaps)
     blockers: list[str] = []
+    research_budget_gaps = list((analysis_metadata or {}).get('research_budget_gaps') or [])
+    gaps.extend(research_budget_gaps)
+    blockers.extend(research_budget_gaps)
     validation = system_data.get("validation") or []
     for item in validation:
         message = str(item.get("message") or item)
