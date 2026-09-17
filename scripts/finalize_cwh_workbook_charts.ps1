@@ -9,7 +9,7 @@ $xlLineMarkers = 65
 $xlBarClustered = 57
 $xlLegendPositionBottom = -4107
 $xlMove = 2
-$topicChartStyle = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/chart_style.v1.json') -Raw | ConvertFrom-Json).topic_distribution
+$topicChartStyle = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/chart_style.v1.json') -Encoding UTF8 -Raw | ConvertFrom-Json).topic_distribution
 $topicHex = $topicChartStyle.bar_color.TrimStart('#')
 $topicOleColor = [Convert]::ToInt32($topicHex.Substring(0, 2), 16) +
     256 * [Convert]::ToInt32($topicHex.Substring(2, 2), 16) +

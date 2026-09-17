@@ -170,6 +170,30 @@ def test_native_workbook_chart_paths_read_the_shared_style_contract():
     assert "$point.DataLabel.NumberFormat = '0.0' + $tenThousandFormatSuffix" in finalizer
 
 
+def test_chart_config_is_utf8_in_production_windows_powershell():
+    # Production invokes Windows PowerShell 5.1, whose Get-Content defaults to
+    # the system ANSI code page, unlike pwsh. Execute the real assignment.
+    import base64
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / 'scripts/finalize_cwh_workbook_charts.ps1').read_text('utf-8-sig')
+    assignment = next(line for line in source.splitlines() if line.startswith('$topicChartStyle ='))
+    assert '-Encoding UTF8' in assignment
+    shell = shutil.which('powershell.exe')
+    if not shell:
+        pytest.skip('Windows PowerShell production host is unavailable')
+    scripts = str(root / 'scripts').replace("'", "''")
+    code = ("$ErrorActionPreference='Stop'; $PSScriptRoot='" + scripts + "'; " + assignment
+            + "; if ($topicChartStyle.label_unit -ne [string][char]19975) { throw 'Wrong unit encoding' };"
+            + " if ($topicChartStyle.bar_color -ne '#17365D') { throw 'Wrong chart color' }")
+    encoded = base64.b64encode(code.encode('utf-16le')).decode('ascii')
+    result = subprocess.run([shell, '-NoProfile', '-EncodedCommand', encoded],
+                            capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode('utf-8', errors='replace')
+
+
 def test_fixed_opening_accepts_sourced_role_and_learning_agenda():
     text = opening_paragraph({'chair_title': '国务院总理', 'chair_name': '测试姓名', 'chair_source': '本期通稿'},
                              '2月3日', '学习贯彻有关讲话精神，研究公共服务工作')
