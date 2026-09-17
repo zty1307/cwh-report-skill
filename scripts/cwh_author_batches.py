@@ -322,12 +322,31 @@ def quarantine_unresolved_spans(packet, response, problems, run):
     return result
 
 
+def normalize_article_decision_labels(response):
+    """Normalize exact enum translations, never infer eligibility from content."""
+    aliases = {'符合条件': 'eligible', '排除': 'excluded', '重复': 'duplicate'}
+    result = copy.deepcopy(response)
+    repairs = []
+    for item in result.get('items', []):
+        value = item.get('decision')
+        if isinstance(value, str) and value in aliases:
+            item['decision'] = aliases[value]
+            repairs.append({'id': item.get('id'), 'original': value, 'normalized': aliases[value]})
+    if repairs:
+        result.setdefault('transport_repairs', []).append({
+            'kind': 'exact_article_decision_translation', 'items': repairs,
+            'scope': 'Enum spelling only; claims and model decisions preserved; not semantic approval',
+        })
+    return result
+
+
 def native_article_batch(packet, prompt, command, workspace, label, timeout, model_call, *, reuse_cache):
     """Repair a completed malformed batch locally, keeping earlier batches intact."""
     deadline = time.monotonic() + timeout
     original_response = None
     try:
         response, initial_run = model_call(packet, prompt, command, workspace, label, timeout, reuse_cache=reuse_cache)
+        response = normalize_article_decision_labels(response)
         response = extend_unique_attribution_context(packet, response, initial_run)
         problems = article_span_problems(packet, response)
         if problems:
@@ -370,6 +389,7 @@ def native_article_batch(packet, prompt, command, workspace, label, timeout, mod
             command, workspace, label + '-json-repair', min(45, remaining), reuse_cache=False)
     if not isinstance(response, dict):
         raise SemanticResponseError('Article batch repair requires an object', run)
+    response = normalize_article_decision_labels(response)
     response = extend_unique_attribution_context(packet, response, run)
     problems = article_span_problems(packet, response)
     if problems:

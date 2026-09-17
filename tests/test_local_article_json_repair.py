@@ -9,6 +9,53 @@ import cwh_author_batches as batches
 from cwh_host_research import HostModelError, SemanticResponseError
 
 
+def test_exact_decision_translations_preserve_claims_without_an_extra_call(tmp_path):
+    packet = {'items': [{'id': 'r1', 'content': '具体观点'}]}
+    response = {'items': [{'id': 'r1', 'decision': '符合条件', 'claims': [
+        {'speaker': '原文主体', 'claim': '具体观点', 'quote': '具体观点'}]}]}
+    original = copy.deepcopy(response)
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(1)
+        return response, {'session_id': 'actual-native-run', 'seconds': 1}
+    result, _ = batches.native_article_batch(packet, '', [], tmp_path, 'author', 90, model, reuse_cache=True)
+    assert len(calls) == 1 and response == original
+    assert result['items'][0]['decision'] == 'eligible'
+    assert result['items'][0]['claims'] == original['items'][0]['claims']
+    assert result['transport_repairs'][0]['kind'] == 'exact_article_decision_translation'
+    assert len(batches.synthesis_packet(packet, result['items'])['eligible_items']) == 1
+
+
+@pytest.mark.parametrize('original,expected', [('排除', 'excluded'), ('重复', 'duplicate')])
+def test_exact_negative_disposition_translation_does_not_promote_items(original, expected):
+    response = {'items': [{'id': 'r1', 'decision': original, 'claims': []}]}
+    result = batches.normalize_article_decision_labels(response)
+    assert result['items'][0]['decision'] == expected
+    assert response['items'][0]['decision'] == original
+
+
+@pytest.mark.parametrize('value', ['保留', '待核实', '符合条件但需要复核', 'ELIGIBLE', None])
+def test_unknown_disposition_remains_rejected_not_inferred_from_claims(value):
+    packet = {'items': [{'id': 'r1', 'content': '原文'}]}
+    result = batches.normalize_article_decision_labels({'items': [
+        {'id': 'r1', 'decision': value, 'claims': [{'claim': '看似可用'}]}]})
+    assert result['items'][0]['decision'] == value
+    with pytest.raises(ValueError, match='invalid disposition'):
+        batches.synthesis_packet(packet, result['items'])
+
+
+def test_translated_eligibility_still_requires_valid_literal_span(tmp_path):
+    packet = {'items': [{'id': 'r1', 'segments': [{'id': 'p1/1', 'text': '原文'}]}]}
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(1)
+        return {'items': [{'id': 'r1', 'decision': '符合条件', 'claims': [
+            {'quote_range': ['wrong/1', 'wrong/2']}]}]}, {'session_id': str(len(calls))}
+    with pytest.raises(SemanticResponseError):
+        batches.native_article_batch(packet, '', [], tmp_path, 'author', 90, model, reuse_cache=False)
+    assert len(calls) == 2
+
+
 def test_local_json_repair_preserves_full_packet_and_both_actual_runs(tmp_path):
     packet = {'topic': '动态议题', 'items': [{'id': 'r1', 'content': '完整原文' * 20000}]}
     original = copy.deepcopy(packet)

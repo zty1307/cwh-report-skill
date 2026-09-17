@@ -1,5 +1,6 @@
 """Fixed report chart fallback; never masquerades as a monitoring-system image."""
 import json
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,4 +66,20 @@ def write_topic_chart(path, values):
         y += row_height
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True); image.save(path)
     return {'style': 'chart_style.v1/topic_distribution', 'origin': 'program_fallback',
+            'image_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+            'style_sha256': hashlib.sha256((ROOT / 'config/chart_style.v1.json').read_bytes()).hexdigest(),
             'ordered_values': [{'label': n, 'value': v, 'display_value': label} for n, v, label in items]}
+
+
+def verify_topic_chart_manifest(path, manifest, values):
+    """Bind a permitted generated chart to actual pixels, config and source values."""
+    path = Path(path)
+    if not isinstance(manifest, dict) or not valid_image(path):
+        return False
+    if manifest.get('style') != 'chart_style.v1/topic_distribution' or manifest.get('origin') != 'program_fallback':
+        return False
+    _, items = topic_chart_spec(values)
+    expected = [{'label': n, 'value': v, 'display_value': label} for n, v, label in items]
+    return (manifest.get('ordered_values') == expected
+            and manifest.get('image_sha256') == hashlib.sha256(path.read_bytes()).hexdigest()
+            and manifest.get('style_sha256') == hashlib.sha256((ROOT / 'config/chart_style.v1.json').read_bytes()).hexdigest())

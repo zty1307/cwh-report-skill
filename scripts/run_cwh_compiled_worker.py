@@ -709,6 +709,12 @@ REVIEW_PROMPT += '\ncross_topic_shared_source_spans仅标记同一声明主体�
 
 
 REVIEW_PROMPT = (
+    '先逐条核对归题：每条claim的topic是待审归属，不是已经正确的结论。'
+    '对照本条实际评论的具体政策对象与全部agenda_topics；全文同时提到多个议题，不表示其中一条判断可放到任意议题。'
+    '如果判断实际针对另一个独立议题，即使摘录逐字支持也按当前topic的正式使用资格判unsupported、revision=null，'
+    'rationale写明实际对象和错放原因，不把正确引文改写成当前议题的观点。'
+    '仅共用法规、制度、建设、投资、民生等泛词不能证明归属；确有跨议题关系须由本条摘录直接说明，不能自行补桥接理由。'
+    '该检查适用于所有claim，不仅适用于cross_topic重复提示中的条目；不得为填补空白议题而放宽。\n'
     '证据位置说明：sources.reference_context只是每篇文章的开头，不是全文。'
     '某人或某句话未出现在文章开头，不能据此否定本条excerpt_segments里明确存在的引文。'
     '每条excerpt_segments由宿主从同一冻结全文的连续摘录按句分段，excerpt_source_span给出其绝对位置；'

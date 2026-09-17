@@ -20,7 +20,7 @@ This candidate imports the human-reviewed generic Word template, preserves its a
 
 ## Verified scope
 
-The local regression suite passed 1189 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
+The local regression suite passed 1203 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
 
 Fresh two-article extraction used identical full source text and shared production instructions. DeepSeek completed in 43.578 seconds with source-span checks passing. GLM first omitted claim classification fields; after the shared required-field reminder, a fresh run completed in 24.062 seconds with those checks passing. These checks do not certify every extracted claim's editorial suitability.
 
@@ -47,6 +47,18 @@ A subsequent complete GLM hotword component reviewed all 205 candidates in 141.3
 Native Excel paths also read the shared bar color, preserve complete wrapped labels and display one decimal with the same unit. On a separate saved-workbook copy, the finalizer completed and the summary values, formulas and series bindings matched the original. Native Excel PDF rendering confirmed the displayed color, labels and units. An empty native PNG export was reproduced: export success now also requires a nonempty PNG signature, rather than treating a successful COM call as a valid picture. Existing image-validation fallback remains in place. The original workbook was never overwritten.
 
 A fresh DeepSeek run at `d1d78ca` exposed a native-host compatibility defect: Windows PowerShell 5.1 read the UTF-8 chart JSON as the system ANSI code page and rejected the Chinese unit. That run initially failed in the workbook stage after 461.860 seconds; it must not be counted as uninterrupted success. `e8758b8` adds explicit UTF-8 decoding and a regression that executes the real configuration assignment through `powershell.exe`, not only modern `pwsh`. The full chart finalizer then completed on an isolated copy of the failed run's workbook. The owned test was resumed with its failed status and prior Skill preserved, original start time unchanged and repair downtime included. Its final outcome is still pending at this checkpoint.
+
+## Follow-up complete run and targeted quality repairs
+
+The fresh GLM run of `61e629b` completed in 1864.234 seconds (31m04s), including one automatic author-stage retry, with Word, Excel and HTML. Its frozen outputs retained 30 domestic claims, 25 reviewed hotwords and all four approved domestic comment quotations; all 16 pages were inspected. The longest paragraph was 421 characters, with three images and three tables and no cloud-only page. It still contained a wrong-topic interpretation and declared evidence gaps. Completion is not semantic acceptance.
+
+The author retry was caused by the exact translated decision label `符合条件` instead of `eligible`. The shared parser now normalizes only three exact translations (`符合条件`, `排除`, `重复`), records the original value, and leaves all claims and other fields unchanged. Unknown or qualified labels remain invalid. A replay of the actual three-article response preserved all fourteen claims without an extra model call; original logs were unchanged. Span and later independent-review requirements still apply.
+
+Independent review now explicitly checks the specific policy object against every claim's assigned topic and the complete current agenda before literal support, including claims without duplicate warnings. A new GLM review of the saved complete draft took 189.938 seconds, retained 27 claims and rejected the misassigned policy interpretation. Current mapping passed; 17 headings were approved and two top-level headings used neutral original-topic labels. This is an independent-review component, not another full run. A separate resulting 15-page rendering passed the structural audit and retained the original statistics and comments.
+
+Fixed-style generated topic charts now carry the image hash, style-configuration hash and ordered source values. DOCX acceptance permits this narrowly verified fallback alongside the original trend chart and reviewed cloud, while continuing to identify it as program-generated. Missing or altered manifests, different source values and substituted images fail; merely declaring a mixed asset origin does not pass. Duplicate topic labels remain separate bars.
+
+For a reviewed hotword associated with multiple topics, display ownership no longer blindly selects the smallest index when the complete term occurs in exactly one approved topic title. All AI-reviewed topic hits remain intact; no unapproved topic is introduced and ambiguous matches retain their prior order. Re-scoring the real 25-word review preserved every term, count, weight, rank, evidence alias and model reason while correcting two display-topic assignments. This deterministic handoff check is not a new semantic approval.
 
 ## Release boundary
 

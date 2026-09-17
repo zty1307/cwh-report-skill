@@ -31,7 +31,8 @@ def test_source_reasoning_checks_are_shared_by_author_and_reviewer():
     assert '正面与批评用同一标准' in rule
     assert '不能擅自修正作者数字' in rule
     assert '先检查论据是否自洽' in REVIEW_PROMPT
-    assert REVIEW_PROMPT.startswith('证据位置说明')
+    assert REVIEW_PROMPT.startswith('先逐条核对归题')
+    assert '证据位置说明' in REVIEW_PROMPT
     assert '不能加“作者认为/原文据此认为”' in REVIEW_PROMPT
 
 

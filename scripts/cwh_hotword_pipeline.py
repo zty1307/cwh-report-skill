@@ -284,6 +284,15 @@ def canonical_document_key(row: dict[str, Any]) -> str:
     return url or f"row:{row.get('source_row', '')}"
 
 
+def primary_reviewed_topic(term: str, reviewed_hits: list[int], topic_titles: list[str]) -> tuple[int, str]:
+    """Choose display ownership only inside AI-approved topics; preserve all hits."""
+    exact = [hit for hit in reviewed_hits if len(normalize_text(term)) >= 2
+             and normalize_text(term) in normalize_text(topic_titles[hit - 1])]
+    if len(exact) == 1:
+        return exact[0], 'unique_literal_term_in_reviewed_topic_title'
+    return reviewed_hits[0], 'reviewed_topic_order_no_unique_literal_match'
+
+
 def topic_for_term(term: str, topic_aliases: list[list[str]]) -> list[int]:
     hits: list[int] = []
     normalized_term = normalize_text(term)
@@ -988,6 +997,7 @@ def apply_hotword_ai_review(
             ai_representativeness=raw.get("ai_representativeness"),
         )
         reviewed_topic_hits = sorted(set(topic_hits))
+        display_topic, display_basis = primary_reviewed_topic(term, reviewed_topic_hits, topic_titles)
         seen.add(term)
         output.append(
             {
@@ -997,7 +1007,8 @@ def apply_hotword_ai_review(
                 # Overwrite any candidate-stage topic_index. A term may have
                 # appeared near several agenda aliases; the reviewed mapping
                 # is authoritative for the report handoff.
-                "topic_index": reviewed_topic_hits[0],
+                "topic_index": display_topic,
+                "display_topic_basis": display_basis,
                 "evidence_tier": tier,
                 "semantic_type": semantic_type,
                 "standalone_topic_label": True,

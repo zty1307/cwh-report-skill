@@ -201,6 +201,40 @@ def test_fixed_opening_accepts_sourced_role_and_learning_agenda():
     assert '涉及学习贯彻' not in text
 
 
+def test_permitted_topic_fallback_requires_source_values_config_and_embedded_image(tmp_path):
+    data = {'topic_stats': [{'topic': '公共服务', 'spread_count': 12000},
+                            {'topic': '公共服务', 'spread_count': 8000}]}
+    values = [('公共服务', 12000), ('公共服务', 8000)]
+    topic = tmp_path / 'topic_distribution.png'
+    manifest = write_topic_chart(topic, values)
+    trend = tmp_path / 'trend_distribution_system.png'
+    cloud = tmp_path / 'hotword_distribution_pipeline.png'
+    Image.new('RGB', (20, 20), 'red').save(trend)
+    Image.new('RGB', (20, 20), 'green').save(cloud)
+    data['artifacts'] = {'chart_authority': 'mixed_system_and_program_fallback',
+                        'docx_charts': dict(zip(('trend_distribution', 'topic_distribution', 'hotword_distribution'),
+                                               map(str, (trend, topic, cloud))))}
+    data['audit'] = {'topic_chart_style': manifest}
+    doc = Document()
+    for path in (trend, topic, cloud):
+        doc.add_picture(str(path))
+    path = tmp_path / 'chart_provenance.docx'
+    doc.save(path)
+    audit = formal.audit_formal_docx(data, path)
+    assert audit['checks']['uses_traceable_fixed_chart_assets']
+    assert audit['chart_provenance']['verified_fixed_topic_fallback']
+    assert not audit['chart_provenance']['monitoring_system_assets']
+    for field in ('image_sha256', 'style_sha256', 'ordered_values'):
+        changed = deepcopy(data)
+        changed['audit']['topic_chart_style'].pop(field)
+        assert not formal.audit_formal_docx(changed, path)['checks']['uses_traceable_fixed_chart_assets']
+    changed = deepcopy(data)
+    changed['topic_stats'][1]['spread_count'] += 1
+    assert not formal.audit_formal_docx(changed, path)['checks']['uses_traceable_fixed_chart_assets']
+    Image.new('RGB', (20, 20), 'blue').save(topic)
+    assert not formal.audit_formal_docx(data, path)['checks']['uses_traceable_fixed_chart_assets']
+
+
 def test_propagation_does_not_invent_a_headline():
     data = {'meeting': {'focus_title': '未经核实的标题'}, 'statistics': {'total_spread': 41000}}
     assert '未经核实' not in formal.total_event_paragraphs(data)[0]

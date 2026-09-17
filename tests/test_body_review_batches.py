@@ -1,5 +1,13 @@
 """Lossless batching and provenance checks, not native-model success claims."""
 import copy
+
+
+def test_body_review_checks_current_topic_before_literal_support_even_without_duplicates():
+    from run_cwh_compiled_worker import REVIEW_PROMPT
+    assert REVIEW_PROMPT.startswith('先逐条核对归题')
+    assert 'topic是待审归属，不是已经正确的结论' in REVIEW_PROMPT
+    assert '不仅适用于cross_topic重复提示' in REVIEW_PROMPT
+    assert 'unsupported、revision=null' in REVIEW_PROMPT
 from pathlib import Path
 import sys
 import time

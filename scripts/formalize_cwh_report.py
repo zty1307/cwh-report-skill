@@ -35,7 +35,7 @@ from source_identity import public_source_family
 from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label, editorial_profile
 from normalize_cwh_analysis import assemble_cluster_details, evidence_sentence
 from cwh_docx_template import TEMPLATE, apply_template
-from cwh_chart_style import valid_image, write_topic_chart
+from cwh_chart_style import valid_image, write_topic_chart, verify_topic_chart_manifest
 
 
 @lru_cache(maxsize=1)
@@ -1502,10 +1502,10 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
     chart_dir.mkdir(parents=True, exist_ok=True)
     stats = data.get("statistics", {})
     hotwords = {x.get("word", ""): x.get("count", 0) for x in data.get("hotwords", [])[:12]}
-    topic_values = {
-        str(row.get("display") or topic_display(row.get("topic", ""))): int(row.get("spread_count", 0) or row.get("total_samples", 0) or 0)
+    topic_values = [
+        (str(row.get("display") or topic_display(row.get("topic", ""))), int(row.get("spread_count", 0) or row.get("total_samples", 0) or 0))
         for row in data.get("topic_stats") or []
-    }
+    ]
     charts = {
         "platform_distribution": ("平台样本分布", stats.get("by_platform") or {}),
         "topic_distribution": ("子议题传播量", topic_values),
@@ -2468,15 +2468,27 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     hyperlink_count = document_xml.count(b"<w:hyperlink")
     image_count = sum(1 for name in names if name.startswith("word/media/"))
     comment_quote_audit = audit_formal_comment_quotes(data, document_xml)
+    artifacts = data.get('artifacts') or {}
+    chart_paths = artifacts.get('docx_charts') or {}
+    monitoring_assets = (artifacts.get('chart_authority') in {
+        'monitoring_system_embedded_assets', 'monitoring_system_assets_plus_pipeline_wordcloud'}
+        and all(chart_matches.values()))
+    topic_values = [(str(row.get('display') or topic_display(row.get('topic', ''))),
+                     int(row.get('spread_count', 0) or row.get('total_samples', 0) or 0))
+                    for row in data.get('topic_stats') or []]
+    fixed_topic_fallback = (
+        artifacts.get('chart_authority') == 'mixed_system_and_program_fallback'
+        and all(chart_matches.values())
+        and Path(chart_paths.get('trend_distribution') or '').stem == 'trend_distribution_system'
+        and Path(chart_paths.get('hotword_distribution') or '').stem in {
+            'hotword_distribution_system', 'hotword_distribution_pipeline'}
+        and verify_topic_chart_manifest(chart_paths.get('topic_distribution') or '',
+                                        (data.get('audit') or {}).get('topic_chart_style'), topic_values))
     checks = {
         "no_unfilled_template_slots": b'CWH_' not in document_xml,
         "fixed_template_applied": (bool((data.get('audit') or {}).get('word_template', {}).get('filled_slots'))
                                    or any(section_override(data, key) for key in ('one', 'two', 'three', 'four'))),
-        "uses_monitoring_system_assets": (
-            (data.get("artifacts") or {}).get("chart_authority")
-            in {"monitoring_system_embedded_assets", "monitoring_system_assets_plus_pipeline_wordcloud"}
-            and all(chart_matches.values())
-        ),
+        "uses_traceable_fixed_chart_assets": monitoring_assets or fixed_topic_fallback,
         "three_required_tables": table_count == 3,
         "three_required_images": image_count >= 3,
         "appendix_hyperlinks_present": hyperlink_count >= 10,
@@ -2490,6 +2502,9 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
         "image_count": image_count,
         "hyperlink_count": hyperlink_count,
         "system_asset_hash_matches": chart_matches,
+        "chart_provenance": {"monitoring_system_assets": monitoring_assets,
+                             "verified_fixed_topic_fallback": fixed_topic_fallback,
+                             "declared_authority": artifacts.get('chart_authority')},
         "domestic_comment_quotes": comment_quote_audit,
     }
 

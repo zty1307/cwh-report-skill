@@ -83,6 +83,8 @@ Numerical propagation facts must use the monitoring workbook's scope. Missing re
 
 When the system workbook already contains the trend chart, subtopic-volume chart, or word-cloud image, embed those original assets directly. They are authoritative system outputs. Do not redraw them in a different chart type, color palette, order, unit, or title. Program-generated graphics are only a fallback when the corresponding workbook asset is absent.
 
+An absent or invalid topic-chart image may use the shared fixed-style script. Keep its generated origin explicit and bind the actual PNG, current style configuration and ordered source values in the chart manifest. The DOCX audit checks this manifest and the embedded image, rather than mislabelling the fallback as a monitoring-system original. A missing manifest or an arbitrary program chart does not qualify.
+
 Use one table. Required columns:
 
 - 序号
