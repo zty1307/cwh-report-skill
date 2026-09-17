@@ -116,6 +116,12 @@ def test_reasoning_reading_hint_does_not_use_distant_unrelated_analysis():
     assert reasoning_reading_hint('公共服务布局实际效果取决于投入。' * 10, ['公共服务布局']) == 3
 
 
+def test_long_agenda_does_not_hide_a_declared_short_policy_alias():
+    from prepare_cwh_corpus_index import reasoning_reading_hint
+    assert reasoning_reading_hint('公共交通改善的效果取决于末端衔接。',
+                                  ['研究城市公共交通服务体系建设有关工作', '公共交通']) == 1
+
+
 def test_raw_source_hydration_only_fills_missing_exact_fields():
     candidate = {"raw_evidence_record_id": "r0", "speaker_name": "发言者"}
     draft = {"research_audit": {"domestic_media_research": {"candidate_pool_by_topic": [{"topic": "议题", "candidates": [candidate]}]}}}

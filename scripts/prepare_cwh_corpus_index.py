@@ -64,8 +64,9 @@ def reasoning_reading_hint(text: str, aliases: list[str]) -> int:
     Neither is certified here; the unchanged author/reviewer gates decide.
     """
     markers = r'不等于|不意味着|取决于|有助于|这将|这意味着|意味着|预计|研判|建议|风险在于|前提是'
-    specific_aliases = [alias for alias in aliases if len(alias) >= 5]
-    aliases = specific_aliases or aliases
+    # Declared short policy names remain meaningful even when the full agenda
+    # title is long. A long title must not suppress all of its actual aliases.
+    aliases = [alias for alias in aliases if len(alias) >= 3]
     paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
     starts = set()
     for number, paragraph in enumerate(paragraphs):
