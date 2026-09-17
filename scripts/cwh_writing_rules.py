@@ -30,8 +30,26 @@ def editorial_eligibility_prompt() -> str:
         '以下只按原文语义判断，不按关键词、渠道名称或专家身份自动通过/排除：' + exclusions + '。'
         '实质的产业、金融或投资分析，只要有直接相关的具体政策机制、条件或论据即可保留；'
         '不能因出现产业链、投资、受益等词就删除，也不要求每条必须由具名专家提出。'
+        + rules.get('public_reasoning_boundary_rule', '') +
         '对预测强弱不能只看原作者用了很确定的词；须核对这条分析实际提供的机制、条件或论据。'
         '如果实际仅为受益推介或口号，不把事实铺垫当成充分论证，更不能由审核者补足。')
+
+
+def editorial_template_prompt(stage: str, rules=None) -> str:
+    """Small stage-specific frames, not a fixed agenda or a second drafting pass."""
+    rules = rules or writing_rules()['viewpoint']
+    if stage == 'selection':
+        return rules['paragraph_pairing_rule']
+    if stage not in {'claim', 'revision'}:
+        raise ValueError('Unknown editorial template stage: ' + stage)
+    result = (rules['claim_unit_rule'] + '\n以下是可选句式，不是必填栏目；只选当前原文适用的一种，'
+              '没有依据的槽位整项省略，不拼凑结论，不改写真实评论引文。\n'
+              + '\n'.join(rules['composition_frames']))
+    if stage == 'claim':
+        example = rules['composition_example']
+        result += ('\n' + example['source'] + '\n不要写：' + example['avoid']
+                   + '\n应分别提取：' + ' / '.join(example['claims']) + '\n' + example['lesson'])
+    return result
 
 
 def chinese_number(value: int) -> str:

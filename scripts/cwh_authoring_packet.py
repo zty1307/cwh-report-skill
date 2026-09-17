@@ -49,4 +49,7 @@ def compact_authoring_references(schema_text: str, registry_text: str, topic_pla
         "预算为上限，不是搜索配额；按研究计划的停止条件保留实际过程，未完成不得冒称饱和。最终仍由原有完整门禁决定是否接受。"
     ] + [writing_rules()['viewpoint'][key] for key in
          ('interpretation_eligibility_rule', 'meeting_reference_rule', 'selection_rule',
-          'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')]}
+          'claim_composition_rule', 'claim_unit_rule', 'paragraph_pairing_rule',
+          'cluster_structure_rule', 'heading_support_rule')]
+        + ['可选句式，不是必填栏目；只按实际原文选用，不照模板编造事实：'
+           + '；'.join(writing_rules()['viewpoint']['composition_frames'])]}
