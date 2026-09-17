@@ -75,3 +75,29 @@ def test_failed_partition_cannot_be_misreported_as_global_completion(tmp_path):
     assert calls == ['hotword-batch-1']
     assert (tmp_path / 'hotword-batch-1.packet.json').is_file()
     assert not (tmp_path / 'hotword-global-review.packet.json').exists()
+
+
+def test_unwitnessed_extension_is_local_gap_not_a_whole_workbook_failure(tmp_path):
+    seen = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        selected = [{'term': row['term']} for row in part['candidates']]
+        if name == 'hotword-batch-1':
+            selected.append({'term': '原文没有的新增词'})
+        seen.append(name)
+        return {'selected': selected, 'second_pass_completed': True}, {'session_id': name}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert len(result['selected']) == 3
+    assert seen[-1] == 'hotword-global-review'
+    gaps = result['batch_review_audit']['source_witness_quarantines']
+    assert gaps[0]['native_selection'] == {'term': '原文没有的新增词'}
+    assert gaps[0]['native_run']['session_id'] == 'hotword-batch-1'
+    assert (tmp_path / 'hotword_source_quarantine.json').exists()
+
+
+def test_strict_delivery_still_rejects_unwitnessed_extension(tmp_path):
+    source = packet()
+    source.pop('delivery_policy')
+    def model(*args, **kwargs):
+        return {'selected': [{'term': '原文没有的新增词'}]}, {'session_id': 'actual'}
+    with pytest.raises(ValueError, match='no literal'):
+        review_hotword_batches(source, 'rules', [], tmp_path, time.monotonic() + 300, model)

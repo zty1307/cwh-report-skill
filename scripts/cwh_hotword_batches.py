@@ -7,6 +7,10 @@ from cwh_pipeline_runtime import atomic_write_json
 from cwh_hotword_pipeline import normalize_text
 
 
+class MissingHotwordWitness(ValueError):
+    """A native extension has no literal witness in the supplied source windows."""
+
+
 def subset_packet(packet, candidates):
     result = copy.deepcopy(packet)
     terms = {row['term'] for row in candidates}
@@ -49,7 +53,7 @@ def retain_native_extensions(packet, selected):
                 if any(normalize_text(value) in normalize_text(window['excerpt']) for value in needles) and window not in windows:
                     windows.append(copy.deepcopy(window))
         if not windows:
-            raise ValueError(f'Native added hotword has no literal retained-source witness: {term}')
+            raise MissingHotwordWitness(f'Native added hotword has no literal retained-source witness: {term}')
         result['candidates'].append({'term': term, 'topic_hits': row.get('topic_hits', []),
                                     'origin': 'native_first_pass_extension; counts require full-source gate'})
         result['candidate_source_windows'].append({'term': term, 'source_windows': windows})
@@ -62,7 +66,7 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
     """One native pass per partition, then native global deduplication. No host selection."""
     from run_cwh_inline_review import normalize_hotword_transport, normalize_topic_hit_transport
     batches = partition_candidates(packet)
-    records, chosen = [], []
+    records, chosen, quarantined = [], [], []
     extended = copy.deepcopy(packet)
     target = int(packet.get('target_term_count') or 48)
 
@@ -89,9 +93,23 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
         if not isinstance(selected, list) or any(not isinstance(row, dict) or not isinstance(row.get('term'), str)
                                                   for row in selected):
             raise ValueError('Hotword batch selected must be an array')
-        retain_native_extensions(part, selected)
         if len({row['term'] for row in selected}) != len(selected):
             raise ValueError('Hotword batch repeated an exact term')
+        accepted = []
+        for row in selected:
+            try:
+                retain_native_extensions(part, [row])
+            except MissingHotwordWitness as exc:
+                if packet.get('delivery_policy') != 'deliver_available_with_gaps':
+                    raise
+                quarantined.append({'batch': name, 'native_run': copy.deepcopy(run),
+                                    'native_selection': copy.deepcopy(row), 'reason': str(exc),
+                                    'origin': 'literal_source_witness_gate; not semantic rejection'})
+            else:
+                accepted.append(row)
+        if quarantined:
+            atomic_write_json(workspace / 'hotword_source_quarantine.json', quarantined)
+        result['selected'] = accepted
         return result
 
     for number, rows in enumerate(batches, 1):
@@ -126,5 +144,6 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
         raise ValueError('Native global hotword second pass was not completed')
     result['delivery_policy'] = packet.get('delivery_policy')
     result['batch_review_audit'] = {'candidate_count': len(packet['candidates']), 'batch_count': len(batches),
-                                   'native_runs': records, 'first_pass_count': len(chosen)}
+                                   'native_runs': records, 'first_pass_count': len(chosen),
+                                   'source_witness_quarantines': quarantined}
     return result

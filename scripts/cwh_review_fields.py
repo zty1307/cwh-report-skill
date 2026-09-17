@@ -1,9 +1,8 @@
-"""Reject unusable review fields; one bounded genuine body-review retry.
+"""Reject unusable review fields; one bounded genuine local-review retry.
 
 No inferred rationale, verdict, alias, source quote or rewritten native cache.
-The retry covers all frozen body claims so its single real reviewer run remains
-the provenance of every compiled verdict; already returned headings keep their
-original real run and are not silently attributed to this retry.
+Only affected frozen claims are retried. Unchanged verdicts and headings retain
+their original real run; no unrelated source re-reading or silent restamping.
 """
 import copy
 import hashlib
@@ -59,9 +58,14 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         return result, run
     if timeout < 15:
         raise ValueError('Invalid independent review fields with no retry budget: ' + json.dumps(errors, ensure_ascii=False))
-    # Headings are not part of this body-field recovery. Every new body verdict
-    # must genuinely be rechecked, rather than a script restamping old verdicts.
+    # Preserve global IDs and full excerpts, but never re-review unrelated claims
+    # merely because another row omitted a field or a meeting reference.
     packet = {key: copy.deepcopy(value) for key, value in request.items() if key != 'headings'}
+    retry_ids = {row['id'] for row in errors}
+    packet['claims'] = [row for row in packet['claims'] if row['id'] in retry_ids]
+    source_ids = {row.get('source_id') for row in packet['claims']}
+    if all(row.get('source_id') for row in packet['claims']):
+        packet['sources'] = [row for row in packet.get('sources', []) if row['id'] in source_ids]
     packet['field_validation_feedback'] = errors
     corrected, retry_run = semantic_json(packet,
         prompt + '\n此前正文审核含空值或非法字段，尚未通过字段门禁。只返回reviews，覆盖本输入全部claim ID一次，'
@@ -74,7 +78,7 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         '确认后必须把实际会议全称写入revision.formal_claim，仅在rationale说明语境明确不算修正文。'
         '输入旧heading本身可能错误，不能据其把报告会议改成另一场会议。', command, workspace,
         'independent-review-field-retry', min(45, timeout))
-    remaining = review_field_errors(corrected, ids, request['claims'])
+    remaining = review_field_errors(corrected, retry_ids, packet['claims'])
     quarantined = []
     if (remaining and request.get('delivery_policy') == 'deliver_available_with_gaps'
             and all(row['invalid_fields'] == ['unexpanded_meeting_reference_requires_native_revision'] for row in remaining)):
@@ -92,20 +96,24 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
                     'actual_native_run': copy.deepcopy(retry_run)})
             row.pop('propositions', None)
             quarantined.append(row['id'])
-        remaining = review_field_errors(corrected, ids, request['claims'])
+        remaining = review_field_errors(corrected, retry_ids, packet['claims'])
     if remaining:
         raise ValueError('Independent review field retry still invalid: ' + json.dumps(remaining, ensure_ascii=False))
     combined = copy.deepcopy(result)
-    combined['reviews'] = copy.deepcopy(corrected['reviews'])
+    replacements = {row['id']: row for row in corrected['reviews']}
+    combined['reviews'] = [copy.deepcopy(replacements.get(row['id'], row)) for row in result['reviews']]
+    if review_field_errors(combined, ids, request['claims']):
+        raise ValueError('Local review retry left invalid fields')
     if combined.get('heading_reviews'):
         for heading in combined['heading_reviews']:
             heading['reviewer_run_id'] = run['session_id']
         combined['heading_original_run'] = copy.deepcopy(run)
     combined['review_field_retry'] = {
         'original_run': copy.deepcopy(run), 'retry_run': copy.deepcopy(retry_run),
+        'retried_claim_ids': [row['id'] for row in packet['claims']],
         'invalid_fields': errors, 'original_result_sha256': hashlib.sha256(
             json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
-        'scope': 'One genuine frozen body-review retry; no heading re-review, inferred fields or changed stage budget'}
+        'scope': 'One genuine affected-claim retry; other verdicts and full excerpts unchanged; no added stage budget'}
     if quarantined:
         combined['review_field_retry']['host_reference_quarantines'] = quarantined
     return combined, retry_run

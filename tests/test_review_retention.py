@@ -38,6 +38,33 @@ def test_uncertain_claim_is_excluded_not_guessed_and_original_is_unchanged():
     assert repaired['research_audit']['domestic_media_research'] == source['research_audit']['domestic_media_research']
 
 
+@pytest.mark.parametrize('narrow', [False, True])
+def test_local_recheck_keeps_each_actual_reviewer_through_retention(narrow):
+    from domestic_evidence_mapping import validate_semantic_review_packet
+    source, initial, original_run = fixture()
+    raw = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': '原审核未变化。'},
+                       {'id': 'e2', 'verdict': 'uncertain', 'rationale': '本条局部补核。', 'revision': None}],
+           'review_field_retry': {'original_run': original_run,
+               'retry_run': {'session_id': 'local-recheck', 'completed_at': 'later-time'},
+               'retried_claim_ids': ['e2']}}
+    if narrow:
+        raw['reviews'][1]['revision'] = {'formal_claim': evidence_rows(source)[0][1]['formal_claim'],
+                                         'verdict': 'fully_supported', 'rationale': '局部收窄有依据。'}
+    later = raw['review_field_retry']['retry_run']
+    initial = compile_review(source, raw, later, 'original-hash')
+    assert initial['reviews'][0]['reviewed_at'] == original_run['completed_at']
+    assert initial['reviews'][0]['reviewer_run_id'] == original_run['session_id']
+    assert initial['reviews'][1]['reviewer_run_id'] == later['session_id']
+    repaired, actions = retain_reviewed_content(source, initial)
+    final = retention_packet(repaired, initial, actions, later, 'new-hash')
+    validate_combined(source, repaired, initial, final)
+    assert final['reviews'][0] == initial['reviews'][0]
+    if narrow:
+        assert final['reviews'][1]['reviewer_run_id'] == later['session_id']
+        assert final['reviews'][1]['reviewed_at'] == later['completed_at']
+    assert not validate_semantic_review_packet(repaired, final, source_bundle_sha256='new-hash')
+
+
 def test_retention_refuses_frozen_source_or_accepted_claim_edits():
     source, initial, run = fixture()
     repaired, actions = retain_reviewed_content(source, initial)

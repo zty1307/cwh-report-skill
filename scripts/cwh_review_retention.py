@@ -91,7 +91,10 @@ def retention_packet(repaired, initial, actions, run, source_hash):
         raw.append(row)
     final = compile_review(repaired, {'reviews': raw}, run, source_hash)
     for row in final['reviews']:
-        row['reviewer_run_id'] = initial['reviewer_run_id']
+        earlier = first[row['evidence_id']]
+        row.update(reviewed_by=earlier['reviewed_by'], reviewed_at=earlier['reviewed_at'],
+                   reviewer_run_id=earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+    final['reviewer_run_ids'] = list(initial.get('reviewer_run_ids') or [initial['reviewer_run_id']])
     final['repair_provenance'] = {
         'mode': 'reviewer_retention_v1',
         'original_source_bundle_sha256': initial['source_bundle_sha256'],
@@ -117,12 +120,13 @@ def validate_retention(original, repaired, initial, combined):
     for identity, row in final.items():
         earlier = first[identity]
         if earlier['verdict'] == 'fully_supported':
-            if row != {**earlier, 'reviewer_run_id': initial['reviewer_run_id']}:
+            if row != {**earlier, 'reviewer_run_id': earlier.get('reviewer_run_id') or initial['reviewer_run_id']}:
                 raise ValueError('Retention rewrote an accepted verdict or real reviewer')
         else:
             revision = earlier['revision']
             ev = next(ev for _, ev in evidence_rows(repaired) if ev['evidence_id'] == identity)
             if (row['verdict'] != 'fully_supported' or row['rationale'] != revision['rationale']
                     or ev['formal_claim'] != revision['formal_claim'].strip()
-                    or row['reviewer_run_id'] != initial['reviewer_run_id']):
+                    or row['reviewer_run_id'] != (earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+                    or row['reviewed_by'] != earlier['reviewed_by'] or row['reviewed_at'] != earlier['reviewed_at']):
                 raise ValueError('Retention changed independent narrowing certification')

@@ -30,7 +30,8 @@ def test_source_reasoning_checks_are_shared_by_author_and_reviewer():
     assert rule in REVIEW_PROMPT
     assert '正面与批评用同一标准' in rule
     assert '不能擅自修正作者数字' in rule
-    assert REVIEW_PROMPT.startswith('先检查论据是否自洽')
+    assert '先检查论据是否自洽' in REVIEW_PROMPT
+    assert REVIEW_PROMPT.startswith('证据位置说明')
     assert '不能加“作者认为/原文据此认为”' in REVIEW_PROMPT
 
 
@@ -41,6 +42,8 @@ def test_both_selection_modes_use_shared_pairing_without_rewriting_claims(ranked
     prompt = flat_prompt(rules, ranked=ranked)
     assert 'configured-complementary-voices' in prompt
     assert rules['composition_example']['source'] not in prompt
+    assert rules['source_reasoning_quality_rule'] not in prompt
+    assert rules['interpretation_eligibility_rule'] not in prompt
     assert '不合并或改写claim' in prompt or '不得改写claim' in prompt
 
 

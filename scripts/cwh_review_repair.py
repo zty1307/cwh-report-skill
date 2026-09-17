@@ -112,7 +112,7 @@ def validate_combined(original, repaired, initial, combined):
     rows = {r['evidence_id']: r for r in combined['reviews']}
     for row in initial['reviews']:
         if row['evidence_id'] not in failed:
-            expected = {**row, 'reviewer_run_id': initial['reviewer_run_id']}
+            expected = {**row, 'reviewer_run_id': row.get('reviewer_run_id') or initial['reviewer_run_id']}
             if rows.get(row['evidence_id']) != expected:
                 raise ValueError('An unchanged verdict or its real reviewer was rewritten')
     if provenance.get('mode') == 'reviewer_narrowing_v1':
@@ -189,9 +189,12 @@ def reviewer_narrowing_packet(repaired, initial, raw_result, revisions, run, sou
     if 'heading_repair_runs' in raw_result:
         final_result['heading_repair_runs'] = raw_result['heading_repair_runs']
     final = compile_review(repaired, final_result, run, source_hash)
+    earlier_reviews = {row['evidence_id']: row for row in initial['reviews']}
     for row in final['reviews']:
-        row['reviewer_run_id'] = run['session_id']
-    final['reviewer_run_ids'] = [run['session_id']]
+        earlier = earlier_reviews[row['evidence_id']]
+        row.update(reviewed_by=earlier['reviewed_by'], reviewed_at=earlier['reviewed_at'],
+                   reviewer_run_id=earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+    final['reviewer_run_ids'] = list(initial.get('reviewer_run_ids') or [initial['reviewer_run_id']])
     final['repair_provenance'] = {
         'mode': 'reviewer_narrowing_v1',
         'original_source_bundle_sha256': initial['source_bundle_sha256'],

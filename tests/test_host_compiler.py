@@ -117,6 +117,18 @@ def test_host_compiler_keeps_source_and_does_not_self_certify():
     assert validate_analysis_mapping(bundle)["status"] == "blocked"
 
 
+def test_review_marks_prefix_as_partial_and_keeps_verified_absolute_excerpt_span():
+    from run_cwh_compiled_worker import independent_packet
+    bundle = compiled()
+    evidence = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    packet = independent_packet(bundle)
+    source = packet['sources'][0]
+    assert source['reference_context_scope'] == 'article_prefix_only_not_full_text'
+    assert source['full_source_character_count'] >= len(source['reference_context'])
+    assert packet['claims'][0]['excerpt_source_span'] == [evidence['source_excerpt_start'], evidence['source_excerpt_end']]
+    assert 'sentence_splits_only' in packet['claims'][0]['excerpt_integrity']
+
+
 def test_metadata_quarantine_keeps_raw_voice_and_attributes_only_count_gaps_to_host():
     from cwh_semantic_compiler import exclude_unverified_web_metadata
     packet, decision, observation, plan = fixture()

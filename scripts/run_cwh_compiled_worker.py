@@ -624,6 +624,11 @@ REVIEW_PROMPT += '\ncross_topic_shared_source_spans仅标记同一声明主体�
 
 
 REVIEW_PROMPT = (
+    '证据位置说明：sources.reference_context只是每篇文章的开头，不是全文。'
+    '某人或某句话未出现在文章开头，不能据此否定本条excerpt_segments里明确存在的引文。'
+    '每条excerpt_segments由宿主从同一冻结全文的连续摘录按句分段，excerpt_source_span给出其绝对位置；'
+    '片段分成几句不代表从不连续位置拼接。只核对本条ID下所有片段的主体、判断、条件与范围，'
+    '仍须检查转述是否忠实，位置校验不代替语义核验；sources开头仅用于会议和政策对象消歧。\n'
     '先检查论据是否自洽，再检查是否忠实转述；逐字有出处不等于适合正式采用。'
     '每条rationale简要交代三项：原文对应、论据自洽、本题选材资格。'
     '当前材料如明确给出比例、年率和期限，却声称归零、翻倍或必然效果，应先按给定参数核对量级；'
@@ -652,11 +657,17 @@ def compile_review(analysis, result, run, digest):
         short_id = row.pop('id')
         topic, ev = by_short[short_id]
         text = candidates[(topic, ev["candidate_id"])]["source_snapshot"]["source_text"]
-        row.update(evidence_id=ev["evidence_id"], reviewed_by="configured_model:" + run["session_id"], reviewed_at=run["completed_at"])
+        retry = result.get('review_field_retry') or {}
+        row_run = run
+        if 'retried_claim_ids' in retry:
+            row_run = retry['retry_run'] if short_id in retry['retried_claim_ids'] else retry['original_run']
+        row.update(evidence_id=ev["evidence_id"], reviewed_by="configured_model:" + row_run["session_id"], reviewed_at=row_run["completed_at"])
+        if 'retried_claim_ids' in retry:
+            row['reviewer_run_id'] = row_run['session_id']
         if (row.get('host_reference_gate') or {}).get('origin') == 'deterministic_reference_gate':
             if row['verdict'] != 'uncertain' or row.get('revision') is not None:
                 raise ValueError('Host reference quarantine cannot certify or rewrite a claim')
-            row['reviewed_by'] = 'host_reference_gate_after_native:' + run['session_id']
+            row['reviewed_by'] = 'host_reference_gate_after_native:' + row_run['session_id']
         supplied_propositions = [dict(p) for p in row.get("propositions") or []]
         if not supplied_propositions:
             supplied_propositions = [{
@@ -690,6 +701,9 @@ def compile_review(analysis, result, run, digest):
         reviews.append(row)
     packet = {"review_version": "1.0", "review_pass": "independent_second_pass", "reviewer_run_id": run["session_id"],
               "source_bundle_sha256": digest, "reviews": reviews}
+    if 'retried_claim_ids' in (result.get('review_field_retry') or {}):
+        packet['reviewer_run_ids'] = list(dict.fromkeys(
+            [result['review_field_retry']['original_run']['session_id'], run['session_id']]))
     if 'heading_reviews' in result:
         packet['heading_reviews'] = result['heading_reviews']
     if 'heading_repair_run' in result:
@@ -713,11 +727,15 @@ def independent_packet(analysis):
                 source_key = (snapshot["snapshot_id"], ev.get("source_segment_scheme", "line_v1"), ev.get("source_segment_scope"))
                 short = snapshots.setdefault(source_key, {"id": f"s{len(snapshots)+1}",
                     "source": candidate["source"], "account": candidate.get("account"), "title": candidate["title"],
+                    "reference_context_scope": "article_prefix_only_not_full_text",
+                    "full_source_character_count": len(snapshot['source_text']),
                     "reference_context": snapshot['source_text'][:2000]})["id"]
                 claim_id = f'e{len(claims)+1}'
                 if snapshot['source_text'][ev['source_excerpt_start']:ev['source_excerpt_end']] != ev['source_excerpt']:
                     raise ValueError('Frozen source does not contain the exact declared excerpt')
                 claims.append({"id": claim_id, "source_id": short, "topic": topic['topic'],
+                    "excerpt_source_span": [ev['source_excerpt_start'], ev['source_excerpt_end']],
+                    "excerpt_integrity": "exact_contiguous_slice_of_frozen_full_article; sentence_splits_only",
                     "reference_expansion_required": has_ambiguous_meeting_reference(ev['formal_claim']),
                     **{k: ev.get(k, "") for k in ("speaker_name", "speaker_role", "attribution_status", "formal_claim")},
                     'excerpt_segments': [{'id': seg['id'], 'text': seg['text']} for seg in source_segments(ev['source_excerpt'], claim_id, 'sentence_v2')]})
