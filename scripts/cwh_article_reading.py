@@ -1,5 +1,6 @@
 """One shared article-reading task, before native whole-topic selection."""
 import json
+import copy
 from cwh_writing_rules import writing_rules, editorial_eligibility_prompt
 
 
@@ -29,3 +30,10 @@ def reading_prompt():
 def reading_contract(packet):
     return '\n本批必须审核的原文ID，每个恰好一次；只返回items，不写整题标题或分组：' + json.dumps(
         [row['id'] for row in packet['items']], ensure_ascii=False, separators=(',', ':'))
+
+
+def reading_input_packet(packet):
+    """Hide only later-stage selection instructions; keep all reading evidence intact."""
+    result = copy.deepcopy(packet)
+    result.pop('formal_selection', None)
+    return result

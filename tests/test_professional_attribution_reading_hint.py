@@ -30,3 +30,16 @@ def test_hint_remains_capped_and_handles_direct_attribution():
 def test_interview_bridge_and_expert_committee_role_are_recognized():
     text = '某经济专家委员会委员赵明在接受财经媒体记者采访时表示，物流体系需协同。'
     assert professional_quote_hint(text, ['物流体系']) == 1
+
+
+def test_neighbouring_background_cannot_lend_topic_to_expert():
+    text = ('此前曾开展交通设施改革。\n'
+            '研究员赵明认为，医疗保障应兼顾地区差异。\n'
+            '另一个议题是交通设施改革。')
+    assert professional_quote_hint(text, ['交通设施改革']) == 0
+    assert professional_quote_hint(text, ['医疗保障']) == 1
+
+
+def test_same_paragraph_policy_context_before_named_attribution_is_retained():
+    text = '交通设施改革有何影响？研究员赵明认为，需要考虑地区差异。'
+    assert professional_quote_hint(text, ['交通设施改革']) == 1

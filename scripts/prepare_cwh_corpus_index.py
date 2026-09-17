@@ -45,7 +45,14 @@ def professional_quote_hint(text: str, aliases: list[str]) -> int:
     for name in names:
         pattern = rf'{re.escape(name)}(?:(?:对|在)[^。！？；\n]{{0,80}}?)?[，,]?\s*(?:{verbs})'
         for match in re.finditer(pattern, text):
-            if any(alias and alias in text[max(0, match.start()-500):match.end()+500] for alias in aliases):
+            # Neighbouring background/bulletin paragraphs cannot lend their
+            # topic to this attribution. All original rows remain readable.
+            paragraph_start = text.rfind('\n', 0, match.start()) + 1
+            paragraph_end = text.find('\n', match.end())
+            if paragraph_end < 0:
+                paragraph_end = len(text)
+            context = text[max(paragraph_start, match.start()-500):min(paragraph_end, match.end()+500)]
+            if any(alias and alias in context for alias in aliases):
                 starts.add(match.start())
     return min(3, len(starts))
 

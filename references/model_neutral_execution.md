@@ -71,6 +71,10 @@ The host treats the final structured model event as authoritative even when a ve
 
 ## Writing behavior
 
+Raw public-account and overseas review use request-local short record aliases (`r1`, `r2`, ...). The host stores the exact alias map and restores original IDs before all source and coverage gates; no fuzzy matching, invented rows or coverage completion is permitted. Repairs use the same aliases, and checkpoints include the transport version. This prevents long-ID copying errors without certifying any semantic decision.
+
+Article-reading-only requests omit the later topic-level `formal_selection` instructions. They still carry full original article bodies, agenda and evidence rules; the host retains the original packet for validation. Final cross-article selection happens separately and still receives its selection rules. Expert-attribution reading hints only borrow topic context from the same paragraph, not an adjacent background paragraph; this changes priority only, never source inclusion or semantic eligibility.
+
 Reusable writing structure and sentence rules live in `config/formal_writing_rules.v1.json`. They were distilled from reviewed reports across unrelated subjects. They define chapter order, paragraph roles, stance headings, attribution forms, evidence density, comment grouping, hotword prose and overseas prose. No period-specific topic, person, source, number or conclusion is stored in the rules.
 
 The model supplies atomic, evidence-backed judgments. Scripts assemble the fixed report skeleton. This keeps tone and structure stable across models while preserving the current meeting's evidence and uncertainty.

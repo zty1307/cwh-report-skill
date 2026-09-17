@@ -22,6 +22,7 @@ from cwh_hotword_pipeline import PROCEDURAL_HOTWORD_MARKERS, looks_like_pure_geo
 from cwh_json_transport import load_framed_json, normalize_authoring_envelope, escape_cjk_internal_quotes
 from cwh_source_spans import source_segments, selected_quote
 from raw_system_workbook_pipeline import normalize_text as normalize_raw_text
+from cwh_raw_record_ids import alias_record_ids, restore_record_ids, alias_previous_review, TRANSPORT_VERSION
 
 
 def configured_raw_review_batch_size():
@@ -355,7 +356,8 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
         batch['items'] = copy.deepcopy(inputs[offset:offset + batch_size])
         folder = workspace / f'{kind}-batch-{offset // batch_size + 1}'
         folder.mkdir(parents=True, exist_ok=True)
-        source = {'packet': batch, 'rules': prompt_rules, 'feedback': feedback, 'command': command_template}
+        source = {'packet': batch, 'rules': prompt_rules, 'feedback': feedback, 'command': command_template,
+                  'id_transport': TRANSPORT_VERSION}
         digest = hashlib.sha256(json.dumps(source, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         output_path, cache_path = folder / 'accepted_review.json', folder / 'cache.json'
         cached = None
@@ -371,8 +373,9 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
         if cached is None:
             session = str(uuid.uuid4())
             command = [x.replace('{session_id}', session) for x in command_template]
-            payload = {'kind': kind, 'reviewer_run_id': session, 'output_shape': shape,
-                       'packet': overseas_span_packet(batch) if kind == 'overseas' else batch}
+            native_packet, record_ids = alias_record_ids(overseas_span_packet(batch) if kind == 'overseas' else batch)
+            payload = {'kind': kind, 'reviewer_run_id': session, 'output_shape': shape, 'packet': native_packet}
+            atomic_write_json(folder / 'record_id_map.json', {'transport': TRANSPORT_VERSION, 'mapping': record_ids})
             prompt = prompt_rules + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
             prompt += '\n只处理本批items，每个ID恰好一次。不要中途重新开始JSON，不返回额外补充报道。'
             if kind == 'overseas':
@@ -405,6 +408,7 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                     atomic_write_json(workspace / 'blocker.json', cached)
                     raise SystemExit(23)
                 cached = stamp_native_review_method(cached, run)
+                cached = restore_record_ids(cached, record_ids)
                 cached = normalize_topic_hit_transport(batch, cached, kind)
                 if kind == 'overseas':
                     cached = resolve_overseas_spans(batch, cached)
@@ -451,6 +455,7 @@ def review_overseas_batches(packet, shape, prompt_rules, command_template, works
                         atomic_write_json(workspace / 'blocker.json', cached)
                         raise SystemExit(23)
                     cached = stamp_native_review_method(cached, run)
+                    cached = restore_record_ids(cached, record_ids)
                     cached = normalize_topic_hit_transport(batch, cached, kind)
                     if kind == 'overseas':
                         cached = resolve_overseas_spans(batch, cached)
@@ -551,6 +556,11 @@ def main():
                                      ai_report_category="事实性报道或解读性报道或借题炒作/风险解读", title_cn_simplified="", source_cn_simplified="", summary_cn_simplified="",
                                      interpretive_verified=False, interpretive_range=["o1/1", "o1/2"])
         transport_packet = overseas_span_packet(packet) if kind == "overseas" else packet
+        record_ids = None
+        if kind != 'hotword':
+            transport_packet, record_ids = alias_record_ids(transport_packet)
+            atomic_write_json(workspace / f'{kind}.record_id_map.json',
+                              {'transport': TRANSPORT_VERSION, 'mapping': record_ids})
         prompt_rules = raw_review_prompt_rules(kind, deliver_available)
         if kind == 'hotword' and deliver_available and len(packet.get('candidates') or []) > 48:
             from cwh_hotword_batches import review_hotword_batches
@@ -581,9 +591,12 @@ def main():
         if repair_required:
             prompt += "\n仅修复本节点校验错误，保留仍然有效的已审记录：" + last_error
             if target.exists():
-                prompt += "\n已有结果：" + target.read_text(encoding="utf-8")
+                previous = json.loads(target.read_text(encoding="utf-8"))
+                if record_ids is not None:
+                    previous = alias_previous_review(previous, record_ids)
+                prompt += "\n已有结果（仅最终覆盖清单中的ID可返回）：" + json.dumps(previous, ensure_ascii=False)
         if kind != "hotword":
-            required_ids = [row["record_id"] for row in packet.get("items", [])]
+            required_ids = list(record_ids)
             prompt += ("\n最终覆盖清单：返回items的record_id必须与以下清单完全一致，"
                        "每项恰好一次；include=false的排除项也必须返回，不能只列入选记录。"
                        + json.dumps(required_ids, ensure_ascii=False, separators=(",", ":")))
@@ -619,6 +632,8 @@ def main():
         try:
             result = response_object(log_text)
             if not result.get("blocker"):
+                if record_ids is not None:
+                    result = restore_record_ids(result, record_ids)
                 result = normalize_topic_hit_transport(packet, result, kind)
                 if kind == "overseas":
                     result = resolve_overseas_spans(packet, result)

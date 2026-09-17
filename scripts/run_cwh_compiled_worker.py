@@ -411,8 +411,13 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                         deadline - time.monotonic(), len(packets) - number,
                         maximum_request_seconds, future_topic_reserve_seconds)
                     if not allow_article_batches:
+                        reading_call = semantic_json
+                        if reading_only:
+                            from cwh_article_reading import reading_input_packet
+                            def reading_call(request, *args, **kwargs):
+                                return semantic_json(reading_input_packet(request), *args, **kwargs)
                         result, run = native_article_batch(model_packet, local_prompt, command, workspace,
-                            f"author-topic-{number}", request_timeout, semantic_json, reuse_cache=reuse_cache)
+                            f"author-topic-{number}", request_timeout, reading_call, reuse_cache=reuse_cache)
                     else:
                         result, run = semantic_json(model_packet, local_prompt, command, workspace,
                             f"author-topic-{number}", request_timeout, reuse_cache=reuse_cache)
@@ -421,7 +426,11 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         if result.get('topic') not in (None, packet['topic']):
             raise ValueError('Single-topic response changed the requested topic')
         try:
-            result, coverage_run = repair_missing_author_items(model_packet, result, prompt, command,
+            coverage_packet = model_packet
+            if reading_only:
+                from cwh_article_reading import reading_input_packet
+                coverage_packet = reading_input_packet(model_packet)
+            result, coverage_run = repair_missing_author_items(coverage_packet, result, prompt, command,
                 workspace, deadline - time.monotonic() - 15, f'author-topic-{number}-missing-items')
         except ValueError as exc:
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
