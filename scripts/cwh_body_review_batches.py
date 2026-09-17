@@ -91,7 +91,8 @@ def review_body_batches(packet, prompt, command, workspace, deadline, model_call
             actual = run
         else:
             for row in result.get('reviews') or []:
-                row.pop('host_unreviewed', None)
+                if isinstance(row, dict):
+                    row.pop('host_unreviewed', None)
             try:
                 result, actual = retry_invalid_review_fields(part, result, run, prompt, command, folder,
                                                             local_deadline - time.monotonic())

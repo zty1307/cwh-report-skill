@@ -461,7 +461,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         except ValueError as exc:
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if result.get('topic') not in (None, packet['topic']):
-            raise ValueError('Single-topic response changed the requested topic')
+            raise SemanticResponseError('Single-topic response changed the requested topic', run)
         try:
             coverage_packet = model_packet
             if reading_only:
@@ -470,7 +470,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             result, coverage_run = repair_missing_author_items(coverage_packet, result, prompt, command,
                 workspace, deadline - time.monotonic() - 15, f'author-topic-{number}-missing-items')
         except ValueError as exc:
-            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+            raise SemanticResponseError(f"[{packet['topic']}] {exc}", run) from exc
         if coverage_run:
             run = {**run, 'missing_item_completion_run': coverage_run}
         if fixed_unread:
@@ -482,7 +482,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             result, completion_run = repair_missing_reasons(packet, result, command, workspace,
                                                             deadline - time.monotonic() - 15)
         except ValueError as exc:
-            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+            raise SemanticResponseError(f"[{packet['topic']}] {exc}", run) from exc
         if completion_run:
             run = {**run, 'missing_reason_completion_run': completion_run}
         metadata_remaining = max(0, deadline - time.monotonic())
@@ -492,7 +492,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             result, metadata_run = repair_topic_web_metadata(packet, result, command, workspace,
                 metadata_timeout, f'author-topic-{number}-web-metadata-repair')
         except ValueError as exc:
-            raise ValueError(f"[{packet['topic']}] {exc}") from exc
+            raise SemanticResponseError(f"[{packet['topic']}] {exc}", run) from exc
         if metadata_run:
             run = {**run, 'web_metadata_repair_run': metadata_run}
         save_completed(completed_path, completed_key, result, run)
