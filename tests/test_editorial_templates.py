@@ -23,6 +23,17 @@ def test_only_reading_receives_fictitious_composition_example():
     assert '一位主体一句完整观点' not in prompt
 
 
+def test_source_reasoning_checks_are_shared_by_author_and_reviewer():
+    from run_cwh_compiled_worker import REVIEW_PROMPT
+    rule = writing_rules()['viewpoint']['source_reasoning_quality_rule']
+    assert rule in reading_prompt()
+    assert rule in REVIEW_PROMPT
+    assert '正面与批评用同一标准' in rule
+    assert '不能擅自修正作者数字' in rule
+    assert REVIEW_PROMPT.startswith('先检查论据是否自洽')
+    assert '不能加“作者认为/原文据此认为”' in REVIEW_PROMPT
+
+
 @pytest.mark.parametrize('ranked', [False, True])
 def test_both_selection_modes_use_shared_pairing_without_rewriting_claims(ranked):
     rules = copy.deepcopy(writing_rules()['viewpoint'])

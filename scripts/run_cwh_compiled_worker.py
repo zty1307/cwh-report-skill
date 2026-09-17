@@ -623,6 +623,18 @@ REVIEW_PROMPT += '\ncross_topic_exact_duplicates是脚本发现的同一声明�
 REVIEW_PROMPT += '\ncross_topic_shared_source_spans仅标记同一声明主体、职务、URL和已核验原文哈希的跨题选材共享连续原文片段，不是重复结论。逐对核对实际论断：同一判断的长短版本或略改措辞只保留在最直接的具体议题，其他条按本题资格判unsupported或uncertain并解释；仅共享背景、却分别提出不同独立判断时可以分别保留，不能仅按重叠自动删除，也不能借另一条额外句子补成当前主体的新结论。'
 
 
+REVIEW_PROMPT = (
+    '先检查论据是否自洽，再检查是否忠实转述；逐字有出处不等于适合正式采用。'
+    '每条rationale简要交代三项：原文对应、论据自洽、本题选材资格。'
+    '当前材料如明确给出比例、年率和期限，却声称归零、翻倍或必然效果，应先按给定参数核对量级；'
+    '复合变化按(1+r)^n，购买力按(1+名义增长率)^n/(1+价格增长率)^n，参数未给不猜。'
+    '不把核算结果代写成作者观点；明显不成立且原文无其他独立依据的判断判unsupported并说明矛盾，'
+    '此处unsupported表示正式使用资格不成立，不是说原文没有这句话。'
+    '这种错误判断revision=null，不能加“作者认为/原文据此认为”就包装成可用观点。'
+    '同篇不依赖该错误论据的具体建议仍逐条评估。只做当前证据能支持的核查，不能声称已外部核实全部事实。\n'
+    + REVIEW_PROMPT)
+
+
 def compile_review(analysis, result, run, digest):
     evidence = [(topic["topic"], e) for topic in analysis["viewpoints"]["by_topic"] for cl in topic["clusters"] for e in cl["evidence"]]
     candidates = {(pool["topic"], c["candidate_id"]): c for pool in analysis["research_audit"]["domestic_media_research"]["candidate_pool_by_topic"] for c in pool["candidates"]}

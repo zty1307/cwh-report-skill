@@ -30,7 +30,7 @@ def editorial_eligibility_prompt() -> str:
         '以下只按原文语义判断，不按关键词、渠道名称或专家身份自动通过/排除：' + exclusions + '。'
         '实质的产业、金融或投资分析，只要有直接相关的具体政策机制、条件或论据即可保留；'
         '不能因出现产业链、投资、受益等词就删除，也不要求每条必须由具名专家提出。'
-        + rules.get('public_reasoning_boundary_rule', '') +
+        + rules.get('public_reasoning_boundary_rule', '') + rules['source_reasoning_quality_rule'] +
         '对预测强弱不能只看原作者用了很确定的词；须核对这条分析实际提供的机制、条件或论据。'
         '如果实际仅为受益推介或口号，不把事实铺垫当成充分论证，更不能由审核者补足。')
 

@@ -135,6 +135,7 @@ def build_task_payload(
             "instruction": "Submit only the semantic fields required by this stage. Do not draft whole report sections or polish script-generated paragraphs. Preserve the source meaning and all qualifications.",
             "claim_cjk_range": writing_rules()["viewpoint"]["claim_cjk_range"],
             "interpretation_eligibility_rule": writing_rules()["viewpoint"]["interpretation_eligibility_rule"],
+            "source_reasoning_quality_rule": writing_rules()["viewpoint"]["source_reasoning_quality_rule"],
             "meeting_reference_rule": writing_rules()["viewpoint"]["meeting_reference_rule"],
             "selection_rule": writing_rules()["viewpoint"]["selection_rule"],
             "claim_composition_rule": writing_rules()["viewpoint"]["claim_composition_rule"],
