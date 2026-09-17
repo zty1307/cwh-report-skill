@@ -56,7 +56,7 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
     errors = review_field_errors(result, ids, request['claims'])
     if not errors:
         return result, run
-    if timeout < 15:
+    if timeout < 15 and not (workspace / 'independent-review-field-retry.cache.json').is_file():
         raise ValueError('Invalid independent review fields with no retry budget: ' + json.dumps(errors, ensure_ascii=False))
     # Preserve global IDs and full excerpts, but never re-review unrelated claims
     # merely because another row omitted a field or a meeting reference.
@@ -77,7 +77,7 @@ def retry_invalid_review_fields(request, result, run, prompt, command, workspace
         '对反馈列出的未展开指称，原句verdict只能partially_supported或uncertain；'
         '确认后必须把实际会议全称写入revision.formal_claim，仅在rationale说明语境明确不算修正文。'
         '输入旧heading本身可能错误，不能据其把报告会议改成另一场会议。', command, workspace,
-        'independent-review-field-retry', min(45, timeout))
+        'independent-review-field-retry', min(45, timeout) if timeout >= 15 else 0)
     remaining = review_field_errors(corrected, retry_ids, packet['claims'])
     quarantined = []
     if (remaining and request.get('delivery_policy') == 'deliver_available_with_gaps'

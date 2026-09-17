@@ -68,6 +68,44 @@ def test_no_budget_does_not_invent_reviews(tmp_path):
         review_body_batches(packet(), '', [], tmp_path, time.monotonic() + 10, forbidden)
 
 
+@pytest.mark.parametrize('change', ['', 'source', 'prompt', 'command', 'result'])
+def test_completed_native_review_survives_expired_budget_only_with_matching_hashes(tmp_path, monkeypatch, change):
+    import hashlib
+    import json
+    import cwh_host_research as host
+    original = packet(1)
+    original['delivery_policy'] = 'deliver_available_with_gaps'
+    part = partition_review_packet(original)[0]
+    prompt = 'current evidence only'
+    suffix = '\n本次只审核本批claims，不审核标题。保持输入短ID，不重新编号；每条从自己的excerpt_segments逐项找依据，不能用另一条摘录替代。'
+    command = ['actual-provider']
+    digest = hashlib.sha256((prompt + suffix + '\n' + json.dumps(part, ensure_ascii=False, separators=(',', ':'))
+                            + '\n' + json.dumps(command)).encode()).hexdigest()
+    result = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': '真实原文支持'}]}
+    cache = {'input_sha256': digest, 'result_sha256': hashlib.sha256(json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
+             'result': result, 'run': {'session_id': 'earlier-native', 'completed_at': 'earlier-time'}}
+    folder = tmp_path / 'body-review-1'
+    folder.mkdir()
+    if change == 'source':
+        original['claims'][0]['excerpt_segments'][0]['text'] = 'changed original source'
+    elif change == 'prompt':
+        prompt += ' changed'
+    elif change == 'command':
+        command = ['another-provider']
+    elif change == 'result':
+        cache['result']['reviews'][0]['rationale'] = 'tampered'
+    (folder / 'independent-body-review.cache.json').write_text(json.dumps(cache, ensure_ascii=False), encoding='utf-8')
+    monkeypatch.setattr(host, 'invoke', lambda *args, **kwargs: pytest.fail('No new provider call after deadline'))
+    actual, _, origins, _ = review_body_batches(original, prompt, command, tmp_path, time.monotonic() - 30, host.semantic_json)
+    if not change:
+        assert actual == result
+        assert origins['e1']['session_id'] == 'earlier-native'
+        assert origins['e1']['completed_at'] == 'earlier-time'
+    else:
+        assert actual['reviews'][0]['verdict'] == 'uncertain'
+        assert actual['reviews'][0]['host_unreviewed']
+
+
 def test_compiler_requires_complete_actual_run_map_and_preserves_it():
     from test_host_compiler import compiled
     from run_cwh_compiled_worker import compile_review

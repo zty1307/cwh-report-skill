@@ -225,6 +225,8 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
                 return prior["result"], prior["run"]
         except (ValueError, AttributeError):
             pass
+    if timeout <= 0:
+        raise TimeoutError('No remaining semantic request budget and no matching completed cache')
     log, run = invoke(command, prompt + "\n" + payload, workspace, label, timeout)
     if run["exit_code"]:
         error = run.get("transport_error") or {}

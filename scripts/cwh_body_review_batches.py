@@ -67,11 +67,12 @@ def review_body_batches(packet, prompt, command, workspace, deadline, model_call
         folder.mkdir(parents=True, exist_ok=True)
         atomic_write_json(folder / 'request.json', part)
         try:
-            if share < 15:
+            if share < 15 and not (folder / 'independent-body-review.cache.json').is_file():
                 raise TimeoutError('No remaining frozen body-review batch budget')
             result, run = model_call(part, prompt + '\n本次只审核本批claims，不审核标题。保持输入短ID，不重新编号；'
                 '每条从自己的excerpt_segments逐项找依据，不能用另一条摘录替代。',
-                command, folder, 'independent-body-review', max(10, min(150, share * .80)), reuse_cache=True)
+                command, folder, 'independent-body-review',
+                max(10, min(150, share * .80)) if share >= 15 else 0, reuse_cache=True)
         except (HostModelError, SemanticResponseError, TimeoutError) as exc:
             if packet.get('delivery_policy') != POLICY:
                 raise
@@ -96,10 +97,10 @@ def review_body_batches(packet, prompt, command, workspace, deadline, model_call
             try:
                 result, actual = retry_invalid_review_fields(part, result, run, prompt, command, folder,
                                                             local_deadline - time.monotonic())
-            except (HostModelError, SemanticResponseError, ValueError) as exc:
+            except (HostModelError, SemanticResponseError, TimeoutError, ValueError) as exc:
                 if packet.get('delivery_policy') != POLICY:
                     raise
-                failure = interruption(exc if isinstance(exc, (HostModelError, SemanticResponseError))
+                failure = interruption(exc if isinstance(exc, (HostModelError, SemanticResponseError, TimeoutError))
                                        else SemanticResponseError(str(exc), run))
                 atomic_write_json(folder / 'incomplete_review.json', {'result': result, 'run': run, 'interruption': failure})
                 # Keep unaffected native rows when the returned ID set is valid.
