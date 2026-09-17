@@ -1,5 +1,6 @@
 """A timed-out source remains unread; no fabricated semantic rejection."""
 import copy
+import json
 from pathlib import Path
 import sys
 import time
@@ -10,6 +11,65 @@ from test_host_compiler import fixture
 from cwh_semantic_compiler import compile_topic
 from cwh_host_research import HostModelError
 from run_cwh_compiled_worker import review_author_article_batches
+
+
+def test_first_reading_gets_topic_time_then_protects_native_selection(tmp_path, monkeypatch):
+    import run_cwh_compiled_worker as worker
+    packet, decision, _, _ = fixture()
+    first = packet['items'][0]
+    second = {**copy.deepcopy(first), 'id': 'r2'}
+    packet.update(items=[first, second], delivery_policy='deliver_available_with_gaps')
+    original = copy.deepcopy(packet)
+    clock = [1000.0]
+    monkeypatch.setattr(worker.time, 'monotonic', lambda: clock[0])
+    calls = []
+    def reader(packets, prompt, command, folder, deadline, **kwargs):
+        calls.append(deadline - clock[0])
+        assert calls == [160]  # Previously halved to 80, then 40, then 20.
+        clock[0] += 90
+        return [{'items': [copy.deepcopy(decision['items'][0])]}], {'session_id': 'actual-reading'}
+    def synthesis(request, choices, command, folder, timeout, model_call, **kwargs):
+        assert timeout == 70  # Another 35-second reading must not eat this.
+        assert request['eligible_items'][0]['id'] == 'r1'
+        assert request['previously_unread_items'][0]['id'] == 'r2'
+        return {'items': choices}, {'session_id': 'actual-selection'}
+    monkeypatch.setattr(worker, 'author_topic_decisions', reader)
+    monkeypatch.setattr(worker, 'native_topic_synthesis', synthesis)
+    result, run = review_author_article_batches(packet, [{'items': [first]}, {'items': [second]}],
+        '', [], tmp_path, 1160, reuse_cache=False, feedback=[], maximum_request_seconds=180)
+    assert packet == original and len(result['items']) == 2
+    assert run['article_reading_deferrals'][0]['kind'] == 'budget_exhausted_before_call'
+    assert run['synthesis_run']['session_id'] == 'actual-selection'
+
+
+@pytest.mark.parametrize('tamper', [False, True])
+def test_short_budget_reuses_only_hash_valid_completed_reading(tmp_path, monkeypatch, tamper):
+    import run_cwh_compiled_worker as worker
+    from cwh_article_reading import reading_prompt
+    packet, _, _, _ = fixture()
+    packet.update(items=packet['items'][:1], delivery_policy='deliver_available_with_gaps')
+    folder = tmp_path / 'b1'
+    folder.mkdir()
+    def native(*args, **kwargs):
+        return {'items': [{'id': 'r1', 'decision': 'excluded', 'reason': '本测试原生判断', 'claims': []}]}, {
+            'session_id': 'cached-native', 'seconds': 2}
+    monkeypatch.setattr(worker, 'semantic_json', native)
+    worker.author_topic_decisions([packet], reading_prompt(), [], folder, time.monotonic() + 90,
+        reuse_cache=True, allow_article_batches=False, reading_only=True)
+    checkpoint = folder / 'author-topic-1.completed.json'
+    if tamper:
+        record = json.loads(checkpoint.read_text('utf-8'))
+        record['payload']['result']['items'][0]['reason'] = '篡改缓存'
+        checkpoint.write_text(json.dumps(record), encoding='utf-8')
+    monkeypatch.setattr(worker, 'semantic_json', lambda *a, **k: pytest.fail('No new call after deadline'))
+    result, run = review_author_article_batches(packet, [{'items': packet['items']}], '', [], tmp_path,
+        time.monotonic() - 1, reuse_cache=True, feedback=[], maximum_request_seconds=180)
+    if tamper:
+        assert run['article_reading_deferrals'][0]['kind'] == 'budget_exhausted_before_call'
+    else:
+        assert not run['article_reading_deferrals']
+        assert result['items'][0]['reason'] == '本测试原生判断'
+        assert run['batch_runs'][0]['topic_runs'][0]['cache_reused']
 
 
 def test_actual_timeout_is_deferred_not_counted_as_semantic_raw_review():

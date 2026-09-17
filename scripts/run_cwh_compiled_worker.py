@@ -303,15 +303,26 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         local = {**packet, 'items': [originals[value] for value in ids]}
         local_workspace = workspace / f'b{number}'
         local_workspace.mkdir(parents=True, exist_ok=True)
-        # Reserve a little time for every unread batch and the native synthesis;
-        # never reset the cumulative stage deadline or borrow future topics.
+        # First secure an actual reading result, rather than geometrically
+        # splitting a short topic allowance into requests that all time out.
+        # Once claims exist, protect native selection before expanding reading.
+        # Neither rule borrows the next topic's time or resets its deadline.
         available = max(0, deadline - time.monotonic())
-        reserve = min(45 + 15 * (len(transport_groups) - number), available * 0.5)
+        recoverable = packet.get('delivery_policy') == 'deliver_available_with_gaps'
+        has_claims = any(row.get('decision') == 'eligible' and row.get('claims') for row in choices)
+        reserve = (min(75, available) if has_claims else 0) if recoverable else min(
+            45 + 15 * (len(transport_groups) - number), available * 0.5)
+        minimum_reading = 45 if recoverable and has_claims else 15
         local_deadline = deadline - reserve
         local_prompt = reading_prompt()
         try:
-            if local_deadline - time.monotonic() < 15:
-                raise TimeoutError('Article reading budget exhausted before this batch')
+            if local_deadline - time.monotonic() < minimum_reading:
+                # A hash-validated completed checkpoint may still be reused.
+                # A past deadline makes the inner cache miss fail before a call.
+                if recoverable and reuse_cache and (local_workspace / 'author-topic-1.completed.json').is_file():
+                    local_deadline = time.monotonic() - 1
+                else:
+                    raise TimeoutError('Article reading budget exhausted before this batch; preserve existing claims and native selection time')
             result, run = author_topic_decisions([local], local_prompt, command, local_workspace,
                 local_deadline, reuse_cache=reuse_cache, feedback=article_feedback,
                 maximum_request_seconds=min(180, maximum_request_seconds) if maximum_request_seconds > 0 else 180,
