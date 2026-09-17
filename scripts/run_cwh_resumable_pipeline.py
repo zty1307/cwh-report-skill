@@ -759,6 +759,9 @@ def validate_hotword_audit(path: Path, topics: list[str]) -> list[str]:
         data = read_json(path)
     except Exception as exc:
         return [f"热词审核文件无法解析：{type(exc).__name__}: {exc}"]
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if is_deferred_hotwords(data):
+        return []  # Valid absence record, not semantic approval.
     method = str(data.get("review_method") or data.get("method") or "")
     if "ai" not in method.lower() and "human_reviewed" not in method.lower():
         return ["热词审核未标明AI语义审核或人工复核"]
@@ -1172,9 +1175,11 @@ class CwhPipeline:
             raw_public_audit = packet_dir / 'public_top_audit.json'
             if raw_public_audit.exists():
                 shutil.copy2(raw_public_audit, self.artifacts / 'public_top_audit.json')
+            normalized_path = packet_dir / 'normalized_raw_workbook.json'
+            raw_gaps = (read_json(normalized_path).get('quality_gate') or {}).get('blockers', []) if normalized_path.exists() else []
             return StageOutcome.succeeded(
-                "原始监测表已经AI审核、汇总并生成标准总表。",
-                details={"log_path": str(log_path), "audit": str(audit)},
+                "标准总表已生成；未完成的附表审核保留缺口，传播统计未以不完整审核结果回算。" if raw_gaps else "原始监测表已经AI审核、汇总并生成标准总表。",
+                details={"log_path": str(log_path), "audit": str(audit), 'raw_review_gaps': raw_gaps},
             )
         packets = {
             "hotword": packet_dir / "hotword_review_packet.json",
@@ -1322,6 +1327,8 @@ class CwhPipeline:
             inputs={
                 "research_plan": str(self.artifacts / "research_plan.json"),
                 "existing_output": str(target) if target.exists() else "",
+                'raw_review_gaps': next((row.get('details', {}).get('raw_review_gaps', [])
+                    for row in runner.state['stages'] if row['stage_id'] == 'workbook'), []),
                 "public_corpus_index": str(index_path) if index_path else "",
                 "public_corpus_reading_indexes": read_json(index_path)["reading_indexes"] if index_path else [],
                 "validation_problems": problems,
@@ -1602,7 +1609,9 @@ class CwhPipeline:
         topics = topic_titles(self.artifacts / "CWH舆情情况_标准总表.xlsx")
         problems = validate_hotword_audit(target, topics) if target.exists() else ["尚未生成热词审核文件"]
         if not problems:
-            return StageOutcome.succeeded("热词已由证据提取并完成AI或人工二次复核。")
+            from cwh_semantic_recovery import is_deferred_hotwords
+            return StageOutcome.succeeded("热词审核未完成，保留缺口并继续交付其他成品。" if is_deferred_hotwords(read_json(target))
+                                          else "热词已由证据提取并完成AI或人工二次复核。")
         task = ai_task(
             runner,
             spec.stage_id,

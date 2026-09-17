@@ -15,6 +15,28 @@ def valid_interruption(row):
         or (row.get('kind') == 'budget_exhausted_before_call' and run.get('model_invoked') is False))
 
 
+def valid_raw_deferrals(review, expected, reviewed):
+    rows = review.get('deferred_records') or []
+    ids = [r.get('record_id') for r in rows]
+    return (review.get('delivery_policy') == POLICY and len(ids) == len(set(ids))
+            and set(ids) == set(expected) - set(reviewed) and not set(reviewed) - set(expected)
+            and all(valid_interruption(row) for row in rows))
+
+
+def deferred_hotwords(failure):
+    return {'status': 'review_deferred', 'review_method': 'host_unreviewed', 'method': 'host_unreviewed',
+            'delivery_policy': POLICY, 'selected': [], 'second_pass_completed': False,
+            'interruption': copy.deepcopy(failure),
+            'notice': '热词审核尚未完成，本稿暂不生成词云；不代表没有相关热词。'}
+
+
+def is_deferred_hotwords(data):
+    return (data.get('delivery_policy') == POLICY and data.get('status') == 'review_deferred'
+            and data.get('review_method') == 'host_unreviewed' and data.get('selected') == []
+            and data.get('second_pass_completed') is False
+            and bool(data.get('notice')) and valid_interruption(data.get('interruption') or {}))
+
+
 def interruption(exc):
     if isinstance(exc, HostModelError):
         if exc.exit_code != 124 or exc.category not in {'', 'timeout'}:

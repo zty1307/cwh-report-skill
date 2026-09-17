@@ -110,6 +110,46 @@ def test_no_budget_never_calls_vendor(tmp_path, monkeypatch):
     assert error.value.code == 124 and not calls
 
 
+def test_available_failed_batch_does_not_lose_later_native_results(tmp_path, monkeypatch):
+    calls = []
+    install_transport(monkeypatch, calls)
+    native = worker.run_scoped_command
+    attempts = []
+    def interrupted(command, **kwargs):
+        attempts.append(command)
+        if len(attempts) == 1:
+            return 124
+        return native(command, **kwargs)
+    monkeypatch.setattr(worker, 'run_scoped_command', interrupted)
+    result = worker.review_overseas_batches(packet(), {}, '', ['model', '{session_id}'], tmp_path,
+        time.monotonic() + 300, batch_size=2, deliver_available=True)
+    assert [r['record_id'] for r in result['items']] == ['row-2', 'row-3', 'row-4']
+    assert result['items'][0]['interpretive_range'] == ['o3/2', 'o3/2']
+    assert result['items'][0]['interpretive_excerpt'] == '实施效果取决于资金。'
+    assert [r['record_id'] for r in result['deferred_records']] == ['row-0', 'row-1']
+    assert all(r['actual_run']['exit_code'] == 124 for r in result['deferred_records'])
+    assert result['review_complete'] is False
+
+
+def test_available_exhausted_budget_is_not_native_review(tmp_path, monkeypatch):
+    from cwh_semantic_recovery import valid_raw_deferrals
+    calls = []
+    install_transport(monkeypatch, calls)
+    result = worker.review_overseas_batches(packet(), {}, '', ['model'], tmp_path,
+        time.monotonic() - 1, deliver_available=True)
+    assert not calls and not result['items']
+    assert result['review_method'] == 'host_partial_review'
+    assert valid_raw_deferrals(result, [r['record_id'] for r in packet()['items']], [])
+
+
+def test_available_auth_failure_is_not_silently_hidden(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, 'run_scoped_command', lambda *a, **kw: 23)
+    with pytest.raises(SystemExit) as error:
+        worker.review_overseas_batches(packet(), {}, '', ['model'], tmp_path,
+            time.monotonic() + 100, deliver_available=True)
+    assert error.value.code == 23
+
+
 @pytest.mark.parametrize('span', ['[o1/1, o1/2]', '["o1/1", "o1/2"]'])
 def test_stringified_pair_changes_only_encoding_and_keeps_exact_source(span):
     source = packet()

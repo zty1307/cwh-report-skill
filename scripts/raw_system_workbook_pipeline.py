@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -1021,6 +1022,7 @@ def apply_overseas_ai_review(
     if str(review.get("review_method") or "").strip().lower() not in {
         "ai_semantic_review",
         "ai_semantic_review_with_human_edits",
+        "host_partial_review",
     }:
         raise PipelineError("境外审核文件缺少有效review_method，不能据此改写传播统计")
 
@@ -1028,6 +1030,8 @@ def apply_overseas_ai_review(
     raw_by_id = {overseas_record_id(row): row for row in rows}
     raw_by_source_row = {int(row["source_row"]): row for row in rows}
     review_items = list(review.get("items") or [])
+    if review.get('review_method') == 'host_partial_review' and (review_items or review.get('supplemental_rows')):
+        raise PipelineError('宿主待审记录不能包含模型审核结论')
     matched: dict[str, dict[str, Any]] = {}
     for item in review_items:
         record_id = str(item.get("record_id") or "").strip()
@@ -1041,7 +1045,8 @@ def apply_overseas_ai_review(
         matched[record_id] = item
 
     missing = sorted(set(raw_by_id) - set(matched))
-    if missing:
+    from cwh_semantic_recovery import valid_raw_deferrals
+    if missing and not valid_raw_deferrals(review, raw_by_id, matched):
         raise PipelineError(f"境外AI审核未覆盖全部系统候选，缺少{len(missing)}条")
 
     decisions: list[dict[str, Any]] = []
@@ -1136,6 +1141,11 @@ def apply_overseas_ai_review(
         }
 
     for record_id, base in raw_by_id.items():
+        if record_id not in matched:
+            decisions.append({**base, 'record_id': record_id, 'decision': 'deferred',
+                              'reason': '模型审核未完成，原始记录留待复核；不纳入已审外媒附录。',
+                              'ai_reviewed': False, 'formal_include': False})
+            continue
         result = reviewed_row(base, matched[record_id], "system_raw")
         decisions.append(result)
         if result["count_include"]:
@@ -1179,8 +1189,9 @@ def apply_overseas_ai_review(
         item for item in deduplicated if item.get("publisher_class") == "mainland_outward_media"
     ]
     return {
-        "status": "ai_review_complete",
-        "counts_reconciled": True,
+        "status": "ai_review_partial" if missing else "ai_review_complete",
+        "counts_reconciled": not missing,
+        "deferred_records": copy.deepcopy(review.get('deferred_records') or []),
         "selected": appendix_selected,
         "appendix_selected": appendix_selected,
         "counted": deduplicated,
@@ -1372,16 +1383,25 @@ def filter_public_top(
     if str(review.get("review_method") or "").strip().lower() not in {
         "ai_semantic_review",
         "ai_semantic_review_with_human_edits",
+        "host_partial_review",
     }:
         raise PipelineError("公众TOP审核文件缺少有效review_method")
     packet_by_id = {item["record_id"]: item for item in review_packet["items"]}
+    if review.get('review_method') == 'host_partial_review' and review.get('items'):
+        raise PipelineError('宿主待审记录不能包含模型审核结论')
     reviewed_by_id = {str(item.get("record_id") or ""): item for item in review.get("items") or []}
+    if len(reviewed_by_id) != len(review.get('items') or []) or set(reviewed_by_id) - set(packet_by_id):
+        raise PipelineError('公众TOP审核含重复或未知记录')
     missing_review = sorted(set(packet_by_id) - set(reviewed_by_id))
-    if missing_review:
+    from cwh_semantic_recovery import valid_raw_deferrals
+    if missing_review and not valid_raw_deferrals(review, packet_by_id, reviewed_by_id):
         raise PipelineError(f"公众TOP AI审核未覆盖全部临界候选，缺少{len(missing_review)}条")
     ai_accepted: list[dict[str, Any]] = []
     ai_decisions: list[dict[str, Any]] = []
     for record_id, row in packet_by_id.items():
+        if record_id not in reviewed_by_id:
+            ai_decisions.append({**row, 'decision': 'deferred', 'reason': '模型审核未完成，原始记录保留待审。'})
+            continue
         item = reviewed_by_id[record_id]
         decision = str(item.get("decision") or "").strip().lower()
         reason = str(item.get("review_reason") or item.get("reason") or "").strip()
@@ -1425,7 +1445,11 @@ def filter_public_top(
     expansion_end = min(len(ranked_raw), max_candidates, len(review_batch) + 30)
     shortfall = None
     if len(selected) < top_n:
-        if expansion_end > len(review_batch):
+        if missing_review:
+            status = 'ai_review_partial'
+            shortfall = {'required': top_n, 'actual': len(selected), 'reason': 'native_review_incomplete',
+                         'deferred_record_ids': missing_review}
+        elif expansion_end > len(review_batch):
             review_packet['items'] = [
                 {**row, 'record_id': review_id(row),
                  'preliminary_topic_hits': topic_hits(normalize_text(f"{row.get('title', '')}{row.get('content', '')}"), aliases)}
@@ -1438,9 +1462,14 @@ def filter_public_top(
             shortfall = {'required': top_n, 'actual': len(selected),
                          'reviewed_candidates': len(review_batch), 'available_candidates': len(ranked_raw),
                          'reason': 'candidate_limit_reached' if len(review_batch) < len(ranked_raw) else 'candidates_exhausted'}
+    if missing_review:
+        status = 'ai_review_partial'
+        shortfall = {'required': top_n, 'actual': len(selected), 'reason': 'native_review_incomplete',
+                     'deferred_record_ids': missing_review}
     return {
         "status": status,
         "evidence_shortfall": shortfall,
+        "deferred_records": copy.deepcopy(review.get('deferred_records') or []),
         "review_method": review.get("review_method"),
         "selected": selected,
         "decisions": ai_decisions,
@@ -1788,10 +1817,13 @@ def build_normalized_bundle(
                 and hotwords.get("status") == "ai_review_complete"
                 and public_top.get("status") == "ai_review_complete"
                 and not public_top.get('evidence_shortfall')
+                and not (hotwords.get('batch_review_audit') or {}).get('deferred_candidate_batches')
             ),
             "warnings": (["公众号TOP来源不足，保留实际审核结果，不代表完整TOP排名"]
                          if public_top.get('evidence_shortfall') else []),
             "blockers": [
+                *(["部分热词候选初审未完成，词云仅包含已完成二次审核的词"]
+                  if (hotwords.get('batch_review_audit') or {}).get('deferred_candidate_batches') else []),
                 *(
                     []
                     if overseas.get("status") == "ai_review_complete"
@@ -2248,18 +2280,21 @@ def main() -> None:
         json.dumps(normalized.get("public_article_evidence") or {}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    if normalized["public_top"].get("status") != "ai_review_complete":
+    if normalized["public_top"].get("status") not in {"ai_review_complete", "ai_review_partial"}:
         raise PipelineError(
             "公众号TOP临界候选必须完成逐篇AI正文审核；审核包已写入"
             f"{run_dir / 'public_top_review_packet.json'}，请生成审核JSON并用--public-review重跑"
         )
-    if normalized["hotwords"].get("status") != "ai_review_complete":
+    from cwh_semantic_recovery import is_deferred_hotwords
+    hotwords_deferred = is_deferred_hotwords(normalized['hotwords'])
+    if normalized["hotwords"].get("status") != "ai_review_complete" and not hotwords_deferred:
         raise PipelineError(
             "热词必须完成AI语义审核后才能生成词云；审核包已写入"
             f"{run_dir / 'hotword_review_packet.json'}，请生成审核JSON并用--hotword-review重跑"
         )
     wordcloud_path = run_dir / "cwh_wordcloud.png"
-    render_wordcloud_png(normalized["hotwords"], wordcloud_path)
+    if not hotwords_deferred:
+        render_wordcloud_png(normalized["hotwords"], wordcloud_path)
     normalized_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "hotword_audit.json").write_text(
         json.dumps(
@@ -2274,7 +2309,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    portable_mode = os.name != "nt" or os.environ.get("CWH_PORTABLE_XLSX", "").strip().lower() in {
+    portable_mode = hotwords_deferred or os.name != "nt" or os.environ.get("CWH_PORTABLE_XLSX", "").strip().lower() in {
         "1",
         "true",
         "yes",

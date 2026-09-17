@@ -371,9 +371,13 @@ def write_wordcloud(workbook: Workbook, data: dict[str, Any], wordcloud_path: Pa
     worksheet["A1"] = "热词"
     for index, item in enumerate((data.get("hotwords") or {}).get("selected") or [], 2):
         worksheet.cell(index, 1, item.get("term"))
-    image = ExcelImage(str(wordcloud_path))
-    image.width, image.height = 760, 480
-    worksheet.add_image(image, "C2")
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if is_deferred_hotwords(data.get('hotwords') or {}):
+        worksheet['C2'] = data['hotwords']['notice']
+    else:
+        image = ExcelImage(str(wordcloud_path))
+        image.width, image.height = 760, 480
+        worksheet.add_image(image, "C2")
     worksheet.column_dimensions["A"].width = 28
 
 
@@ -442,7 +446,8 @@ def build_portable_workbook(normalized_path: Path, output_path: Path, verificati
         "key_range_checks": "通过",
         "formula_error_count": 0,
         "chart_count": 2,
-        "embedded_chart_images": {"trend": str(trend_path), "topic": str(topic_path), "wordcloud": str(wordcloud_path)},
+        "embedded_chart_images": {"trend": str(trend_path), "topic": str(topic_path),
+            **({"wordcloud": str(wordcloud_path)} if not (data.get('hotwords') or {}).get('status') == 'review_deferred' else {})},
         "rendered_sheets": [],
         "render_errors": [],
         "portable_note": "Linux/With环境使用已计算数值和内嵌图像，避免依赖Excel COM公式缓存。",

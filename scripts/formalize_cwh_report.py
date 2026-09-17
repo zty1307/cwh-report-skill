@@ -57,6 +57,16 @@ def topic_display(topic: str) -> str:
 
 def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
     payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if is_deferred_hotwords(payload):
+        data['hotwords'] = []
+        data['hotword_review_gap'] = payload['notice']
+        data.setdefault('audit', {}).setdefault('data_gaps', []).append(payload['notice'])
+        acceptance = data['audit'].setdefault('acceptance', {})
+        acceptance['ready_for_formal_delivery'] = False
+        acceptance.setdefault('blockers', []).append(payload['notice'])
+        data.setdefault('artifacts', {})['hotword_audit'] = str(audit_path)
+        return
     if payload.get("status") != "ai_review_complete":
         raise ValueError(f"词云审计未完成AI审核：{audit_path}")
     if payload.get("method") != "ai_semantic_review_with_evidence":
@@ -664,6 +674,8 @@ def comment_wording(rows: list[dict[str, Any]]) -> str:
 
 
 def hotword_paragraph(data: dict[str, Any]) -> str:
+    if data.get('hotword_review_gap'):
+        return str(data['hotword_review_gap'])
     frames = writing_rules()["hotwords"]
     hotwords = data.get("hotwords") or []
     if not hotwords:
@@ -1491,6 +1503,12 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         (artifacts.get("charts") or {}).get("hotword_distribution"),
         chart_dir / "hotword_distribution_system.png",
     ]
+    if data.get('hotword_review_gap'):
+        wordcloud_candidates = []
+        for owner in (data.setdefault('artifacts', {}), data.get('collection') or {}):
+            owner.pop('wordcloud_image', None)
+        for key in ('charts', 'docx_charts'):
+            (data['artifacts'].get(key) or {}).pop('hotword_distribution', None)
     explicit_wordcloud_value = ""
     invalid_wordcloud_values: list[str] = []
     for candidate_value in wordcloud_candidates:
@@ -1519,6 +1537,9 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
             data.setdefault("artifacts", {})["wordcloud_image"] = str(target)
             explicit_wordcloud_used = True
     for key, (title, values) in charts.items():
+        if key == 'hotword_distribution' and data.get('hotword_review_gap'):
+            output.pop(key, None)
+            continue
         if key in output:
             continue
         path = chart_dir / f"{key}.png"
@@ -2283,7 +2304,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     for key in ["trend_distribution", "topic_distribution", "hotword_distribution"]:
         source = Path(str(((data.get("artifacts") or {}).get("docx_charts") or {}).get(key) or ""))
         chart_matches[key] = bool(
-            source.exists()
+            source.is_file()
             and hashlib.sha256(source.read_bytes()).hexdigest() in embedded_hashes
         )
     table_count = document_xml.count(b"<w:tbl>")

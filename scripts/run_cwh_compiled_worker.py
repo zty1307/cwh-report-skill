@@ -645,6 +645,8 @@ def author(task, deadline):
         report_agenda=(plan.get('input_contract') or {}).get('agenda') or '',
         authoring_batch_run_ids=actual_author_run_ids(run),
         transport="host_compiled_semantic_v1")
+    if inputs.get('raw_review_gaps'):
+        merged['metadata']['upstream_review_gaps'] = list(inputs['raw_review_gaps'])
     output(task, merged)
 
 

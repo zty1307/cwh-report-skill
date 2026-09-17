@@ -66,7 +66,7 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
     """One native pass per partition, then native global deduplication. No host selection."""
     from run_cwh_inline_review import normalize_hotword_transport, normalize_topic_hit_transport
     batches = partition_candidates(packet)
-    records, chosen, quarantined = [], [], []
+    records, chosen, quarantined, deferred = [], [], [], []
     extended = copy.deepcopy(packet)
     target = int(packet.get('target_term_count') or 48)
 
@@ -121,7 +121,25 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
                   '返回原review_output_shape的热词字段，保留真实证据，不因全局数量要求在本组凑数。')
         if feedback:
             prompt += '\n上次真实校验反馈：' + feedback
-        reviewed = call(part, prompt, f'hotword-batch-{number}', len(batches) - number + 2)
+        from cwh_host_research import HostModelError, SemanticResponseError
+        try:
+            reviewed = call(part, prompt, f'hotword-batch-{number}', len(batches) - number + 2)
+        except (HostModelError, ValueError, TypeError, KeyError) as exc:
+            if packet.get('delivery_policy') != 'deliver_available_with_gaps':
+                raise
+            from cwh_semantic_recovery import interruption
+            if not isinstance(exc, (HostModelError, SemanticResponseError)):
+                actual = next((r.get('run') for r in reversed(records) if r.get('name') == f'hotword-batch-{number}'), None)
+                if not actual:
+                    raise
+                exc = SemanticResponseError(str(exc), actual)
+            if isinstance(exc, HostModelError) and exc.exit_code == 124 and not exc.run:
+                failure = interruption(TimeoutError(str(exc)))
+            else:
+                failure = interruption(exc)
+            deferred.append({'batch': number, 'terms': [r['term'] for r in rows], **failure})
+            atomic_write_json(workspace / 'hotword_reading_deferrals.json', deferred)
+            continue
         atomic_write_json(workspace / f'hotword-batch-{number}.review.json', reviewed)
         extended = retain_native_extensions(extended, reviewed['selected'])
         chosen.extend(reviewed['selected'])
@@ -145,5 +163,6 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
     result['delivery_policy'] = packet.get('delivery_policy')
     result['batch_review_audit'] = {'candidate_count': len(packet['candidates']), 'batch_count': len(batches),
                                    'native_runs': records, 'first_pass_count': len(chosen),
+                                   'deferred_candidate_batches': deferred,
                                    'source_witness_quarantines': quarantined}
     return result

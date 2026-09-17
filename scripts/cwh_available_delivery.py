@@ -32,7 +32,7 @@ def prepare_available_delivery(data: dict) -> dict:
     pools = {p["topic"]: p for p in research.get("candidate_pool_by_topic") or []}
     reviews = {p["topic"]: p for p in (research.get("public_article_corpus_review") or {}).get("topic_reviews") or []}
     from cwh_search_budget import query_budget_evidence
-    budget_notices = []
+    budget_notices = list(result['metadata'].get('upstream_review_gaps') or [])
     for topic, review in reviews.items():
         completed = len(set(review.get('reviewed_record_ids') or []))
         deferred = len(set(review.get('deferred_record_ids') or []))

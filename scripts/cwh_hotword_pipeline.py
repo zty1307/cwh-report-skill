@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -1061,6 +1062,11 @@ def build_hotword_payload(
     selected = []
     status = "ai_review_required"
     method = "ai_review_required"
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if review is not None and is_deferred_hotwords(review):
+        return {**review, 'candidates': candidates, 'review_packet': review_packet,
+                'settings': settings, 'corpus_audit': {'raw_document_count': len(rows),
+                    'deduplicated_relevant_document_count': len(documents), 'candidate_count': len(candidates)}}
     if review is not None:
         selected = apply_hotword_ai_review(
             review,
@@ -1079,6 +1085,7 @@ def build_hotword_payload(
         "method": method,
         "review_method": review.get("review_method") if review else None,
         "second_pass_completed": bool(review and review.get("second_pass_completed") is True),
+        "batch_review_audit": copy.deepcopy((review or {}).get('batch_review_audit') or {}),
         "settings": {
             "term_count": term_count,
             "minimum_term_count": 1 if deliver_available else minimum_term_count,

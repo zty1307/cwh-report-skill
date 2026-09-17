@@ -70,11 +70,29 @@ def test_failed_partition_cannot_be_misreported_as_global_completion(tmp_path):
     def fail(*args, **kwargs):
         calls.append(args[4])
         raise HostModelError('actual provider timeout', 124, run={'session_id': 'timeout-id'})
+    strict = packet()
+    strict.pop('delivery_policy')
     with pytest.raises(HostModelError):
-        review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, fail)
+        review_hotword_batches(strict, 'rules', [], tmp_path, time.monotonic() + 300, fail)
     assert calls == ['hotword-batch-1']
     assert (tmp_path / 'hotword-batch-1.packet.json').is_file()
     assert not (tmp_path / 'hotword-global-review.packet.json').exists()
+
+
+def test_partial_timeout_keeps_successes_but_requires_real_global_review(tmp_path):
+    from cwh_host_research import HostModelError
+    calls = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        calls.append(name)
+        if name == 'hotword-batch-2':
+            raise HostModelError('timeout', 124, run={'session_id': name, 'exit_code': 124})
+        return {'selected': [{'term': row['term']} for row in part['candidates']],
+                'second_pass_completed': True}, {'session_id': name, 'exit_code': 0}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert calls[-1] == 'hotword-global-review'
+    assert [r['term'] for r in result['selected']] == ['公共服务', '基础设施']
+    assert result['batch_review_audit']['deferred_candidate_batches'][0]['terms'] == ['普惠托育']
+    assert result['second_pass_completed'] is True
 
 
 def test_unwitnessed_extension_is_local_gap_not_a_whole_workbook_failure(tmp_path):
