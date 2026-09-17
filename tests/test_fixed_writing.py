@@ -102,9 +102,13 @@ def test_final_renderer_rebuilds_stale_attribution_from_unchanged_atomic_evidenc
     assert cluster == original
 
 
-def test_chair_name_requires_explicit_current_source():
+def test_unapproved_chair_requires_current_source_and_neutral_profile_remains_available():
     generic = opening_paragraph({}, "1月2日", "研究公共服务工作")
-    assert "李强" not in generic
+    assert generic.startswith(writing_rules()['document']['approved_chair_default'])
+    neutral = copy.deepcopy(writing_rules())
+    neutral['document']['approved_chair_default'] = ''
+    with mock.patch('cwh_writing_rules.writing_rules', return_value=neutral):
+        assert '李强' not in opening_paragraph({}, '1月2日', '研究公共服务工作')
     assert "张某" not in opening_paragraph({"chair_name": "张某"}, "1月2日", "研究公共服务工作")
     sourced = opening_paragraph({"chair_name": "张某", "chair_source": "本期会议通稿"}, "1月2日", "研究公共服务工作")
     assert sourced.startswith("张某1月2日主持召开")
@@ -114,7 +118,7 @@ def test_noun_only_agenda_is_rendered_as_a_grammatical_sentence():
     agenda = formal.joined_agenda_topics(["城市更新", "农业农村现代化", "基础教育改革发展"])
     assert agenda == "城市更新、农业农村现代化和基础教育改革发展"
     text = opening_paragraph({}, "5月15日", agenda)
-    assert text.startswith("5月15日召开的国务院常务会议涉及")
+    assert text.startswith("国务院总理李强5月15日主持召开国务院常务会议，会议涉及")
     assert "等议题。" in text
 
 
@@ -139,22 +143,22 @@ def test_unsupported_padding_is_blocked_but_original_quote_is_preserved():
     assert row["formal_claim"] == claim
 
 
-def test_propagation_frames_do_not_invent_publisher_placement_or_peak():
+def test_approved_editorial_frames_do_not_invent_numeric_peak_data():
     paragraphs = formal.total_event_paragraphs({"meeting": {}, "statistics": {"total_spread": 100, "by_source_bucket": {"domestic_media": 80, "overseas_media": 0}}})
     text = "".join(paragraphs)
     assert "100条" in text
     assert "80条" in text
     assert "峰值" not in text
     assert "李强" not in text
-    assert "显著位置" not in text
-    assert "人民网" not in text
+    assert "显著位置" in text
+    assert "人民网" in text
 
 
 def test_more_than_eight_groups_are_not_dropped_and_docx_matches_markdown(tmp_path):
     clusters = [{"summary": f"建议落实第{index}项配套要求", "details": f"测试机构认为，应落实第{index}项配套要求并保留实施条件。", "evidence": []} for index in range(1, 10)]
     groups = [(f"建议回应第{index}项公共需求", [{"content": "建议明确职责并建立公开反馈机制。", "quote_verified": True, "url": "https://example.test/comment"}]) for index in range(1, 10)]
     data = {"meeting": {"date": "2025-01-02", "topics": ["研究公共服务工作"]}, "statistics": {}, "viewpoints": {"by_topic": [{"heading": "建议落实配套要求", "clusters": clusters}]}, "comments": {"selected": []}, "topic_stats": []}
-    with mock.patch.object(formal, "comment_groups", return_value=groups), mock.patch.object(formal, "ensure_docx_chart_images", return_value={}):
+    with mock.patch.object(formal, "report_comment_groups", return_value=groups), mock.patch.object(formal, "ensure_docx_chart_images", return_value={}):
         markdown = formal.render_formal_markdown(data, tmp_path)
         path = tmp_path / "report.docx"
         formal.write_docx(data, path)
@@ -180,8 +184,8 @@ def test_comment_lead_uses_short_first_clause_but_body_keeps_full_heading():
     heading = "认为城市更新应优先保障居住安全，并完善长期运营和资金平衡机制"
     groups = [(heading, [{"content": "支持改善居住环境"}])]
     lead = formal.comment_lead({}, groups)
-    assert "围绕城市更新应优先保障居住安全" in lead
-    assert "围绕认为" not in lead
+    assert "主要有城市更新应优先保障居住安全" in lead
+    assert "主要有认为" not in lead
     assert "长期运营" not in lead
     assert groups[0][0] == heading
 
@@ -192,7 +196,7 @@ def test_comment_cleanup_repairs_mixed_quotes_and_numeric_ranges():
 
 def test_comment_lead_preserves_a_complete_long_clause_without_cutting_a_word():
     heading = '认为公共服务改革应兼顾偏远地区特殊群体的长期基本保障需求'
-    groups = [(heading, [])]
+    groups = [(heading, [{'content': '已审核的真实原话'}])]
     original = copy.deepcopy(groups)
     assert heading.removeprefix('认为') in formal.comment_lead({}, groups)
     assert groups == original

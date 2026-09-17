@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "user_approved_fill_in_template",
+  "source_template_sha256": "4633c44baf252411555d2df0c803674c1f666a227c0e8d1c4ae85e051614e735",
+  "provenance": "user_authored_editorial_wording_not_measurement",
+  "document": {
+    "approved_chair_default": "国务院总理李强"
+  },
+  "propagation": {
+    "focus_from_current_topics": true,
+    "total_template": "本次常务会引发境内外媒体广泛报道，境内外传播总量约{total_text}条{focus_sentence}。{peak_sentence}",
+    "domestic_template": "{domestic_label}如人民网、新华网、央视网等均在显著位置刊文，共有相关报道{count}条。"
+  },
+  "comments": {
+    "lead_template": "网民有关本次国务院常务会议讨论的情感属性以积极正面和客观中立为主，主要有{stance_summaries}等。主要评论如下：",
+    "use_editorial_lead": true,
+    "cover_all_topics": true,
+    "missing_topic_notice": "暂未取得该议题可引用的网民评论。"
+  },
+  "overseas": {
+    "no_comment_evidence_sentence": "境外网民对本次国务院常务会议关注度较低，暂无评论性观点。"
+  },
+  "notes": [
+    "固定句式是用户确认的编辑要求，不是采集结论；不据此改写情感标签、分母、统计数字、检索状态或审核结果。",
+    "主持人默认值是可替换的模板配置；本期有来源的主持人信息优先。其他任期或历史会议须提供本期信息或修改此配置，不让模型猜测。",
+    "议题数量和顺序取本期数据，不从历史报告复制；无合格观点的议题保留位置和缺口，不虚构引文。",
+    "模板中的具体观点按100—200字软目标摘写，不补原文没有的理由，不机械截断，不扩写短而完整的观点。"
+  ]
+}

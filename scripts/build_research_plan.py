@@ -301,7 +301,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                     "same_voice_distinct_claims_allowed": True,
                     "independent_voice_count_basis": "distinct_subject_not_claim_count",
                     "preserve_source_excerpt": True,
-                    "preferred_claim_cjk_range": [45, 120],
+                    "preferred_claim_char_range": [100, 200],
                     "minimum_claim_cjk": 30,
                     "media_voice_form": "某媒体认为/称/建议",
                     "named_person_form": "完整机构+职务+姓名+认为/指出/建议",
@@ -316,7 +316,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                         "independent_voices_per_cluster": (
                             "bounded_2_to_4_with_audited_reserve" if bounded else "all_eligible_no_upper_cap"
                         ),
-                        "preferred_claim_cjk_range_per_voice": [45, 120],
+                        "preferred_claim_char_range_per_voice": [100, 200],
                         "cluster_detail_length": "scales_with_eligible_voice_count_no_upper_cap",
                         "single_cluster_rule": (
                             "A substantive topic normally has at least two independently supported viewpoint clusters. "

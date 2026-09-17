@@ -50,7 +50,7 @@ def test_markdown_body_table_and_dashboard_keep_scope_without_reclassifying_coun
                            'source_bucket_labels': {'domestic_media': '境内新闻'}},
             'topic_stats': [], 'comments': {'selected': []}, 'viewpoints': {'by_topic': []}}
     text = formal.render_formal_markdown(data, tmp_path)
-    assert '境内新闻共有相关报道10条。' in text
+    assert '境内新闻如人民网、新华网、央视网等均在显著位置刊文，共有相关报道10条。' in text
     assert '| 境内新闻 |' in text
     assert '境内主流媒体' not in text
     prepared = dashboard.prepare_dashboard_data(copy.deepcopy(data), tmp_path)

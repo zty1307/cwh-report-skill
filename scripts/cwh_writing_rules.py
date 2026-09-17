@@ -10,16 +10,26 @@ from typing import Any
 from urllib.parse import urlsplit
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "config/formal_writing_rules.v1.json"
+EDITORIAL_PATH = RULES_PATH.with_name('editorial_template.v1.json')
+
+
+@lru_cache(maxsize=1)
+def editorial_profile() -> dict[str, Any]:
+    return json.loads(EDITORIAL_PATH.read_text(encoding='utf-8'))
 
 
 @lru_cache(maxsize=1)
 def writing_rules() -> dict[str, Any]:
-    return json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    rules = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    profile = editorial_profile()
+    for section in ('document', 'propagation', 'comments', 'overseas'):
+        rules[section].update(profile.get(section, {}))
+    return rules
 
 
 @lru_cache(maxsize=1)
 def writing_rules_sha256() -> str:
-    return hashlib.sha256(RULES_PATH.read_bytes()).hexdigest()
+    return hashlib.sha256(RULES_PATH.read_bytes() + b'\n' + EDITORIAL_PATH.read_bytes()).hexdigest()
 
 
 def editorial_eligibility_prompt() -> str:
@@ -42,7 +52,7 @@ def editorial_template_prompt(stage: str, rules=None) -> str:
         return rules['paragraph_pairing_rule']
     if stage not in {'claim', 'revision'}:
         raise ValueError('Unknown editorial template stage: ' + stage)
-    result = (rules['claim_unit_rule'] + '\n以下是可选句式，不是必填栏目；只选当前原文适用的一种，'
+    result = (rules.get('claim_length_policy', '') + '\n' + rules['claim_unit_rule'] + '\n以下是可选句式，不是必填栏目；原文已完整清楚时优先直接摘用，不为套句式改写。只选当前原文适用的一种，'
               '没有依据的槽位整项省略，不拼凑结论，不改写真实评论引文。\n'
               + '\n'.join(rules['composition_frames']))
     if stage == 'claim':
@@ -98,12 +108,19 @@ def judgment_heading(value: Any) -> str:
 
 def opening_paragraph(meeting: dict[str, Any], date_label: str, agenda_topics: str) -> str:
     rules = writing_rules()["document"]
-    # Only explicit, source-backed input may name a chair. Missing metadata
-    # uses a neutral frame and never defaults to a historical office holder.
+    # A complete current communique agenda can replace abbreviated topic labels.
+    if meeting.get('agenda_text') and meeting.get('agenda_source'):
+        agenda_topics = str(meeting['agenda_text']).strip().rstrip('。')
+    # Verified period metadata outranks the user's configurable editorial default.
     chair_name = str(meeting.get("chair_name") or "").strip()
     chair_source = str(meeting.get("chair_source") or "").strip()
-    governing_verbs = ("听取", "研究", "审议", "进一步部署", "部署", "决定")
-    if chair_name and chair_source:
+    governing_verbs = ("听取", "研究", "审议", "进一步部署", "部署", "决定", "学习贯彻", "学习")
+    chair_title = str(meeting.get('chair_title') or '').strip()
+    if chair_title and chair_name and not chair_name.startswith(chair_title):
+        chair_name = chair_title + chair_name
+    if not (chair_name and chair_source):
+        chair_name = str(rules.get('approved_chair_default') or '').strip()
+    if chair_name:
         if not agenda_topics:
             template = rules["opening_with_chair_no_agenda"]
         elif agenda_topics.startswith(governing_verbs):

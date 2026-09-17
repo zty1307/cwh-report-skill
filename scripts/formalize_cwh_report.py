@@ -32,8 +32,10 @@ from report_rules import (
     formal_sentiment_row_ready,
 )
 from source_identity import public_source_family
-from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label
-from normalize_cwh_analysis import assemble_cluster_details
+from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label, editorial_profile
+from normalize_cwh_analysis import assemble_cluster_details, evidence_sentence
+from cwh_docx_template import TEMPLATE, apply_template
+from cwh_chart_style import valid_image, write_topic_chart
 
 
 @lru_cache(maxsize=1)
@@ -283,7 +285,7 @@ def cluster_wording(cluster: dict[str, Any]) -> str:
     details = clean_sentence(display_cluster_details(cluster))
     warning = attribution_review_marker(cluster)
     if details:
-        return f"{summary}。{details}。{warning}"
+        return f"{summary}。" + '\n\n'.join(cluster_detail_paragraphs(cluster)) + warning
     evidence = evidence_text(cluster.get("evidence") or [])
     if evidence:
         return f"{summary}。{evidence}。{warning}"
@@ -548,12 +550,70 @@ def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
     peak = peak_date_text({"by_date": dated_counts})
     peak_sentence = frames["peak_template"].format(peak_date=peak) if dated_counts else ""
     examples = frames["overseas_examples_template"].format(sources=overseas_sources) if overseas_sources and overseas > 0 else ""
+    # Current, explicitly sourced headline only; never borrow a benchmark headline.
+    meeting = data.get('meeting') or {}
+    focus = str(meeting.get('focus_title') or '').strip()
+    focus_sentence = frames['focus_template'].format(focus=focus) if focus and meeting.get('focus_source') else ''
+    if not focus_sentence and frames.get('focus_from_current_topics'):
+        current_topics = report_topics(data)
+        if current_topics:
+            focus_sentence = frames['focus_template'].format(focus='”“'.join(current_topics))
     return [
-        frames["total_template"].format(total_text=total_text, peak_sentence=peak_sentence),
+        frames["total_template"].format(total_text=total_text, focus_sentence=focus_sentence, peak_sentence=peak_sentence),
         frames["domestic_template"].format(count=domestic, domestic_label=domestic_media_label(data)),
         frames["new_media_template"].format(wechat=wechat, weibo=weibo, video=video, other=other_new_media),
         frames["overseas_template"].format(count=overseas, examples=examples),
     ]
+
+
+def report_topics(data: dict[str, Any]) -> list[str]:
+    """Use current input order, never historical topic names or fuzzy assignment."""
+    values = [row.get('topic') or row.get('display') for row in data.get('topic_stats') or []]
+    if not values:
+        values = (data.get('meeting') or {}).get('topics') or []
+    if not values:
+        values = [row.get('topic') for row in (data.get('viewpoints') or {}).get('by_topic') or []]
+    return list(dict.fromkeys(str(value).strip() for value in values if isinstance(value, str) and value.strip()))
+
+
+def report_topic_items(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = list((data.get('viewpoints') or {}).get('by_topic') or [])
+    topics = report_topics(data)
+    if not topics:
+        return rows
+    output, consumed = [], set()
+    for topic in topics:
+        matches = [(index, row) for index, row in enumerate(rows) if str(row.get('topic') or '').strip() == topic]
+        if matches:
+            output.extend(row for _, row in matches)
+            consumed.update(index for index, _ in matches)
+        else:
+            output.append({'topic': topic, 'heading': topic, 'clusters': [],
+                           'evidence_gap': {'notice': '暂未取得该议题可引用的媒体自媒体观点。'}})
+    # Unmatched legacy rows remain visible, not silently reassigned or deleted.
+    output.extend(row for index, row in enumerate(rows) if index not in consumed)
+    return output
+
+
+def report_comment_groups(data: dict[str, Any]) -> list[tuple[str, list[dict[str, Any]]]]:
+    groups = comment_groups((data.get('comments') or {}).get('selected') or [])
+    if not writing_rules()['comments'].get('cover_all_topics'):
+        return groups
+    topics = report_topics(data)
+    if not topics:
+        return groups
+    output, consumed = [], set()
+    for topic in topics:
+        matches = [(index, group) for index, group in enumerate(groups)
+                   if all(str(row.get('system_topic') or row.get('topic') or row.get('subtopic') or '').strip() == topic
+                          for row in group[1])]
+        if matches:
+            output.extend(group for _, group in matches)
+            consumed.update(index for index, _ in matches)
+        else:
+            output.append((topic, []))
+    output.extend(group for index, group in enumerate(groups) if index not in consumed)
+    return output
 
 
 def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
@@ -623,7 +683,11 @@ def comment_lead(data: dict[str, Any], groups: list[tuple[str, list[dict[str, An
         # or qualification from a reviewed clause. Preserve the whole clause.
         return value
 
-    summaries = "、".join(lead_summary(name) for name, _ in groups)
+    summaries = "、".join(lead_summary(name) for name, rows in groups if rows)
+    if not summaries:
+        return empty_comment_notice(data)
+    if rules.get('use_editorial_lead'):
+        return rules['lead_template'].format(stance_summaries=summaries)
     if formal_sentiment_available(data):
         return rules["sentiment_lead_template"].format(
             sentiment_lead=netizen_sentiment_lead(data).rstrip("。"), stance_summaries=summaries,
@@ -1236,7 +1300,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
     frames = writing_rules()["overseas"]
     appendix_rows = appendix_overseas_rows(data)
     if not appendix_rows:
-        return ["数据周期内，暂未取得通过相关性、报道类型和简体中文门禁的境外报道样本，不据此推断整体关注度。"]
+        return [writing_rules()['overseas']['no_media_evidence_sentence']]
 
     factual_rows = [row for row in appendix_rows if row.get("_formal_category") == "事实性报道"]
     interpretive_rows = [
@@ -1452,7 +1516,7 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
     # instead of silently replacing them with program-drawn fallbacks.
     for key in ("trend_distribution", "topic_distribution"):
         existing_system_chart = chart_dir / f"{key}_system.png"
-        if existing_system_chart.exists() and existing_system_chart.stat().st_size > 0:
+        if valid_image(existing_system_chart):
             output[key] = str(existing_system_chart)
     workbook_value = str((data.get("collection") or {}).get("system_workbook") or "").strip()
     missing_system_keys = {"trend_distribution", "topic_distribution"} - set(output)
@@ -1465,7 +1529,7 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
                 extracted = extract_system_excel_assets(workbook_path, chart_dir)
                 for key in missing_system_keys:
                     candidate = Path(str(extracted.get(key) or ""))
-                    if candidate.is_file() and candidate.stat().st_size > 0:
+                    if valid_image(candidate):
                         output[key] = str(candidate)
         except Exception as exc:
             data.setdefault("audit", {}).setdefault("data_gaps", []).append(
@@ -1479,7 +1543,7 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         if not explicit_value:
             continue
         explicit_path = Path(explicit_value)
-        if explicit_path.is_file() and explicit_path.stat().st_size > 0:
+        if valid_image(explicit_path):
             target = chart_dir / f"{key}_system.png"
             if explicit_path.resolve() != target.resolve():
                 shutil.copyfile(explicit_path, target)
@@ -1545,6 +1609,8 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         path = chart_dir / f"{key}.png"
         if key == "hotword_distribution":
             write_wordcloud_png(path, title, values)
+        elif key == 'topic_distribution':
+            data.setdefault('audit', {})['topic_chart_style'] = write_topic_chart(path, values)
         else:
             write_bar_png(path, title, values)
         output[key] = str(path)
@@ -1590,7 +1656,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     lines.append(md_table(topic_headers, formal_topic_rows(data, sentiment_visible)))
 
     lines.extend(["", "## " + document_rules["fixed_chapters"][1], "", "### " + document_rules["domestic_subsections"][0], ""])
-    for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
+    for topic_idx, item in enumerate(report_topic_items(data), 1):
         clusters = item.get("clusters") or []
         if not clusters:
             lines.append(f"{topic_idx}.{topic_heading(item)}")
@@ -1601,7 +1667,8 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             details = clean_sentence(display_cluster_details(clusters[0]))
             body = details or clean_sentence(clusters[0].get("summary"))
             warning = ATTRIBUTION_REVIEW_TEXT if cluster_needs_attribution_review(clusters[0]) else ""
-            lines.append(f"{topic_idx}.{topic_heading(item)}。{body}。{warning}")
+            paragraphs = cluster_detail_paragraphs(clusters[0])
+            lines.append(f"{topic_idx}.{topic_heading(item)}。" + ('\n\n'.join(paragraphs) if paragraphs else body + '。') + warning)
             lines.append("")
             continue
         lines.append(f"{topic_idx}.{topic_heading(item)}")
@@ -1612,12 +1679,13 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
 
     comments = data.get("comments", {}).get("selected") or []
     lines.extend(["### " + document_rules["domestic_subsections"][1], ""])
-    groups = comment_groups(comments)
+    groups = report_comment_groups(data)
     if groups:
         lines.append(comment_lead(data, groups))
         for idx, (name, rows) in enumerate(groups, 1):
             prefix = ordinal_prefix(idx)
-            lines.append(f"{prefix}{name}。{comment_wording(rows)}")
+            wording = comment_wording(rows) if rows else writing_rules()['comments']['missing_topic_notice']
+            lines.append(f"{prefix}{name}。{wording}")
     else:
         lines.append(empty_comment_notice(data))
 
@@ -1711,6 +1779,8 @@ def style_docx_table(table: Any, font_name: str, size_pt: int, widths_pt: list[f
                 paragraph.paragraph_format.first_line_indent = Pt(0)
                 paragraph.paragraph_format.space_before = Pt(0)
                 paragraph.paragraph_format.space_after = Pt(0)
+                # Keep all consecutive header rows with the first data row.
+                paragraph.paragraph_format.keep_with_next = is_header
                 for run in paragraph.runs:
                     set_docx_run_font(run, font_name, size_pt, is_header)
 
@@ -1904,6 +1974,67 @@ def add_emphasized_details(paragraph: Any, details: str) -> None:
         paragraph.add_run(details[cursor:])
 
 
+def cluster_detail_paragraphs(cluster: dict[str, Any]) -> list[str]:
+    """Layout only: keep complete attributed claims and all their conditions."""
+    limit = writing_rules()['viewpoint']['paragraph_soft_max_chars']
+    max_claims = writing_rules()['viewpoint']['paragraph_max_claims']
+    evidence = [row for row in cluster.get('evidence') or [] if isinstance(row, dict)]
+    if not evidence:
+        text = clean_sentence(display_cluster_details(cluster))
+        return [text + '。'] if text else []
+    result, current, seen, count = [], '', set(), 0
+    for row in evidence:
+        sentence = evidence_sentence(row)
+        signature = re.sub(r'[^0-9A-Za-z\u4e00-\u9fff]+', '', sentence).lower()
+        if not signature or signature in seen:
+            continue
+        seen.add(signature)
+        sentence = sentence.rstrip('。') + '。'
+        if current and (len(current) + len(sentence) > limit or count >= max_claims):
+            result.append(current); current, count = '', 0
+        current += sentence; count += 1
+    if current:
+        result.append(current)
+    return result
+
+
+def add_detail_blocks(document: Any, paragraph: Any, cluster: dict[str, Any]) -> None:
+    from cwh_writing_rules import formal_attribution
+    entries = []
+    verbs = '|'.join(map(re.escape, sorted(writing_rules()['viewpoint']['attribution_verbs'], key=len, reverse=True)))
+    for row in cluster.get('evidence') or []:
+        if not isinstance(row, dict):
+            continue
+        sentence = evidence_sentence(row).rstrip('。') + '。'
+        subject = re.sub(r'\s+', '', formal_attribution(row))
+        subjects = [subject] if subject else []
+        if row.get('attribution_status') == 'named_person' and row.get('speaker_name'):
+            name = re.sub(r'\s+', '', str(row['speaker_name']))
+            roles = re.split(r'[、，,；;]', str(row.get('speaker_role') or ''))
+            subjects.extend(re.sub(r'\s+', '', role) + name for role in roles if role)
+        pattern = '|'.join(map(re.escape, sorted(set(subjects), key=len, reverse=True)))
+        prefix = re.match(r'(?:' + pattern + r')(?:' + verbs + r')', sentence) if pattern else None
+        entries.append((sentence, prefix.end() if prefix else 0))
+    for index, details in enumerate(cluster_detail_paragraphs(cluster)):
+        target = paragraph if index == 0 else document.add_paragraph()
+        if not entries:
+            # No structured speaker mapping: keep prose plain, do not guess
+            # that a verb mentioned inside the claim is its attribution.
+            target.add_run(details)
+            continue
+        remainder = details
+        while remainder:
+            matched = next(((sentence, prefix) for sentence, prefix in entries if remainder.startswith(sentence)), None)
+            if not matched:
+                target.add_run(remainder)
+                break
+            sentence, prefix = matched
+            if prefix:
+                target.add_run(sentence[:prefix]).bold = True
+            target.add_run(sentence[prefix:])
+            remainder = remainder[len(sentence):]
+
+
 def add_cluster_paragraph(document: Any, prefix: str, cluster: dict[str, Any]) -> Any:
     paragraph = document.add_paragraph()
     summary = clean_sentence(cluster.get("summary"))
@@ -1911,7 +2042,7 @@ def add_cluster_paragraph(document: Any, prefix: str, cluster: dict[str, Any]) -
     lead.bold = True
     details = clean_sentence(display_cluster_details(cluster))
     if details:
-        add_emphasized_details(paragraph, f"{details}。")
+        add_detail_blocks(document, paragraph, cluster)
     else:
         evidence = evidence_text(cluster.get("evidence") or [])
         if evidence:
@@ -1929,7 +2060,7 @@ def add_single_topic_paragraph(document: Any, index: int, item: dict[str, Any], 
     lead.bold = True
     details = clean_sentence(display_cluster_details(cluster))
     if details:
-        add_emphasized_details(paragraph, f"{details}。")
+        add_detail_blocks(document, paragraph, cluster)
     else:
         summary = clean_sentence(cluster.get("summary"))
         paragraph.add_run(f"{summary}。")
@@ -1944,7 +2075,7 @@ def add_comment_group_paragraph(document: Any, prefix: str, name: str, rows: lis
     paragraph = document.add_paragraph()
     lead = paragraph.add_run(f"{prefix}{name}。")
     lead.bold = True
-    paragraph.add_run(comment_wording(rows))
+    paragraph.add_run(comment_wording(rows) if rows else writing_rules()['comments']['missing_topic_notice'])
     return paragraph
 
 
@@ -1964,6 +2095,8 @@ def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: s
     paragraph.paragraph_format.line_spacing = 1
     paragraph.paragraph_format.space_before = Pt(0)
     paragraph.paragraph_format.space_after = Pt(6)
+    section = document.sections[-1]
+    width = min(width, section.page_width - section.left_margin - section.right_margin)
     shape = paragraph.add_run().add_picture(image_path, width=width)
     if max_height is not None and shape.height > max_height:
         shape.width = round(shape.width * max_height / shape.height)
@@ -1974,7 +2107,7 @@ def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: s
 
 
 def add_docx_title(document: Any, text: str) -> None:
-    paragraph = document.add_paragraph()
+    paragraph = document.add_paragraph(style='Title')
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.first_line_indent = Pt(0)
     paragraph.paragraph_format.space_before = Pt(0)
@@ -2003,7 +2136,7 @@ def add_docx_heading(document: Any, text: str, level: int) -> Any:
 
 
 def template_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "templates" / "formal_report_template_complete_20260714.docx"
+    return TEMPLATE
 
 
 def clear_document_body(document: Any) -> None:
@@ -2015,25 +2148,33 @@ def clear_document_body(document: Any) -> None:
 
 
 def remove_nonprinting_pagination_controls(document: Any) -> None:
-    """Remove paragraph flags that Word renders as black squares with marks on."""
-    tags = ("w:keepNext", "w:keepLines", "w:pageBreakBefore")
+    """Allow body flow while retaining heading/table pagination semantics.
+
+    Word's black paragraph squares are nonprinting UI marks, not document text.
+    Removing keepNext to hide them strands real headings and table headers.
+    """
+    tags = ("w:keepLines", "w:pageBreakBefore")
     for root in (document._element, document.styles.element):
         for tag in tags:
             for element in list(root.iter(qn(tag))):
                 parent = element.getparent()
                 if parent is not None:
                     parent.remove(element)
+    for paragraph in document.paragraphs:
+        if paragraph.style.name.startswith('Heading'):
+            paragraph.paragraph_format.keep_with_next = True
+        else:
+            # Body paragraphs and pictures should not create long keep chains.
+            paragraph.paragraph_format.keep_with_next = False
 
 
 def new_document() -> Any:
     from docx import Document
 
     path = template_path()
-    if path.exists():
-        document = Document(str(path))
-        clear_document_body(document)
-        return document
-    return Document()
+    document = Document(str(path))
+    clear_document_body(document)
+    return document
 
 
 def section_override(data: dict[str, Any], key: str) -> list[dict[str, str]]:
@@ -2172,7 +2313,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     else:
         add_docx_heading(document, document_rules["fixed_chapters"][1], 1)
         add_docx_heading(document, document_rules["domestic_subsections"][0], 2)
-        for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
+        for topic_idx, item in enumerate(report_topic_items(data), 1):
             clusters = item.get("clusters") or []
             if not clusters:
                 add_docx_heading(document, f"{topic_idx}.{topic_heading(item)}", 3)
@@ -2188,7 +2329,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
 
         add_docx_heading(document, document_rules["domestic_subsections"][1], 2)
         comments = data.get("comments", {}).get("selected") or []
-        groups = comment_groups(comments)
+        groups = report_comment_groups(data)
         if groups:
             document.add_paragraph(comment_lead(data, groups))
             for idx, (name, rows) in enumerate(groups, 1):
@@ -2238,6 +2379,19 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     end_paragraph.paragraph_format.line_spacing = Pt(1)
     end_run = end_paragraph.add_run(" ")
     end_run.font.size = Pt(1)
+    if not any((one_override, two_override, three_override, four_override)):
+        data.setdefault('audit', {})['word_template'] = apply_template(document)
+        data['audit']['word_template']['editorial_profile'] = {
+            'id': editorial_profile()['profile_id'],
+            'source_template_sha256': editorial_profile()['source_template_sha256'],
+            'provenance': editorial_profile()['provenance'],
+            'writing_rules_sha256': writing_rules_sha256(),
+            'chair_origin': 'meeting_source' if meeting.get('chair_name') and meeting.get('chair_source') else 'editorial_default',
+            'does_not_certify_sentiment_or_collection': True,
+        }
+    else:
+        # Explicit user edits are a separate route, never silently labelled template-filled.
+        data.setdefault('audit', {})['word_template'] = {'mode': 'explicit_section_override'}
     remove_nonprinting_pagination_controls(document)
     document.save(out_path)
 def empty_comment_notice(data: dict[str, Any]) -> str:
@@ -2312,6 +2466,9 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     image_count = sum(1 for name in names if name.startswith("word/media/"))
     comment_quote_audit = audit_formal_comment_quotes(data, document_xml)
     checks = {
+        "no_unfilled_template_slots": b'CWH_' not in document_xml,
+        "fixed_template_applied": (bool((data.get('audit') or {}).get('word_template', {}).get('filled_slots'))
+                                   or any(section_override(data, key) for key in ('one', 'two', 'three', 'four'))),
         "uses_monitoring_system_assets": (
             (data.get("artifacts") or {}).get("chart_authority")
             in {"monitoring_system_embedded_assets", "monitoring_system_assets_plus_pipeline_wordcloud"}

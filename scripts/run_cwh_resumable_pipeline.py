@@ -1364,7 +1364,7 @@ class CwhPipeline:
                 "每个实际检索结果都进入候选池并标记eligible、duplicate或excluded及理由；保存查询ID、结果URL快照和真实阻断。",
                 "eligible候选须核验监测期内发布时间并保存完整原文快照及SHA-256；搜索摘要不能冒充原文。",
                 "一篇文章中的不同发言主体分成独立证据；同一主体同一观点的转载只保留一个正式候选。",
-                "每条入选证据保留candidate_id、evidence_id、单一speaker_name、连续source_excerpt及字符位置、45至120汉字的formal_claim；不得增强原文结论。",
+                "每条入选证据保留candidate_id、evidence_id、单一speaker_name、连续source_excerpt及字符位置、100至200字软目标的formal_claim；不得增强原文结论。",
                 "bounded限时档每议题选择6至12个、最多12个代表性独立声音，其余有效候选设formal_use=reserve并写reserve_reason；不足4个时须写含reason、search_evidence、reviewed_by的evidence_shortfall。exhaustive才全部成文。",
                 "本节点不填写semantic_review，也不写最终正文；脚本将从formal_claim机械生成cluster.details，独立下一节点再逐命题复核。",
                 "证据不足时返回现有可用观点和缺口，不因缺少声音中止交付；真实访问阻断须保留。不得编造链接、引文、人物、ID、快照或状态。",

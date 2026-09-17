@@ -98,6 +98,7 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "SKILL.md",
         "config/execution_policy.v1.json",
         "config/formal_writing_rules.v1.json",
+        "config/editorial_template.v1.json",
         "config/source_registry.v1.json",
         "scripts/run_cwh_resumable_pipeline.py",
         "scripts/cwh_model_contract.py",
@@ -132,6 +133,8 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "scripts/generate_dashboard.py",
         "assets/cwh_dashboard_template.html",
         "templates/formal_report_template_complete_20260714.docx",
+        "templates/cwh_fill_in_template.docx",
+        "config/chart_style.v1.json",
     ]
     for relative in required_files:
         path = skill_root / relative
@@ -149,6 +152,14 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         checks.append({"id": "template:dashboard_data_slot", "status": "passed" if placeholder_count == 1 else "failed", "placeholder_count": placeholder_count})
     except (OSError, UnicodeError) as exc:
         checks.append({"id": "template:dashboard_data_slot", "status": "failed", "message": type(exc).__name__})
+
+    try:
+        from docx import Document
+        from cwh_docx_template import validate_template
+        validate_template(Document(skill_root / 'templates/cwh_fill_in_template.docx'))
+        checks.append({'id': 'template:word_slots', 'status': 'passed'})
+    except Exception as exc:
+        checks.append({'id': 'template:word_slots', 'status': 'failed', 'message': str(exc)})
 
     try:
         policy = json.loads((skill_root / "config" / "execution_policy.v1.json").read_text(encoding="utf-8"))

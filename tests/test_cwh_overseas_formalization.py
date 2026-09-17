@@ -70,8 +70,9 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             root = Path(temp)
             chart_dir = root / "charts"
             chart_dir.mkdir()
-            (chart_dir / "trend_distribution_system.png").write_bytes(b"trend")
-            (chart_dir / "topic_distribution_system.png").write_bytes(b"topic")
+            from PIL import Image
+            Image.new('RGB', (20, 20), 'white').save(chart_dir / "trend_distribution_system.png")
+            Image.new('RGB', (20, 20), 'navy').save(chart_dir / "topic_distribution_system.png")
             data = {
                 "statistics": {"by_platform": {}, "by_date": {}},
                 "topic_stats": [],
@@ -90,8 +91,9 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             root = Path(temp)
             chart_dir = root / "charts"
             chart_dir.mkdir()
-            (chart_dir / "trend_distribution_system.png").write_bytes(b"trend")
-            (chart_dir / "topic_distribution_system.png").write_bytes(b"topic")
+            from PIL import Image
+            Image.new('RGB', (20, 20), 'white').save(chart_dir / "trend_distribution_system.png")
+            Image.new('RGB', (20, 20), 'navy').save(chart_dir / "topic_distribution_system.png")
             pipeline = chart_dir / "hotword_distribution_pipeline.png"
             pipeline.write_bytes(b"reviewed-pipeline-wordcloud")
             data = {
@@ -272,8 +274,8 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         }]}}
         text = "".join(FORMALIZE.overseas_media_body_paragraphs(data))
         self.assertIn("境外媒体以事实性报道为主", text)
-        self.assertIn("本轮未取得可引用的评论性文章", text)
-        self.assertIn("本轮已审核材料", text)
+        self.assertIn("暂未发现可引用的评论性文章", text)
+        self.assertIn("数据周期内", text)
         self.assertNotIn("一是", text)
 
     def test_interpretation_follows_factual_lead_without_category_numbering(self) -> None:

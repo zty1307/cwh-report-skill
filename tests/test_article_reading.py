@@ -77,6 +77,8 @@ def test_reading_contract_does_not_request_provisional_topic_composition():
     assert 'actual_model' not in prompt
     contract = reading_contract({'items': [{'id': 'r1'}, {'id': 'w2'}]})
     assert '["r1","w2"]' in contract
+    assert 'claim_kind不能漏、不能为null' in contract
+    assert '100—200字是摘写软目标' in contract
 
 
 def test_production_reading_prompt_matches_the_tested_semantic_scope():
