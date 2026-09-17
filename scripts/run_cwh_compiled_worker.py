@@ -698,7 +698,7 @@ REVIEW_PROMPT += '\n判缺乏原文支持前，先在本条全部excerpt_segment
 REVIEW_PROMPT += '\n还须结合当前topic、agenda_topics与sources中的原始title核对实际讨论对象，标题仅用于对象消歧、不代替原文论据。原文针对其他会议或既有政策的解读不能因“本次会议”等相同指称就变成本次报告会议的新部署；判断或revision必须保留实际对象和范围，不能靠删去对象变成更泛、更确定的结论。纯会议要求转述不能因媒体名与source元数据相同就认定为媒体自身判断。'
 REVIEW_PROMPT += '\n先做对象消歧，再逐项核对论据。sources的reference_context是原文开头，仅用于确认会议、政策和日期，不可拿它补充excerpt之外的论据。formal_claim含“本次会议”“新增”“首次”“升级”等相对指称时，必须能在本报告中独立读懂实际对象；如果原文讨论的是其他会议，即使claim逐字照抄excerpt也不能判fully_supported，须在revision中明确原文实际会议名称或政策对象，保留比较基准与限定。对象仍不清楚就判uncertain，不要只检查关键词是否相同。程度同样须逐字核对：“卷”“压力大”不自动支持“普遍加班”，不能把评价扩成新的具体行为事实。'
 REVIEW_PROMPT += '\n恢复原文限定时保持原文写法：原文未加引号的规划时期、术语或专名，不要在revision中自行加引号；原文证据不变，不为过门禁删除必要的期限、条件或比较对象。'
-REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
+REVIEW_PROMPT += '\nreference_expansion_required=true是正式观点可读性硬规则：原claim不能直接判fully_supported，必须用revision将裸“本次/这次/此次/该会议”或“会议明确/表示/认为/确定”等未具名指称展开成原文实际会议名称；其他事实仍只由excerpt支持。不是统一替换成国务院常务会议，也不能删去指称来掩盖实际对象。'
 REVIEW_PROMPT += '\nreport_agenda是用户声明的报告会议，仅用于对象消歧，不能当作原文论据。相关背景会议的真实判断可保留，但“会议在……新增”“会议首次重点提及”等必须展开成原文实际对象；确认属背景会议也不意味着可以不写明名称，不能把背景会议定调冒充本报告会议的新部署。'
 REVIEW_PROMPT += '\n展开会议名称不等于增加日期：如果excerpt没有具体月日，revision只补明原文实际会议名称，不新增月日或年份。引用投资、目标或对比时必须保留原文规划时期、基准与条件，不能把规划期投资改成无期限的一般投资。确实无法确认对象或无受支持观点时允许uncertain、revision=null，宿主限时交付会排除该条并保留审核记录，不要求杜撰修订。'
 REVIEW_PROMPT += '\n只在原观点需修订时按以下规则组织revision；已充分支持的观点保持不变，不为润色触发额外全文重写：' + writing_rules()['viewpoint']['claim_composition_rule']

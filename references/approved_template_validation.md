@@ -13,16 +13,19 @@ This candidate imports the human-reviewed generic Word template, preserves its a
 - Existing valid monitoring images are retained. Invalid/empty images trigger the documented fixed-style fallback. Word-cloud height and natural flow remain controlled by script.
 - Reading contracts repeat required fields before submission for every provider; model-specific writing templates are not introduced.
 - Batched hotword initial review no longer also requests whole-table coverage, padding or a completed global second pass. Exact candidate/source windows are retained; the separately invoked global review remains required.
+- Bare meeting references followed directly by a statement or quotation (for example `会议明确……`) also require actual-source identification. Arabic numbers adjacent to Chinese text are included in the existing literal-support gate; a semantic approval cannot waive added dates or quantities.
 
 ## Verified scope
 
-The local regression suite passed 1171 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
+The local regression suite passed 1178 tests, with seven skipped. Two previously delivered datasets were independently re-rendered and inspected: 15 and 13 pages, each with three tables and three original images. Source numbers, comments and evidence were preserved; existing display-heading normalization is recorded separately. These are layout regressions, not new end-to-end model runs or renewed semantic reviews.
 
 Fresh two-article extraction used identical full source text and shared production instructions. DeepSeek completed in 43.578 seconds with source-span checks passing. GLM first omitted claim classification fields; after the shared required-field reminder, a fresh run completed in 24.062 seconds with those checks passing. These checks do not certify every extracted claim's editorial suitability.
 
 HY4 timed out at 182.578 seconds on the same task. An isolated host request to disable thinking also timed out at 180.844 seconds; provider enforcement of that setting was not established. Do not advertise HY4 stability or three-model end-to-end acceptance from this candidate's template tests.
 
 During a fresh full GLM run, initial hotword partitions timed out at approximately 35 seconds. An isolated replay of a 33-candidate packet also timed out at 90 seconds. Scoping initial review separately allowed one eight-candidate replay to return in 57.438 seconds, but the corresponding 33-candidate replay still timed out at 90.36 seconds. This instruction correction is not a demonstrated complete hotword performance fix. No running full test was patched or had its original clock reset.
+
+A saved GLM claim exposed an unexpanded `会议明确` reference that an independent reviewer had approved. The updated detection requests actual-source disambiguation. A fresh local call returned a correction in 17.75 seconds, but also added a date absent from the selected excerpt; the corrected numeric gate rejects that addition. Field completeness is not production acceptance. These fixes were developed after the full tests started and require separately labelled verification, not retroactive certification of their frozen code.
 
 ## Release boundary
 

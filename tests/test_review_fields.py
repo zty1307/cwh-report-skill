@@ -114,11 +114,22 @@ def test_ambiguous_meeting_reference_needs_native_revision_not_host_replacement(
     assert request['claims'][0]['formal_claim'].startswith('会议首次')
 
 
-@pytest.mark.parametrize('claim', ['会议未给出具体安排。', '会议围绕市场环境作出部署。'])
+@pytest.mark.parametrize('claim', ['会议未给出具体安排。', '会议围绕市场环境作出部署。',
+    '会议明确“完善相关政策”，这需要落实实际执行条件。', '会议表示政策需要与实施条件相适应。',
+    '会议认为当前环境仍需完善。', '会议确定后续工作方向。'])
 def test_bare_meeting_action_also_requires_explicit_source_reference(claim):
     from domestic_evidence_mapping import has_ambiguous_meeting_reference
     assert has_ambiguous_meeting_reference(claim)
     assert not has_ambiguous_meeting_reference('中央政治局' + claim)
+
+
+def test_bare_meeting_before_quote_cannot_pass_on_literal_fidelity_alone():
+    request, result, run = fixtures()
+    request['claims'][0]['formal_claim'] = '会议明确“完善相关政策”，具体实施仍需要配套条件。'
+    request['claims'][0]['reference_expansion_required'] = False  # older saved packet
+    result['reviews'][0]['rationale'] = '原文有这句，且作者给出具体实施条件。'
+    errors = review_field_errors(result, ['e1'], request['claims'])
+    assert errors[0]['invalid_fields'] == ['unexpanded_meeting_reference_requires_native_revision']
 
 
 def test_available_delivery_quarantines_only_unresolved_reference_not_other_fields():

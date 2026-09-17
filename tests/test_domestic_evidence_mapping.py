@@ -170,6 +170,27 @@ def test_merged_speakers_and_unsupported_number_are_blocked() -> None:
     assert any("新增了原文片段中没有的数字" in message for message in messages)
 
 
+def test_arabic_numbers_next_to_chinese_prose_are_not_silently_skipped():
+    from domestic_evidence_mapping import _numbers
+    assert {'7', '30', '2025', '6', '10', '2030', '4.7%'} <= _numbers(
+        '7月30日讨论2025年产值近6万亿元，预计2030年超过10万亿元，增长4.7%。')
+    assert _numbers('AI2与5G和model_12不是数量') == set()
+    assert _numbers('２０２５年增长４．７％') == {'2025', '4.7%'}
+    assert {'7', '30'} == _numbers('7月30日中共中央政治局会议明确政策对象。')
+
+
+def test_added_arabic_date_is_blocked_even_when_semantic_reviewer_approves():
+    bundle = valid_bundle()
+    cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+    evidence = cluster['evidence'][0]
+    old = evidence['formal_claim']
+    evidence['formal_claim'] = '7月30日，' + old
+    cluster['details'] = cluster['details'].replace(old, evidence['formal_claim'])
+    evidence['semantic_review']['propositions'][0]['text'] = evidence['formal_claim']
+    issues = validate_analysis_mapping(bundle)['issues']
+    assert any(row['code'] == 'claim_adds_numbers' and '30' in row['message'] for row in issues)
+
+
 def test_semantic_review_must_be_fully_supported() -> None:
     bundle = valid_bundle()
     evidence = bundle["viewpoints"]["by_topic"][0]["clusters"][0]["evidence"][0]

@@ -45,7 +45,7 @@ def has_ambiguous_meeting_reference(value: Any) -> bool:
     return bool(re.search(r'(?:本次|这次|此次|该|(?:\d{4}年)?[0-9一二三四五六七八九十]{1,2}月(?:[0-9一二三四五六七八九十]{1,2}日)?)会议', text)
                 or re.search(r'(?:按照|根据|落实)会议部署|(?:^|[，；。：:])会议(?:(?:既|首次|再次|重点|明确|进一步|专门|着重){0,2})(?:部署|提出|提及|新增|增加|要求|指出|强调|决定|审议|核准|释放|把|将)', text)
                 or re.search(r'(?:^|[，；。：:])会议(?:在|于)[^，。；：:]{1,60}(?:新增|增加|提出|强调|部署|审议|核准)', text)
-                or re.search(r'(?:^|[，；。：:])会议(?:未给出|没有给出|并未给出|围绕|针对)', text))
+                or re.search(r'(?:^|[，；。：:])会议(?:未给出|没有给出|并未给出|围绕|针对|明确|表示|认为|确定)', text))
 
 
 def _normalized(value: Any) -> str:
@@ -58,7 +58,9 @@ def _sha256_text(value: str) -> str:
 
 def _numbers(value: str) -> set[str]:
     normalized = unicodedata.normalize("NFKC", value)
-    arabic = set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?%?(?![\w.])", normalized))
+    # Unicode \w includes Chinese: it silently skipped 7月、30日、6亿元
+    # and 4.7%增长. Exclude Latin identifiers, not adjacent Chinese prose.
+    arabic = set(re.findall(r"(?<![A-Za-z0-9_.])\d+(?:\.\d+)?%?(?![A-Za-z0-9_.])", normalized))
     chinese = set(
         re.findall(
             r"[零〇一二两三四五六七八九十百千万亿]+(?:年|月|日|个|项|条|家|人|倍|亿元|万元|公里|种|类|轮|方面|%|％)",
