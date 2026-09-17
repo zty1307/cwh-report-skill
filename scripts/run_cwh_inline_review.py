@@ -552,6 +552,24 @@ def main():
                                      interpretive_verified=False, interpretive_range=["o1/1", "o1/2"])
         transport_packet = overseas_span_packet(packet) if kind == "overseas" else packet
         prompt_rules = raw_review_prompt_rules(kind, deliver_available)
+        if kind == 'hotword' and deliver_available and len(packet.get('candidates') or []) > 48:
+            from cwh_hotword_batches import review_hotword_batches
+            from cwh_host_research import semantic_json, HostModelError
+            try:
+                result = review_hotword_batches(packet, prompt_rules, command_template, workspace, deadline,
+                    semantic_json, feedback=last_error if repair_required else '')
+                validate_transport_result(kind, packet, result)
+            except HostModelError as exc:
+                atomic_write_json(workspace / 'blocker.json', {'blocker': True, 'type': 'model_transport_error',
+                    'kind': kind, 'error': str(exc), 'exit_code': exc.exit_code, 'run': exc.run})
+                raise SystemExit(exc.exit_code) from exc
+            except (ValueError, TypeError, KeyError) as exc:
+                atomic_write_json(workspace / 'parse_failure.json', {'kind': kind, 'source_sha256': digest,
+                                  'error': str(exc), 'transport': 'native_hotword_batches'})
+                raise SystemExit(65) from exc
+            atomic_write_json(target, result)
+            atomic_write_json(cache, {'source_sha256': digest, 'output_sha256': sha256_file(target)})
+            continue
         if kind in {'overseas', 'public_top'} and len(packet.get('items') or []) > batch_size:
             result = review_overseas_batches(packet, shape, prompt_rules, command_template, workspace, deadline,
                                              feedback=last_error if repair_required else '', kind=kind, batch_size=batch_size)

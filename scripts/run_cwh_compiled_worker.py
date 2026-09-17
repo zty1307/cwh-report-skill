@@ -492,6 +492,10 @@ def author(task, deadline):
     parts, packets, topic_plans, observed = [], [], [], []
     author_id = str(uuid.uuid4())
     raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
+    from cwh_reading_budget import frozen_reading_allocation
+    raw_read_limit, page_fetch_limit = frozen_reading_allocation(
+        Path(task['stage_workspace']) / 'reading_allocation.json', plan,
+        (raw_read_limit, page_fetch_limit), len(index['topics']), max(0, deadline - time.monotonic()))
     for position, indexed in enumerate(index["topics"]):
         workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -502,6 +506,10 @@ def author(task, deadline):
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      min(65, (deadline - time.monotonic()) * .12))
         urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
+        if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
+            from cwh_reading_priority import prioritize_pages
+            urls = prioritize_pages(observations, indexed['topic'], page_fetch_limit, urls,
+                command, workspace, min(30, max(0, deadline - time.monotonic() - 60)), semantic_json)
         pages = cached_public_pages(workspace, urls, timeout=8)
         pages = recover_failed_page_slots(workspace, observations, urls, pages, plan,
                                           deadline, topic=indexed['topic'])
