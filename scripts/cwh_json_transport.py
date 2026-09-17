@@ -133,6 +133,14 @@ def escape_cjk_internal_quotes(text):
     quoted = escaped = is_key = False
     string_start = -1
     previous = ''
+    numeric_quote_positions = set()
+    for match in re.finditer(r'(?<=[\u4e00-\u9fff])"[0-9]+"(?=[\u4e00-\u9fff])', text):
+        numeric_quote_positions.update((match.start(), match.end() - 1))
+    def cjk(character):
+        return '\u4e00' <= character <= '\u9fff'
+    def cjk_label(tail):
+        return bool(tail) and (cjk(tail[0]) or (len(tail) > 1 and tail[0].isascii()
+                                              and tail[0].isalnum() and cjk(tail[1])))
     for i, character in enumerate(text):
         if quoted:
             if escaped:
@@ -146,8 +154,12 @@ def escape_cjk_internal_quotes(text):
                 if closing:
                     quoted = False
                 elif (not is_key and i > 0 and i+1 < len(text)
-                      and ('\u4e00' <= text[i-1] <= '\u9fff' or i == string_start + 1)
-                      and '\u4e00' <= text[i+1] <= '\u9fff'):
+                      and ((cjk(text[i-1]) or i == string_start + 1) and cjk(text[i+1])
+                           or i in numeric_quote_positions
+                           or (cjk(text[i-1]) and text[i+1] in '，。；：、！？）')
+                           or (text[i-1] in '，。；：、！？（' and cjk(text[i+1]))
+                           or (cjk(text[i-1]) and text[i+1] == '"' and cjk_label(text[i+2:]))
+                           or (text[i-1] == '"' and i-1 in positions and cjk_label(text[i+1:])))):
                     output.append('\\')
                     positions.append(i)
                 else:
@@ -167,12 +179,17 @@ def escape_cjk_internal_quotes(text):
     if not positions or quoted or stack:
         return None
     try:
-        result = json.loads(''.join(output))
+        def reject_constant(value):
+            raise ValueError('Non-standard JSON constant')
+        result = json.loads(''.join(output), object_pairs_hook=unique_members, parse_constant=reject_constant)
     except ValueError:
         return None
     if not isinstance(result, dict):
         return None
-    result.setdefault('transport_repairs', []).append({'kind': 'escaped_cjk_internal_quotes', 'positions': positions})
+    if 'transport_repairs' in result and not isinstance(result['transport_repairs'], list):
+        return None
+    result.setdefault('transport_repairs', []).append({'kind': 'escaped_cjk_internal_quotes', 'positions': positions,
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest()})
     return result
 
 
