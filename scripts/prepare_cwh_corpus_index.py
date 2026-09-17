@@ -135,15 +135,25 @@ def prepare_corpus_index(source: Path, corpus: dict, topics: list[str], declared
                                   "professional_attribution_hint_count": hints[str(row['record_id'])],
                                   "reasoning_reading_hint_count": reasoning_hints[str(row['record_id'])],
                                   "source": row.get("source"), "full_text_path": str(article)})
+        from cwh_raw_reading_discovery import discovery_cards
+        discovery = discovery_cards(candidates, selected, aliases)
+        originals = {row['record_id']: row for row in candidates}
+        for row in discovery:
+            key = hashlib.sha256(str(row['record_id']).encode()).hexdigest()[:20]
+            article = root / f'article-{key}.json'
+            atomic_write_json(article, originals[row['record_id']])
+            row['full_text_path'] = str(article)
         topic_index = root / f"topic-{number}.json"
         atomic_write_json(topic_index, {"topic": topic, "reading_order_only_not_review": True,
                                       "reading_diversity": "delay_high_overlap_fulltexts_without_excluding_them",
                                       "priority_hint": "professional_attribution_then_possible_reasoning_near_current_policy_not_semantic_eligibility",
                                       "shortlist": reading_order,
+                                      "discovery_shortlist": discovery,
                                       "all_candidates": [{k: row.get(k) for k in ("record_id", "title", "source", "published_at", "url")} for row in candidates]})
         index["reading_indexes"].append({"topic": topic, "path": str(topic_index)})
         index["topics"].append({"topic": topic, "record_ids": [x["record_id"] for x in candidates],
-                                "reading_index": str(topic_index), "shortlist": reading_order})
+                                "reading_index": str(topic_index), "shortlist": reading_order,
+                                "discovery_shortlist": discovery})
     path = source.parent / "public_corpus_index.json"
     atomic_write_json(path, index)
     return path

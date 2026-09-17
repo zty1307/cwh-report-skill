@@ -511,7 +511,12 @@ def author(task, deadline):
         if deadline - time.monotonic() < 60:
             raise TimeoutError("No remaining topic budget")
         topic_plan = next(row for row in plan["topics"] if row["topic"] == indexed["topic"])
-        source_rows = [read(row["full_text_path"]) for row in indexed["shortlist"][:raw_read_limit]]
+        raw_order = indexed['shortlist'][:raw_read_limit]
+        if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
+            from cwh_raw_reading_discovery import prioritize_raw_articles
+            raw_order = prioritize_raw_articles(indexed, raw_read_limit, command, workspace,
+                min(30, max(0, deadline - time.monotonic() - 60)), semantic_json)
+        source_rows = [read(row['full_text_path']) for row in raw_order]
         observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
                                      min(65, (deadline - time.monotonic()) * .12))
         urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
