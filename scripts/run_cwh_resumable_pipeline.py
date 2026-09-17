@@ -28,7 +28,7 @@ from cwh_model_contract import build_task_payload, execution_profile, stage_budg
 from normalize_cwh_analysis import normalize_analysis
 from complete_cwh_evidence_structure import complete_analysis_structure
 from cwh_viewpoint_gate import cluster_density_result, independent_voice_keys
-from cwh_available_delivery import DELIVERY_POLICY, available_delivery, prepare_available_delivery, valid_gap
+from cwh_available_delivery import DELIVERY_POLICY, available_delivery, prepare_available_delivery, valid_gap, has_unmapped_formal_candidates
 from report_rules import domestic_viewpoint_quality_issues
 
 
@@ -651,7 +651,8 @@ def validate_analysis_bundle(path: Path, topics: list[str], *, require_semantic_
             continue
         clusters = item.get("clusters") or []
         if not clusters:
-            if available_delivery(data) and valid_gap(item) and not eligible_candidates:
+            if (available_delivery(data) and valid_gap(item)
+                    and not has_unmapped_formal_candidates(eligible_candidates.values(), bounded=bounded_profile)):
                 continue
             problems.append(f"子议题没有观点簇：{topic}")
             continue

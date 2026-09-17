@@ -12,6 +12,13 @@ def available_delivery(data: dict) -> bool:
     return (data.get("metadata") or {}).get("delivery_policy") == DELIVERY_POLICY
 
 
+def has_unmapped_formal_candidates(candidates, *, bounded):
+    """Audited reserves are not formal selections or independently approved claims."""
+    return any(c.get('decision') == 'eligible' and not (
+        bounded and str(c.get('formal_use') or '').strip().lower() == 'reserve'
+        and str(c.get('reserve_reason') or '').strip()) for c in candidates)
+
+
 def valid_gap(topic: dict) -> bool:
     gap = topic.get("evidence_gap") or {}
     return not topic.get("clusters") and gap.get("status") == "no_usable_interpretation_in_reviewed_material" and all(
@@ -92,9 +99,15 @@ def prepare_available_delivery(data: dict) -> dict:
             topic.setdefault("single_cluster_exception", exception(count_note))
         for cluster in clusters:
             cluster.setdefault("thin_cluster_exception", exception(count_note))
-        if not clusters and not any(c.get("decision") == "eligible" for c in pool.get("candidates") or []):
+        candidates = pool.get('candidates') or []
+        if not clusters and not has_unmapped_formal_candidates(candidates,
+                bounded=str(research.get('execution_profile') or '').startswith('bounded_')):
+            reserved = [c['candidate_id'] for c in candidates if c.get('decision') == 'eligible']
             topic["heading"] = topic["topic"]
             topic["evidence_gap"] = {"status": "no_usable_interpretation_in_reviewed_material",
                                      "notice": GAP_NOTICE, "search_evidence": audit,
                                      "recorded_by": "controller", "scope": count_note}
+            if reserved:
+                topic['evidence_gap']['reserved_candidate_ids'] = reserved
+                topic['evidence_gap']['scope'] += f'另有{len(reserved)}条备选未进入正式选材，原文及原生取舍保留；不视为已通过独立核验。'
     return result

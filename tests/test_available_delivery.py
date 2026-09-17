@@ -37,6 +37,24 @@ def test_unmapped_eligible_candidate_cannot_be_excused_as_missing_evidence():
     assert not valid_gap(prepare_available_delivery(original)["viewpoints"]["by_topic"][0])
 
 
+@pytest.mark.parametrize('profile,reason,expected', [('bounded_60m', '原生未入选，留作备选', True),
+    ('bounded_40m', '原生备选', True), ('bounded_60m', '', False), ('exhaustive', '原生备选', False)])
+def test_reserves_do_not_block_empty_formal_topic_or_gain_semantic_approval(profile, reason, expected):
+    original = material()
+    research = original['research_audit']['domestic_media_research']
+    research['execution_profile'] = profile
+    candidate = {'candidate_id': 'reserved-c1', 'decision': 'eligible', 'formal_use': 'reserve',
+                 'reserve_reason': reason, 'source_snapshot': {'source_text': '完整原文'}}
+    research['candidate_pool_by_topic'][0]['candidates'] = [candidate]
+    result = prepare_available_delivery(original)
+    topic = result['viewpoints']['by_topic'][0]
+    assert valid_gap(topic) is expected
+    assert result['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'] == [candidate]
+    if expected:
+        assert topic['evidence_gap']['reserved_candidate_ids'] == ['reserved-c1']
+        assert '不视为已通过独立核验' in topic['evidence_gap']['scope']
+
+
 def test_final_audit_reports_honest_gap_as_warning_not_fabricated_stance_error():
     data = prepare_available_delivery(material())
     audit = build_system_audit({}, [], [], data["viewpoints"], data["metadata"])
