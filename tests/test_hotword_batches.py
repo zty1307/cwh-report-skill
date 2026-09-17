@@ -5,6 +5,7 @@ import time
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from cwh_hotword_batches import partition_candidates, subset_packet, review_hotword_batches, retain_native_extensions
+from cwh_hotword_batches import first_pass_scope
 
 
 def packet():
@@ -29,6 +30,24 @@ def test_partition_keeps_unassigned_anchors_and_all_candidates_exactly_once():
     assert selected['topics'] == original['topics']
     assert selected['candidate_source_windows'] == [original['candidate_source_windows'][1]]
     assert selected['source_urls'] == {'u2': 'https://example.test/b'}
+
+
+def test_first_pass_does_not_repeat_global_review_or_pad_missing_topics():
+    original = packet()
+    original['instructions'] = ['删除无实质含义的会议套话。',
+        '合并同义词，并按topics中的实际议题数量检查每个议题是否都有实质性词项。',
+        '不得为凑数量保留噪声；若审核后少于最低数量，继续从证据中补提，而不是回退到规则词。']
+    original['review_output_shape'] = {'second_pass_completed': True, 'selected': []}
+    before = copy.deepcopy(original)
+    scoped, prompt = first_pass_scope(original, '保留独立来源证据，完成二次自审与同义去重，不凑词。')
+    assert original == before
+    for key in ('candidates', 'candidate_source_windows', 'source_urls', 'topics'):
+        assert scoped[key] == original[key]
+    assert '删除无实质含义的会议套话。' in scoped['instructions']
+    assert '完成二次自审' not in prompt
+    assert '继续从证据中补提' not in ''.join(scoped['instructions'])
+    assert scoped['review_output_shape']['second_pass_completed'] is False
+    assert '宿主随后另行调用全表二审' in prompt
 
 
 def test_every_partition_then_real_global_pass_preserves_native_selections(tmp_path):

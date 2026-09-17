@@ -36,6 +36,25 @@ def partition_candidates(packet, max_candidates=40):
             for offset in range(0, len(rows), max_candidates)]
 
 
+def first_pass_scope(packet, prompt_rules):
+    """Only scope the task; all candidate/source evidence remains intact."""
+    part = copy.deepcopy(packet)
+    global_instructions = {
+        '合并同义词，并按topics中的实际议题数量检查每个议题是否都有实质性词项。',
+        '候选不足时，从document_samples的标题和正文摘录中补提有原文证据的新词。',
+        '不得为凑数量保留噪声；若审核后少于最低数量，继续从证据中补提，而不是回退到规则词。',
+    }
+    part['instructions'] = [text for text in part.get('instructions', []) if text not in global_instructions]
+    scope = ('这是分组初审，只做本组的一遍语义选词和同义去重，不执行全表二审或全议题覆盖检查。'
+             '数量只作目标，不因缺词反复扩词；本包原文里确有更完整的短语仍可提取。'
+             '无合格词可返回selected:[]。second_pass_completed=false，宿主随后另行调用全表二审。')
+    part['instructions'].append(scope)
+    if isinstance(part.get('review_output_shape'), dict):
+        part['review_output_shape']['second_pass_completed'] = False
+    prompt = prompt_rules.replace('完成二次自审与同义去重', '完成本组同义去重') + '\n' + scope
+    return part, prompt
+
+
 def retain_native_extensions(packet, selected):
     """Keep native new phrases only with a literal retained-source witness; no invented counts."""
     result = copy.deepcopy(packet)
@@ -117,8 +136,7 @@ def review_hotword_batches(packet, prompt_rules, command, workspace, deadline, m
         part['minimum_term_count'] = 0
         part['target_term_count'] = math.ceil(target * len(rows) / len(packet['candidates'])) + 2
         part['batch_scope'] = 'Disjoint candidate partition; all original topic indices and exact source windows retained.'
-        prompt = (prompt_rules + '\n这是分组初审，不是全表最终审核；仅审核本组候选。数量只作目标，无合格词可返回selected:[]。'
-                  '返回原review_output_shape的热词字段，保留真实证据，不因全局数量要求在本组凑数。')
+        part, prompt = first_pass_scope(part, prompt_rules)
         if feedback:
             prompt += '\n上次真实校验反馈：' + feedback
         from cwh_host_research import HostModelError, SemanticResponseError
