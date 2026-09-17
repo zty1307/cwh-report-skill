@@ -73,6 +73,33 @@ def test_bounded_deferral_never_calls_unread_records_reviewed(tmp_path):
     assert any("未逐条审核" in x for x in validate_analysis_bundle(target, ["议题"], require_semantic_review=False, allow_deferred_corpus=True))
 
 
+def test_reading_shortfall_can_deliver_only_with_exact_index_and_explicit_gap(tmp_path):
+    from cwh_available_delivery import prepare_available_delivery
+    raw = corpus()
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(raw), encoding='utf-8')
+    prepare_corpus_index(source, raw, ['议题'])
+    row = {'topic': '议题', 'reviewed_record_ids': ['r0'], 'retained_record_ids': [],
+           'excluded': [{'record_id': 'r0', 'reason': '实际原文审核后排除'}]}
+    data = complete_corpus_deferrals({'research_audit': {'domestic_media_research': {
+        'public_article_corpus_review': {'topic_reviews': [row]}}}}, raw, ['议题'])
+    target = tmp_path / 'draft.json'
+    target.write_text(json.dumps(data), encoding='utf-8')
+    def errors():
+        return validate_analysis_bundle(target, ['议题'], require_semantic_review=False, allow_deferred_corpus=True)
+    assert any('未逐条审核' in e for e in errors())
+    available = prepare_available_delivery(data)
+    target.write_text(json.dumps(available), encoding='utf-8')
+    assert not any('未逐条审核' in e for e in errors())
+    assert errors()  # All other source/mapping checks are still enforced.
+    assert available['metadata']['research_budget_gaps']
+    reviewed = available['research_audit']['domestic_media_research']['public_article_corpus_review']['topic_reviews'][0]
+    assert reviewed['reviewed_record_ids'] == ['r0']
+    reviewed['deferred_record_ids'].pop()
+    target.write_text(json.dumps(available), encoding='utf-8')
+    assert any('未逐条审核' in e for e in errors())
+
+
 def test_professional_body_hint_beats_generic_analysis_title_without_excluding_rows(tmp_path):
     data = corpus()
     data['candidates'][0].update(title='某政策最新部署', content='某研究院副院长张明表示，制度覆盖须保留实际就业群体的适用条件。')
