@@ -138,6 +138,7 @@ def flat_prompt(rules=None, *, ranked=False):
             '只返回JSON {"heading":"本题中心判断","selected":[{"key":"k1","heading":"本组共同判断",'
             '"claim_ids":["c1"],"thin_reason":""}],"shortfall_reason":"","single_cluster_reason":""}。'
             'selected按本期重要性先排组，再按观点代表性排列组内编号；此顺序是明确的取舍优先级。'
+            f"宿主按此优先级保留最多{rules['bounded_max_formal_clusters']}个非空组，后续组的观点完整保留备选，不合并或改写。"
             '宿主按此顺序保留至多formal_selection.max_independent_voices个不同主体；同一主体的不同实质判断可分别保留。'
             '重复编号只保留第一次出现的分组；超限或未列出的编号自动保留在备选审计，不用逐一罗列排除理由。'
             '同一组同一主体按你给出的优先级只留一条最完整的论断，其余保留备选；不同实质判断可进入不同组。'

@@ -37,10 +37,28 @@ def test_same_subject_distinct_groups_remain_traceable():
     assert [row['claim_ids'] for row in result['selected']] == [['c1'], ['c4']]
 
 
-def test_excess_groups_require_native_reselection_not_host_semantic_merge():
+def test_repeated_groups_do_not_consume_formal_group_slots():
     packet, response = sample()
     response['selected'] *= 7
-    with pytest.raises(ValueError, match='cluster cap'):
+    result = ranked_selection(packet, response)
+    assert len(result['selected']) == 1
+    assert result['transport_repairs'][0]['native_response'] == response
+
+
+def test_excess_native_priority_groups_are_reserved_without_semantic_merge():
+    packet = {'formal_selection': {'allow_reserve': True, 'max_independent_voices': 12},
+              'candidates': [{'id': f'c{i}', 'speaker': f'主体{i}', 'source': '原媒体'} for i in range(8)]}
+    response = {'selected': [{'key': f'k{i}', 'heading': f'原判断{i}', 'claim_ids': [f'c{i}']}
+                             for i in range(8)]}
+    original = copy.deepcopy((packet, response))
+    result = ranked_selection(packet, response)
+    assert result['selected'] == response['selected'][:6]
+    assert [row['id'] for row in result['reserved']] == ['c6', 'c7']
+    assert all(row['reason'].startswith('ranked_cluster_cap:') for row in result['reserved'])
+    assert result['excluded'] == []
+    assert (packet, response) == original
+    response['selected'][-1]['claim_ids'] = ['unknown']
+    with pytest.raises(ValueError, match='unknown claim ID'):
         ranked_selection(packet, response)
 
 

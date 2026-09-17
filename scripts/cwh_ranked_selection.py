@@ -13,8 +13,7 @@ def ranked_selection(transport, response):
     maximum = policy.get('max_independent_voices')
     if type(maximum) is not int or maximum < 1:
         raise ValueError('Ranked selection requires a positive subject cap')
-    if len(response['selected']) > writing_rules()['viewpoint']['bounded_max_formal_clusters']:
-        raise ValueError('Ranked selection exceeds the formal cluster cap; select representative distinct judgments instead of listing every subtheme')
+    cluster_maximum = writing_rules()['viewpoint']['bounded_max_formal_clusters']
     candidates = {row['id']: row for row in transport['candidates']}
     explicit = {}
     for field in ('excluded', 'reserved'):
@@ -29,7 +28,7 @@ def ranked_selection(transport, response):
             explicit.setdefault(row['id'], []).append((field, row['reason']))
     result = copy.deepcopy(response)
     selected, voices, groups, duplicate_ids, conflicts, capped = set(), set(), [], [], set(), set()
-    seen, redundant = set(), set()
+    seen, redundant, cluster_capped = set(), set(), set()
     for group in response['selected']:
         if not isinstance(group, dict) or not isinstance(group.get('claim_ids'), list):
             raise ValueError('Ranked group requires claim_ids')
@@ -43,6 +42,9 @@ def ranked_selection(transport, response):
             seen.add(key)
             if key in explicit:
                 conflicts.add(key)
+                continue
+            if len(groups) >= cluster_maximum:
+                cluster_capped.add(key)
                 continue
             candidate = candidates[key]
             identity = independent_voice_keys([{'speaker_name': candidate.get('speaker'),
@@ -71,6 +73,7 @@ def ranked_selection(transport, response):
             continue
         reason = ('ranked_selection_conflict:模型同时入选和排除或备选，暂不进入正文' if key in conflicts or len(choices) > 1
                   else 'ranked_subject_cap:按模型声明的重要性排序超出本题主体上限，保留备选' if key in capped
+                  else 'ranked_cluster_cap:按模型声明的组优先级超出正文组数上限，完整保留备选，不宣称语义重复或无效' if key in cluster_capped
                   else 'ranked_same_subject_group:按模型排序，本组该主体已有更优先的完整论断；本条保留备选，不宣称语义重复' if key in redundant
                   else choices[0][1] if choices else 'ranked_not_selected:模型未列入本稿入选清单，保留候选；未判定证据无效')
         result['reserved'].append({'id': key, 'reason': reason})
@@ -79,5 +82,6 @@ def ranked_selection(transport, response):
         'selected_subject_count': len(voices), 'max_independent_voices': maximum,
         'duplicate_ids': duplicate_ids, 'conflicting_ids': sorted(conflicts), 'capped_ids': sorted(capped),
         'same_subject_group_reserves': sorted(redundant),
+        'max_formal_clusters': cluster_maximum, 'cluster_capped_ids': sorted(cluster_capped),
         'scope': 'Mechanical ranked top-subject selection and reserve inventory only; independent source review still mandatory'})
     return result

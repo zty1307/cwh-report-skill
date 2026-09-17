@@ -375,6 +375,15 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         local_prompt = prompt + contract
         if retained.get('feedback'):
             local_prompt += '\n仅修复本议题的真实反馈，不改变原文身份；JSON值中术语用中文引号或正确转义：' + json.dumps(retained['feedback'], ensure_ascii=False)
+        from cwh_author_cache import cache_key, read_completed, save_completed
+        completed_path = workspace / f'author-topic-{number}.completed.json'
+        completed_key = cache_key(packet, local_prompt, command, author_contract_sha256(prompt, command))
+        cached = read_completed(completed_path, completed_key) if reuse_cache else None
+        if cached:
+            result, run = cached
+            decisions.append({**result, 'topic': packet['topic']})
+            runs.append(run)
+            continue
         try:
             if fixed_unread and not model_packet['items']:
                 result = {'items': [], 'heading': '', 'clusters': [],
@@ -440,6 +449,7 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
             raise ValueError(f"[{packet['topic']}] {exc}") from exc
         if metadata_run:
             run = {**run, 'web_metadata_repair_run': metadata_run}
+        save_completed(completed_path, completed_key, result, run)
         decisions.append({**result, 'topic': packet['topic']})
         runs.append(run)
     return decisions, {'session_id': str(uuid.uuid4()), 'completed_at': utc_now(),
