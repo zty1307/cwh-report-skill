@@ -81,9 +81,9 @@ Numerical propagation facts must use the monitoring workbook's scope. Missing re
 
 ### （二）子议题传播情况
 
-When the system workbook already contains the trend chart, subtopic-volume chart, or word-cloud image, embed those original assets directly. They are authoritative system outputs. Do not redraw them in a different chart type, color palette, order, unit, or title. Program-generated graphics are only a fallback when the corresponding workbook asset is absent.
+Trend and subtopic-volume charts always use the baseline-locked report visual templates, even when a monitoring image exists. Original images remain untouched source/audit assets, not report styling authority. The reviewed word cloud remains unchanged. See `references/word_fill_in_template.md` for exact titles, geometry, color, typography and variable-data slots.
 
-An absent or invalid topic-chart image may use the shared fixed-style script. Keep its generated origin explicit and bind the actual PNG, current style configuration and ordered source values in the chart manifest. The DOCX audit checks this manifest and the embedded image, rather than mislabelling the fallback as a monitoring-system original. A missing manifest or an arbitrary program chart does not qualify.
+Bind both template-generated PNGs to current meeting date, totals, trend/topic values and style-configuration hashes. DOCX acceptance requires their actual image hashes and manifest to match; a historical monitoring image or older approximate fallback does not satisfy the new visual contract. Word and workbench use the same report images.
 
 Use one table. Required columns:
 
@@ -95,7 +95,7 @@ Use one table. Required columns:
 - 总量
 - 网民情感：正面 / 中立 / 负面
 
-The table must be generated for all detected subtopics, not hard-coded to four items.
+The table must be generated for all detected subtopics, not hard-coded to four items. Always retain the nine-column, two-header-row baseline table from `templates/topic_table.xml`; missing reviewed sentiment leaves blank cells, never drops the three columns or invents ratios. Table paragraphs have explicit zero indents so body formatting cannot break numeric cells.
 Keep the full system subtopic titles in this table, including action wording such as `听取`、`研究`、`审议通过` and the full policy name. Use 11 pt table text; do not shorten titles merely to make the table fit one page.
 
 ## 二、境内舆论情况

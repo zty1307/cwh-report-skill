@@ -906,12 +906,12 @@ def prepare_dashboard_data(data: dict[str, Any], out_dir: Path) -> dict[str, Any
     }
     images = {
         "trend": first_image_data_uri(
-            local_system_charts["trend_distribution"],
-            chart_artifacts.get("trend_distribution"), fallback_charts.get("trend_distribution")
+            chart_artifacts.get("trend_distribution"),
+            local_system_charts["trend_distribution"], fallback_charts.get("trend_distribution")
         ),
         "topic": first_image_data_uri(
-            local_system_charts["topic_distribution"],
-            chart_artifacts.get("topic_distribution"), fallback_charts.get("topic_distribution")
+            chart_artifacts.get("topic_distribution"),
+            local_system_charts["topic_distribution"], fallback_charts.get("topic_distribution")
         ),
         "hotword": first_image_data_uri(
             (data.get("artifacts") or {}).get("wordcloud_image"),

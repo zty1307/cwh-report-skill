@@ -36,6 +36,7 @@ from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix,
 from normalize_cwh_analysis import assemble_cluster_details, evidence_sentence
 from cwh_docx_template import TEMPLATE, apply_template
 from cwh_chart_style import valid_image, write_topic_chart, verify_topic_chart_manifest
+from cwh_report_visuals import write_report_charts, verify_report_charts, add_fixed_topic_table, verify_topic_table
 
 
 @lru_cache(maxsize=1)
@@ -1512,49 +1513,10 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         "trend_distribution": ("传播走势", dict(sorted((stats.get("by_date") or {}).items()))),
         "hotword_distribution": ("候选热词", hotwords),
     }
-    output: dict[str, str] = {}
-    # A report can be regenerated from its structured JSON after the original
-    # workbook has been moved or reduced to a basename. Preserve the exact
-    # monitoring-system charts already extracted into the report directory
-    # instead of silently replacing them with program-drawn fallbacks.
-    for key in ("trend_distribution", "topic_distribution"):
-        existing_system_chart = chart_dir / f"{key}_system.png"
-        if valid_image(existing_system_chart):
-            output[key] = str(existing_system_chart)
-    workbook_value = str((data.get("collection") or {}).get("system_workbook") or "").strip()
-    missing_system_keys = {"trend_distribution", "topic_distribution"} - set(output)
-    if workbook_value and missing_system_keys:
-        try:
-            from extract_system_excel_assets import extract_system_excel_assets
-
-            workbook_path = Path(workbook_value)
-            if workbook_path.is_file():
-                extracted = extract_system_excel_assets(workbook_path, chart_dir)
-                for key in missing_system_keys:
-                    candidate = Path(str(extracted.get(key) or ""))
-                    if valid_image(candidate):
-                        output[key] = str(candidate)
-        except Exception as exc:
-            data.setdefault("audit", {}).setdefault("data_gaps", []).append(
-                f"系统工作簿原图提取失败，已使用程序重绘兜底：{type(exc).__name__}: {exc}"
-            )
-    for key, artifact_key in [
-        ("trend_distribution", "trend_chart_image"),
-        ("topic_distribution", "topic_chart_image"),
-    ]:
-        explicit_value = str((data.get("artifacts") or {}).get(artifact_key) or "").strip()
-        if not explicit_value:
-            continue
-        explicit_path = Path(explicit_value)
-        if valid_image(explicit_path):
-            target = chart_dir / f"{key}_system.png"
-            if explicit_path.resolve() != target.resolve():
-                shutil.copyfile(explicit_path, target)
-            output[key] = str(target)
-        else:
-            data.setdefault("audit", {}).setdefault("data_gaps", []).append(
-                f"指定的监测系统图表不存在或为空：{explicit_value}"
-            )
+    output, visual_manifests = write_report_charts(data, chart_dir)
+    data.setdefault('audit', {})['report_visual_templates'] = visual_manifests
+    # Source charts remain untouched/auditable. They are no longer a styling
+    # authority: every report uses the same current-data baseline templates.
     artifacts = data.get("artifacts") or {}
     reviewed_image = reviewed_hotword_image_path(data)
     # Regeneration often follows a copied or restored report directory.  A stale
@@ -1618,16 +1580,10 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
             write_bar_png(path, title, values)
         output[key] = str(path)
     output.pop("source_workbook", None)
-    if (
-        explicit_wordcloud_used
-        and all("_system" in Path(output.get(key, "")).stem for key in ["trend_distribution", "topic_distribution"])
-    ):
-        chart_authority = "monitoring_system_assets_plus_pipeline_wordcloud"
-    elif all("_system" in Path(output.get(key, "")).stem for key in ["trend_distribution", "topic_distribution", "hotword_distribution"]):
-        chart_authority = "monitoring_system_embedded_assets"
-    else:
-        chart_authority = "mixed_system_and_program_fallback"
-    data.setdefault("artifacts", {})["chart_authority"] = chart_authority
+    # Monitoring assets remain source artifacts, never override fixed report styling.
+    data.setdefault("artifacts", {})["chart_authority"] = (
+        'baseline_template_plus_reviewed_wordcloud' if explicit_wordcloud_used
+        else 'baseline_template_without_reviewed_wordcloud')
     data.setdefault("artifacts", {}).setdefault("docx_charts", {}).update(output)
     return output
 
@@ -1654,9 +1610,9 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     lines.extend(["", "### （二）子议题传播情况", ""])
     sentiment_visible = formal_sentiment_available(data)
     topic_headers = ["序号", "标题", domestic_media_label(data), "新媒体", "境外媒体", "总量"]
-    if sentiment_visible:
-        topic_headers.extend(["正面", "中立", "负面"])
-    lines.append(md_table(topic_headers, formal_topic_rows(data, sentiment_visible)))
+    topic_headers.extend(["正面", "中立", "负面"])
+    lines.append(md_table(topic_headers, [[('' if v == '待分析' else v) for v in row]
+                                         for row in formal_topic_rows(data, True)]))
 
     lines.extend(["", "## " + document_rules["fixed_chapters"][1], "", "### " + document_rules["domestic_subsections"][0], ""])
     for topic_idx, item in enumerate(report_topic_items(data), 1):
@@ -1862,36 +1818,7 @@ def add_table(
 
 def add_topic_table(document: Any, rows: list[list[Any]], include_sentiment: bool,
                     domestic_label: str = "境内主流媒体") -> Any:
-    if not include_sentiment:
-        return add_table(
-            document,
-            ["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"],
-            rows,
-            font_name="微软雅黑",
-            size_pt=11,
-            widths_pt=[35.5, 132.0, 55.0, 55.0, 50.0, 55.0],
-        )
-    table = document.add_table(rows=2, cols=9)
-    for idx, text in enumerate(["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"]):
-        table.cell(0, idx).merge(table.cell(1, idx)).text = text
-    table.cell(0, 6).merge(table.cell(0, 8)).text = "网民情感"
-    for idx, text in enumerate(["正面", "中立", "负面"], 6):
-        table.cell(1, idx).text = text
-    mark_row_as_header(table.rows[0])
-    mark_row_as_header(table.rows[1])
-    for row in rows:
-        cells = table.add_row().cells
-        for idx, value in enumerate(row):
-            cells[idx].text = "" if value is None else str(value)
-    style_docx_table(
-        table,
-        "微软雅黑",
-        11,
-        [35.5, 77.9, 47.2, 52.0, 42.5, 49.6, 42.5, 40.6, 32.8],
-    )
-    for row_index, row in enumerate(table.rows):
-        row.height = Pt(15.0 if row_index < 2 else (121.6 if row_index == 2 else 32.65))
-    return table
+    return add_fixed_topic_table(document, rows, domestic_label)
 
 
 def add_wechat_top_table(document: Any, rows: list[dict[str, Any]]) -> Any:
@@ -2484,11 +2411,16 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
             'hotword_distribution_system', 'hotword_distribution_pipeline'}
         and verify_topic_chart_manifest(chart_paths.get('topic_distribution') or '',
                                         (data.get('audit') or {}).get('topic_chart_style'), topic_values))
+    fixed_report_visuals = (
+        artifacts.get('chart_authority') == 'baseline_template_plus_reviewed_wordcloud'
+        and all(chart_matches.values())
+        and verify_report_charts(data, chart_paths, (data.get('audit') or {}).get('report_visual_templates') or {}))
     checks = {
         "no_unfilled_template_slots": b'CWH_' not in document_xml,
         "fixed_template_applied": (bool((data.get('audit') or {}).get('word_template', {}).get('filled_slots'))
                                    or any(section_override(data, key) for key in ('one', 'two', 'three', 'four'))),
-        "uses_traceable_fixed_chart_assets": monitoring_assets or fixed_topic_fallback,
+        "uses_traceable_fixed_chart_assets": fixed_report_visuals,
+        "fixed_topic_table_layout": verify_topic_table(document_xml),
         "three_required_tables": table_count == 3,
         "three_required_images": image_count >= 3,
         "appendix_hyperlinks_present": hyperlink_count >= 10,
@@ -2504,6 +2436,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
         "system_asset_hash_matches": chart_matches,
         "chart_provenance": {"monitoring_system_assets": monitoring_assets,
                              "verified_fixed_topic_fallback": fixed_topic_fallback,
+                             "verified_baseline_template": fixed_report_visuals,
                              "declared_authority": artifacts.get('chart_authority')},
         "domestic_comment_quotes": comment_quote_audit,
     }

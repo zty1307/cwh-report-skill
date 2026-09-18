@@ -99,6 +99,9 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "config/execution_policy.v1.json",
         "config/formal_writing_rules.v1.json",
         "config/editorial_template.v1.json",
+        "config/report_visual_style.v1.json",
+        "templates/topic_table.xml",
+        "scripts/cwh_report_visuals.py",
         "config/source_registry.v1.json",
         "scripts/run_cwh_resumable_pipeline.py",
         "scripts/cwh_model_contract.py",
@@ -160,6 +163,13 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         checks.append({'id': 'template:word_slots', 'status': 'passed'})
     except Exception as exc:
         checks.append({'id': 'template:word_slots', 'status': 'failed', 'message': str(exc)})
+
+    try:
+        from cwh_report_visuals import _fonts
+        _fonts(1)
+        checks.append({'id':'template:baseline_chart_fonts','status':'passed'})
+    except Exception as exc:
+        checks.append({'id':'template:baseline_chart_fonts','status':'failed','message':str(exc)})
 
     try:
         policy = json.loads((skill_root / "config" / "execution_policy.v1.json").read_text(encoding="utf-8"))

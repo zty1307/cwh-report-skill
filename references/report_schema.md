@@ -51,7 +51,7 @@ Normalized samples should use these fields whenever possible:
 
 ## Report rendering rules
 
-Rendering is deterministic and does not request a model to author deliverable files. `cwh_orchestrator.py` generates Word, Markdown, Excel and the workbench from the same structured report. `generate_dashboard.py` injects a JSON payload into the single `__DASHBOARD_DATA__` slot in `assets/cwh_dashboard_template.html`; the model never rewrites HTML, styles, navigation, cards or export controls during report production. Preserve `analysis_bundle` and its evidence IDs in the payload. Existing system chart images remain authoritative assets. Only an explicit Skill-development task changes templates.
+Rendering is deterministic and does not request a model to author deliverable files. `cwh_orchestrator.py` generates Word, Markdown, Excel and the workbench from the same structured report. `generate_dashboard.py` injects a JSON payload into the single `__DASHBOARD_DATA__` slot in `assets/cwh_dashboard_template.html`; the model never rewrites HTML, styles, navigation, cards or export controls during report production. Preserve `analysis_bundle` and its evidence IDs in the payload. Monitoring images remain unchanged audit inputs; report trend/topic images use the baseline template and current authoritative numbers. Only an explicit Skill-development task changes templates.
 
 `meeting.chair_name` and `meeting.chair_source` are optional source-backed opening metadata. When both are present, they override the configurable chair default in `config/editorial_template.v1.json`. Otherwise scripts use that explicitly approved editorial default; a neutral opening is used only when the default is empty as well. Never infer additional people from a historical report. `audit.writing_rules_sha256` records the combined executable and editorial rule revision; the Word audit records editorial provenance separately from source verification.
 
@@ -83,7 +83,7 @@ The workbook is generated from `report_data.json`; it must not contain hard-code
 
 `artifacts.dashboard` must point to the self-contained `cwh_dashboard.html` generated from this object.
 
-- Render the authoritative totals and system charts from `system_data`, `statistics`, `topic_stats`, and `artifacts.docx_charts`.
+- Render authoritative totals from `system_data`, `statistics` and `topic_stats`. The two report charts in `artifacts.docx_charts` use the baseline visual templates with current-data manifests; original monitoring images remain source artifacts, not style overrides.
 - Render qualitative organization from `viewpoints`, `comments`, `hotwords`, `overseas`, and `appendices`.
 - Render readiness and evidence coverage from `audit`.
 - Keep artifact links relative when the target is in the same output directory, while also exposing Microsoft Office protocol links for Word and Excel.

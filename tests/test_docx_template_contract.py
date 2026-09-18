@@ -201,7 +201,7 @@ def test_fixed_opening_accepts_sourced_role_and_learning_agenda():
     assert '涉及学习贯彻' not in text
 
 
-def test_permitted_topic_fallback_requires_source_values_config_and_embedded_image(tmp_path):
+def test_old_fixed_topic_fallback_is_traceable_but_not_baseline_template_acceptance(tmp_path):
     data = {'topic_stats': [{'topic': '公共服务', 'spread_count': 12000},
                             {'topic': '公共服务', 'spread_count': 8000}]}
     values = [('公共服务', 12000), ('公共服务', 8000)]
@@ -221,7 +221,7 @@ def test_permitted_topic_fallback_requires_source_values_config_and_embedded_ima
     path = tmp_path / 'chart_provenance.docx'
     doc.save(path)
     audit = formal.audit_formal_docx(data, path)
-    assert audit['checks']['uses_traceable_fixed_chart_assets']
+    assert not audit['checks']['uses_traceable_fixed_chart_assets']
     assert audit['chart_provenance']['verified_fixed_topic_fallback']
     assert not audit['chart_provenance']['monitoring_system_assets']
     for field in ('image_sha256', 'style_sha256', 'ordered_values'):

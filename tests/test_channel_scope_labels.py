@@ -41,7 +41,7 @@ def test_word_table_uses_same_explicit_label_for_both_shapes(sentiment):
     doc = Document()
     table = formal.add_topic_table(doc, [], sentiment, '境内新闻')
     assert table.cell(0, 2).text == '境内新闻'
-    assert len(table.columns) == (9 if sentiment else 6)
+    assert len(table.columns) == 9  # Missing ratios never change the fixed layout.
 
 
 def test_markdown_body_table_and_dashboard_keep_scope_without_reclassifying_counts(tmp_path):

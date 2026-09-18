@@ -84,7 +84,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
                 }],
             }
             FORMALIZE.ensure_docx_chart_images(data, root)
-        self.assertEqual(data["artifacts"]["chart_authority"], "mixed_system_and_program_fallback")
+        self.assertEqual(data["artifacts"]["chart_authority"], "baseline_template_without_reviewed_wordcloud")
 
     def test_stale_wordcloud_path_does_not_mask_copied_pipeline_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -105,7 +105,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             charts = FORMALIZE.ensure_docx_chart_images(data, root)
         self.assertEqual(charts["hotword_distribution"], str(pipeline))
         self.assertEqual(data["artifacts"]["wordcloud_image"], str(pipeline))
-        self.assertEqual(data["artifacts"]["chart_authority"], "monitoring_system_assets_plus_pipeline_wordcloud")
+        self.assertEqual(data["artifacts"]["chart_authority"], "baseline_template_plus_reviewed_wordcloud")
 
     def test_unreviewed_hotword_rows_do_not_authorize_pipeline_wordcloud(self) -> None:
         self.assertFalse(FORMALIZE.reviewed_hotword_pipeline_ready({
