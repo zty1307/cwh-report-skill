@@ -604,6 +604,8 @@ def author(task, deadline):
         packet['delivery_policy'] = delivery_policy
         packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
         packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
+        if inputs.get('meeting_context'):
+            packet['meeting_context'] = inputs['meeting_context']
         selection = topic_plan.get('candidate_pool_contract') or {}
         packet['formal_selection'] = {
             'allow_reserve': task['execution_profile'].startswith('bounded_'),

@@ -105,6 +105,7 @@ def run_preflight(skill_root: Path) -> dict[str, Any]:
         "config/source_registry.v1.json",
         "scripts/run_cwh_resumable_pipeline.py",
         "scripts/cwh_model_contract.py",
+        "scripts/cwh_meeting_intake.py",
         "scripts/cwh_viewpoint_gate.py",
         "scripts/cwh_writing_rules.py",
         "scripts/complete_cwh_evidence_structure.py",

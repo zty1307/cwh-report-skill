@@ -30,6 +30,8 @@ When a successful raw-review model invocation omits only `review_method`, the ho
 
 ## Raw-review JSON transport
 
+`meeting_communique_review` uses the same `CWH_SEMANTIC_COMMAND_JSON` host for full communique understanding before raw topic mapping. Without that optional no-tools transport, the ordinary task-file worker can complete its declared context JSON. The packet contains complete original source bodies, not just agenda titles. Source acquisition is not model completion; date/hash/literal-topic/order checks and the user's explicit mapping convention remain separate. Its call consumes the existing workbook-stage budget. Do not restart paused multi-model evaluations merely to exercise this intake feature.
+
 `run_cwh_inline_review.py --task <task>` is a narrower adapter for `raw_workbook_semantic_reviews` only. Configure the model CLI with no filesystem/shell tools and JSON or stream-JSON output. It receives source material over stdin and returns review JSON; host code writes only declared review outputs. It cannot perform downstream internet research or replace independent claim verification; unsupported stages return an explicit blocker.
 
 The raw adapter reviews public TOP candidates, overseas articles and hotwords sequentially. Public/overseas packets retain the full supplied article contents. Hotword transport retains all candidate terms and up to two continuous source windows per term; these are indexes, not full-article verification. Original packets stay unchanged on disk. A term without adequate source support must not be selected. Host cache reuse checks both source packet and output SHA-256, never record IDs alone. New forward evaluations must not receive prior semantic decisions.

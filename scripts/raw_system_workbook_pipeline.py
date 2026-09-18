@@ -503,7 +503,10 @@ def identify_inputs(raw_directory: Path, config: dict[str, Any]) -> InputBundle:
     for profile in heat_profiles:
         if profile is total_profile:
             continue
-        index = child_index_from_filename(profile["path"], config)
+        declared_index = (config.get("child_file_indices") or {}).get(profile["file"])
+        index = declared_index if declared_index is not None else child_index_from_filename(profile["path"], config)
+        if index is not None and (type(index) is not int or index < 1):
+            raise PipelineError(f"子事件序号必须为正整数：{profile['file']}")
         if index is None:
             raise PipelineError(
                 f"已确认{profile['file']}是子事件热度文件，但文件和工作簿均未提供可验证的子事件序号；"
@@ -518,8 +521,8 @@ def identify_inputs(raw_directory: Path, config: dict[str, Any]) -> InputBundle:
                 "role": "child_heat",
                 "child_index": index,
                 "confidence": 0.95,
-                "method": "sheet_schema_plus_child_index_hint",
-                "evidence": [*profile["evidence"], f"文件名解析出子事件序号{index}"],
+                "method": "confirmed_period_metadata" if declared_index is not None else "sheet_schema_plus_child_index_hint",
+                "evidence": [*profile["evidence"], f"已确认元数据指定子事件序号{index}" if declared_index is not None else f"文件名解析出子事件序号{index}"],
                 "filename_monitoring_window": profile.get("filename_monitoring_window") or {},
             }
         )
@@ -2203,6 +2206,10 @@ def main() -> None:
     config = load_json(args.config)
     metadata = load_json(args.metadata)
     validate_declared_topic_mapping(metadata)
+    if metadata.get("child_file_indices"):
+        if metadata.get("topic_mapping_confirmed") is not True:
+            raise PipelineError("child_file_indices需要明确确认的议题映射")
+        config["child_file_indices"] = metadata["child_file_indices"]
     overseas_review = load_json(args.overseas_review) if args.overseas_review else None
     hotword_review = load_json(args.hotword_review) if args.hotword_review else None
     public_review = load_json(args.public_review) if args.public_review else None

@@ -185,6 +185,12 @@ def ai_task(
     output_schema: dict[str, Any] | None = None,
 ) -> Path:
     path = runner.root / "tasks" / f"{stage_id}.json"
+    context_path = runner.root / 'artifacts/meeting_context.json'
+    if context_path.is_file():
+        context = read_json(context_path)
+        from cwh_meeting_intake import validate_review, expected_date
+        validate_review({'expected_date': expected_date(runner.input_contract['agenda']), 'sources': [context['source']]}, context['review'])
+        inputs = {**inputs, 'meeting_context': context}
     payload = build_task_payload(
         stage_id=stage_id,
         task_type=task_type,
@@ -940,7 +946,8 @@ def build_specs() -> list[StageSpec]:
             "标准总表生成与审核",
             dependencies=("intake",),
             artifacts=(ArtifactSpec("workbook", "artifacts/CWH舆情情况_标准总表.xlsx", minimum_bytes=1024),
-                       ArtifactSpec("public_article_evidence", "artifacts/public_article_evidence.json", required=False)),
+                       ArtifactSpec("public_article_evidence", "artifacts/public_article_evidence.json", required=False),
+                       ArtifactSpec("meeting_context", "artifacts/meeting_context.json", required=False)),
             max_attempts=2,
         ),
         StageSpec(
@@ -1108,6 +1115,14 @@ class CwhPipeline:
             "contract_fingerprint": runner.state["input_fingerprint"],
         }
         target = self.artifacts / "intake.json"
+        metadata_path = Path(str(self.contract.get('metadata') or ''))
+        if metadata_path.is_file():
+            context = read_json(metadata_path).get('meeting_context')
+            if context:
+                from cwh_meeting_intake import validate_review, expected_date
+                validate_review({'expected_date': expected_date(agenda), 'sources': [context['source']]}, context['review'])
+                atomic_write_json(self.artifacts / 'meeting_context.json', context)
+                payload['meeting_context'] = context
         atomic_write_json(target, payload)
         return StageOutcome.succeeded("输入已固化，后续节点只能消费本任务产物。")
 
@@ -1137,11 +1152,34 @@ class CwhPipeline:
 
         metadata = Path(str(self.contract.get("metadata") or ""))
         if not metadata.is_file():
-            return StageOutcome.waiting(
-                "waiting_review",
-                "原始表模式需要本期议题元数据，以便可靠匹配子事件表。",
-                details={"required_input": "metadata", "stage": spec.stage_id},
-            )
+            from cwh_meeting_intake import prepare, validate_review, metadata_from_context, PROMPT
+            intake_workspace = self.job_dir / 'meeting_intake'
+            try:
+                packet, source_state = prepare(self.contract['raw_input_dir'], self.contract['agenda'], intake_workspace, self.contract.get('communique_url', ''))
+            except ValueError as exc:
+                return StageOutcome.waiting('waiting_review', str(exc))
+            if not packet['sources']:
+                return StageOutcome.waiting('waiting_review', '未发现本期通稿，请提供公开通稿链接。', details=source_state)
+            context_path = self.artifacts / 'meeting_context.json'
+            if not context_path.is_file():
+                task = ai_task(runner, spec.stage_id, task_type='meeting_communique_review', expected_output=context_path,
+                               inputs={'communique_packet': str(intake_workspace / 'communique_packet.json')},
+                               rules=[PROMPT, '输出{status:reviewed,source:所选完整原始快照,review:语义结果}，保持source全文与哈希不变。'])
+                outcome = maybe_run_ai_worker(runner, spec, task, context_path)
+                if outcome:
+                    return outcome
+                if not context_path.is_file():
+                    return StageOutcome.waiting('waiting_ai', '已取得通稿正文，等待AI全文理解。', details={'task': str(task)})
+            try:
+                context = read_json(context_path)
+                verified = validate_review(packet, context.get('review') or {})
+                context = {**verified, 'model_run': context.get('model_run') or {}}
+                atomic_write_json(context_path, context)
+                metadata_payload = metadata_from_context(context, self.contract['raw_input_dir'], self.contract.get('agenda_order_confirmed') is True)
+            except ValueError as exc:
+                return StageOutcome.waiting('waiting_review', str(exc))
+            metadata = self.artifacts / 'run_metadata.json'
+            atomic_write_json(metadata, metadata_payload)
         raw_dir = Path(str(self.contract["raw_input_dir"]))
         raw_run = self.job_dir / "raw_workbook"
         raw_run.mkdir(parents=True, exist_ok=True)
@@ -1802,6 +1840,8 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "stage_timeouts_seconds": resolved_stage_budgets(profile, input_mode),
         "budget_input_mode": input_mode,
         "agenda": str(args.agenda or "").strip(),
+        "communique_url": str(getattr(args, 'communique_url', '') or '').strip(),
+        "agenda_order_confirmed": bool(getattr(args, 'confirm_agenda_order', False)),
         "system_workbook": str(Path(args.system_workbook).resolve()) if args.system_workbook else "",
         "raw_input_dir": str(Path(args.raw_input_dir).resolve()) if args.raw_input_dir else "",
         "metadata": str(Path(args.metadata).resolve()) if args.metadata else "",
@@ -1986,6 +2026,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("action", choices=["run", "status", "invalidate"])
     result.add_argument("--job-dir", required=True)
     result.add_argument("--agenda", default="")
+    result.add_argument('--communique-url', default='')
+    result.add_argument('--confirm-agenda-order', action='store_true')
     result.add_argument("--system-workbook", default="")
     result.add_argument("--raw-input-dir", default="")
     result.add_argument("--metadata", default="")

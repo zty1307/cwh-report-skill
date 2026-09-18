@@ -46,6 +46,10 @@ def run_host_semantic_task(task_path: Path, callback) -> None:
 
 def build_prompt(task_path: Path, session_id: str) -> str:
     task = json.loads(task_path.read_text(encoding="utf-8-sig"))
+    if task.get('task_type') == 'meeting_communique_review' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON'):
+        from cwh_meeting_intake import run_task
+        run_host_semantic_task(task_path, run_task)
+        return
     raw_command = os.environ.get("CWH_RAW_REVIEW_COMMAND_JSON", "")
     if task.get("task_type") == "raw_workbook_semantic_reviews" and raw_command:
         code = run_scoped_command([sys.executable, str(Path(__file__).with_name("run_cwh_inline_review.py")),

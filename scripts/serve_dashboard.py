@@ -809,34 +809,13 @@ class DashboardApp:
         return aliases
 
     def _raw_metadata(self, manifest: dict) -> dict:
-        data = self._current_report_data()
-        meeting = data.get("meeting") or {}
-        topics = [str(value).strip() for value in meeting.get("topics") or [] if str(value).strip()]
-        keywords = meeting.get("topic_keywords") or {}
-        agenda = str(manifest.get("agenda") or meeting.get("agenda") or "").strip()
-        if re.search(r"(进一步部署|部署|听取|研究|审议通过|审议|决定)", agenda):
-            from cwh_orchestrator import infer_topics
-
-            inferred_topics = [str(value).strip() for value in infer_topics(agenda) if str(value).strip()]
-            if inferred_topics and inferred_topics != ["本次国务院常务会议"]:
-                topics = inferred_topics
-        if not topics:
-            raise ValueError("当前工作台没有子议题信息，无法匹配原始子事件表。")
-        date = str(meeting.get("date") or "").strip()
-        if agenda:
-            from cwh_orchestrator import normalize_date
-
-            date = normalize_date(agenda) or date
-        meeting_title = f"{chinese_date(date)}国务院常务会议" if date else agenda
-        return {
-            "meeting_title": meeting_title or "国务院常务会议",
-            "event_sheet_title": agenda or meeting_title or "国务院常务会议",
-            "topic_titles": topics,
-            "topic_aliases": [
-                self._topic_aliases(topic, [str(value) for value in keywords.get(topic, [])])
-                for topic in topics
-            ],
-        }
+        # A displayed previous report is never metadata for a newly uploaded batch.
+        from cwh_meeting_intake import metadata_from_context
+        context = manifest.get("meeting_context")
+        if not context:
+            raise ValueError("本期通稿尚未完成全文理解，不能沿用当前页面或上一期议题。")
+        directory = self._job_directory(manifest["job_id"])
+        return metadata_from_context(context, directory / "files", manifest.get("agenda_order_confirmed") is True)
 
     @staticmethod
     def _is_standard_workbook(profile: dict) -> str:
@@ -1337,6 +1316,8 @@ class DashboardApp:
             "job_id": job_id,
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "agenda": str(payload.get("agenda") or "").strip(),
+            "communique_url": str(payload.get("communique_url") or "").strip(),
+            "agenda_order_confirmed": payload.get("agenda_order_confirmed") is True,
             "files": [],
             "status": "uploading",
             "progress": 0,
@@ -1360,12 +1341,30 @@ class DashboardApp:
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"status": "uploaded", "name": target.name, "size": len(content), "file_count": len(manifest["files"])}
 
+    def update_communique(self, payload: dict) -> dict:
+        """Update only the selected import; never edit a published report's facts."""
+        directory = self._job_directory(str(payload.get("job_id") or ""))
+        manifest = self._read_manifest(directory)
+        if manifest.get("status") in {"workbook_queued", "workbook_running", "report_queued", "report_running", "complete", "workbook_complete"}:
+            raise ValueError("已启动或已完成任务不能替换通稿，请新建导入任务。")
+        from cwh_meeting_intake import expected_date, is_gov_url
+        agenda = str(payload.get("agenda") or manifest.get("agenda") or "")
+        expected_date(agenda)
+        url = str(payload.get("communique_url") or "").strip()
+        if url and not is_gov_url(url):
+            raise ValueError("请输入公开 gov.cn 通稿链接。")
+        return self._update_manifest(directory, agenda=agenda, communique_url=url,
+                                     communique_supplement_url=bool(url),
+                                     agenda_order_confirmed=payload.get("agenda_order_confirmed") is True)
+
     def commit_import(self, job_id: str) -> dict:
         directory = self._job_directory(job_id)
         manifest_path = directory / "manifest.json"
         if not manifest_path.exists():
             raise FileNotFoundError("Import job not found")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("status") in {"workbook_queued", "workbook_running", "report_queued", "report_running"}:
+            raise ValueError("当前任务仍在运行，请勿重复启动。")
         if not manifest.get("files"):
             raise ValueError("No files were uploaded")
         from profile_cwh_import import profile_files
@@ -1434,6 +1433,27 @@ class DashboardApp:
                 )
                 return
 
+            from cwh_meeting_intake import prepare, review_packet, validate_review
+            packet, source_state = prepare(directory / "files", manifest["agenda"], directory / "meeting_intake", manifest.get("communique_url", ""),
+                                           supplement_url=manifest.get('communique_supplement_url') is True)
+            self._update_manifest(directory, communique=source_state, message="通稿正文已获取，正在等待或执行AI全文理解。")
+            context = None
+            saved_context = directory / "meeting_intake/meeting_context.json"
+            if saved_context.is_file():
+                prior = json.loads(saved_context.read_text(encoding="utf-8"))
+                try:
+                    context = {**validate_review(packet, prior.get("review") or {}), 'model_run': prior.get('model_run') or {}}
+                except ValueError:
+                    pass
+            if not context and packet["sources"]:
+                context = review_packet(packet, directory / "meeting_intake")
+            if not context:
+                self._update_manifest(directory, status="waiting_ai" if packet["sources"] else "waiting_review",
+                                      communique=source_state,
+                                      message="通稿全文已保存，等待AI理解；接入模型后点处理数据继续。" if packet["sources"] else "原始样本未找到本期通稿，请补充通稿链接后继续。")
+                return
+            manifest = self._update_manifest(directory, meeting_context=context,
+                                             communique={**source_state, "ai_status": "reviewed", "status": "reviewed"})
             metadata = self._raw_metadata(manifest)
             metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
             self._update_manifest(
@@ -1539,7 +1559,7 @@ class DashboardApp:
             )
             self._update_manifest(
                 directory,
-                status="failed",
+                status="waiting_review" if isinstance(exc, ValueError) else "failed",
                 steps=self._steps(complete_before=failed_index, failed=failed_index),
                 finished_at=datetime.now().isoformat(timespec="seconds"),
                 workbook_log_path=str(log_path),
@@ -1798,6 +1818,8 @@ class DashboardApp:
             command.extend(
                 ["--ai-worker-command-json", json.dumps(self.pipeline_ai_command, ensure_ascii=False)]
             )
+        if manifest.get('raw_metadata_path'):
+            command.extend(['--metadata', manifest['raw_metadata_path']])
         existing_state_path = output_dir / "pipeline_state.json"
         if existing_state_path.exists():
             try:
@@ -2211,6 +2233,9 @@ def handler_factory(app: DashboardApp):
                     return
                 if parsed.path == "/api/import/commit":
                     self.json_response(app.commit_import(str(self.read_json().get("job_id") or "")))
+                    return
+                if parsed.path == "/api/import/communique":
+                    self.json_response(app.update_communique(self.read_json()))
                     return
                 if parsed.path == "/api/import/report":
                     self.json_response(app.start_report(str(self.read_json().get("job_id") or ""), self.authenticated_user_key()))
