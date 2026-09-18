@@ -2,7 +2,7 @@
 
 This candidate imports the human-reviewed generic Word template, preserves its approved fixed phrases, and fills the same eleven slots for all models. Editorial wording is maintained separately from evidence/measurement rules in `config/editorial_template.v1.json`. It does not confer semantic approval, change statistics or turn an access failure into a verified collection result. Current sourced meeting metadata overrides the configurable chair default.
 
-## Changed behavior
+## Initial template behavior (historical; later sections supersede)
 
 - One-source viewpoint target: 100–200 characters excluding attribution and whitespace, including punctuation. This is a soft writing target, not padding, truncation or a new 100-character rejection gate.
 - Prefer faithful source wording; do not force every quotation into judgment/reason/scope fields.
@@ -83,6 +83,16 @@ The table always retains all nine columns. Missing independently reviewed sentim
 The complete local suite passed **1218 tests with seven skipped**. Generic visual cases use unrelated dates and four, six and nine topics; checks cover counts versus evidence-sample counts, duplicate/long labels, zero values, image/config/data manifest changes, table merge/width/font/indent/line-spacing drift and source-image override prevention. Skill validation and preflight passed. Structural tests and manifests are not a claim of pixel-identical rendering across rasterizers or independent semantic review.
 
 Two separately labelled visual revisions were generated from the retained GLM reviewed delivery and DeepSeek full-flow delivery. All **16 GLM pages and 21 DeepSeek pages** were rendered through an independent read-only Word instance and visually inspected. Source statistics, topic facts, viewpoint text, comments, hotwords and original files remained unchanged. These revisions do not apply the later DeepSeek selection-only experiment or resolve existing editorial/evidence gaps. Each workbench passed offline read-only checks of all ten panels at 1600- and 390-pixel widths: no broken images, page overflow or JavaScript errors, and a valid Word target. Save/backend behavior was not exercised. These are visual re-renders, not fresh end-to-end model runs or new runtime measurements.
+
+## User-approved compact writing revision
+
+The later user decision supersedes the earlier 100–200-character and 2–4-voice guidance. Single attributed claims now normally use 50–120 characters, preferably 80–100, with necessary extended explanations around 150–180. All ranges are soft: no padding, hard truncation or omission of indispensable conditions. The 30-Chinese-character source-quality floor and existing audited thin-evidence exceptions remain unchanged.
+
+Bounded prose normally uses 4–6 attributed excerpts across 2–3 judgments per topic, not 6–12 distinct people. Usually two complementary sources support a judgment; one strong source can use the existing exception, while a third must add substance. There is no fixed whole-report excerpt or paragraph quota. Existing 12-subject/six-group safety ceilings remain abnormal-case bounds, not targets. Discovery, article-reading limits, original evidence, independent source review and wall-clock budgets are unchanged.
+
+The first rendered paragraph's heading and attribution count toward the 300-character soft split threshold. Paragraphs normally aim for 150–260 characters; splitting happens only between complete claims, and a necessary overlong claim is preserved. An advisory DOCX audit reports actual domestic-media paragraph lengths, structured claim counts and long-claim/additional-information checks. Structured claim counts are explicitly not unique-person counts or a remeasurement of historical attribution spans. The audit neither deletes text nor fails delivery by length.
+
+Reading, legacy authoring, selection, correction, task-generation and plan-generation contracts now carry the same revised expectations. These are cross-model rules, not provider-specific prompts. Existing reports and the human-edited Word template are not overwritten. Full regression passed 1223 tests with seven skipped; Skill validation and preflight passed. Added behavioral cases preserve a seventh selected claim, a necessary overlong claim and all original evidence, count first-paragraph headings during splitting, distinguish repeated-person claims from person counts, and verify unchanged reading/discovery limits. Regression validation is distinct from a fresh model run; this revision alone does not certify improved editorial selection or end-to-end stability.
 
 ## Publication scope
 

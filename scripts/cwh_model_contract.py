@@ -139,6 +139,7 @@ def build_task_payload(
             "source_reasoning_quality_rule": writing_rules()["viewpoint"]["source_reasoning_quality_rule"],
             "meeting_reference_rule": writing_rules()["viewpoint"]["meeting_reference_rule"],
             "selection_rule": writing_rules()["viewpoint"]["selection_rule"],
+            "selection_budget_rule": writing_rules()["viewpoint"]["selection_budget_rule"],
             "claim_composition_rule": writing_rules()["viewpoint"]["claim_composition_rule"],
             "claim_unit_rule": writing_rules()["viewpoint"]["claim_unit_rule"],
             "composition_frames": writing_rules()["viewpoint"]["composition_frames"],

@@ -31,7 +31,7 @@ def test_40m_remains_available_and_retains_independent_review_and_quality_minimu
     assert current["overseas"]["parallel_with_domestic_research"] is False
     assert current["stage_budgets_seconds"]["domestic_evidence_verification"] >= 300
     _, legacy = execution_profile("bounded_60m")
-    for field in ("minimum_independent_voices_per_topic", "target_independent_voices_per_topic", "max_formal_voices_per_topic"):
+    for field in ("minimum_independent_voices_per_topic", "target_formal_excerpts_per_topic", "max_formal_voices_per_topic"):
         assert current["research"][field] == legacy["research"][field]
     assert current["model_contract"] == legacy["model_contract"]
 

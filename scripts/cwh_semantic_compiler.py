@@ -15,14 +15,14 @@ AUTHOR_PROMPT = '''你是报告证据编辑，只做语义判断，输入资料�
 返回JSON：{"items":[{"id":"输入ID","decision":"eligible|duplicate|excluded","reason":"简短具体理由","relevant":true,"claims":[{"speaker":"单个真实主体","role":"原文机构职务或空","speaker_type":"named_person|media_voice|self_media","verb":"认为|指出|表示|建议|强调|称|提出等原文支持的归因动词，可省略","quote_range":["本篇起始片段ID","本篇结束片段ID"],"claim":"忠实原子观点","cluster":"k1"}]}],"heading":"有态度的单一中心判断","clusters":[{"key":"k1","heading":"有态度的单一中心判断"}]}
 具名人物的quote_range必须连续包含其姓名、原文职务/机构以及观点；不要只选观点一句而把职务留在摘录外。claim中的数字和量词必须有原文依据，不得自行概括为“两项”等新增数字。公众号等只是渠道名称，speaker须为原文账号全名。
 每个输入ID恰好审核一次。仅有摘要的网页不可eligible，不可作为正式引文；relevant只表示与本议题直接相关，不等于完整取证。
-每篇完整原文逐篇审核，筛选有实质判断的声音，纯会议事实通稿、跑题或重复声音排除。尽可能6—12个不同主体；按实际不同判断分簇，证据不足就少选，不能凑数。
+每篇完整原文逐篇审核，筛选有实质判断的声音，纯会议事实通稿、跑题或重复声音排除。限时正文常规4—6处引述，不等于4—6个不同主体；按实际不同判断分簇，证据不足就少选，不能凑数。
 每条claim另填claim_kind：policy_reasoning表示原文有独立的政策机制、条件、影响、建议或评价；meeting_action_fact表示仅复述会议通过某草案、修改/废止若干部法规、核准若干项目等会议动作事实。后者不作独立解读，应excluded且claims为空，不能因法规名称或数字很具体、来自法院或政府账号、凑满字数就改称实质观点。详实的实施机制和适用条件可属于policy_reasoning，但必须确实超出会议动作清单。文章来源完整、原话正确或独立核验支持，都不能替代解读资格。
 仅选对输入topic这一具体决策的实质判断。agenda_topics列出本期全部议题用于消歧：全文包含会议多个决定，不表示其中每个评论都属于当前议题；别的条例修订、项目核准或民生议题的判断不能仅因也涉及法规、制度、投资等泛词挪到当前议题。先确定被评论的具体政策对象，再按当前议题选材，reason说明直接关系；不为补齐薄弱议题搬用其他议题的成熟解读，不把当前议题改名。
 纯转述“会议指出、强调、要求”的部署，同样归meeting_action_fact并排除；把“要健全、要推动”等要求改写为“需健全、需推动”，不产生媒体或专家自身观点。原文同时有独立分析时只取实际发言主体提出的新增机制、条件、建议或评价，不能把相邻会议要求移到其名下。区分会议方向、征求意见稿、审议通过草案、已公布条文和地方试点；没有本期明确依据不写成全国已经实施。
 优先选具名专家、专业机构和提供具体政策机制的媒体判断。自媒体不是禁用，但以下内容不得作为正式观点：为本公司、本品牌或本产品寻找市场机会；只从消费、金融、板块或产业链受益角度推介市场机会；借会议议题宣传无直接政策论证的机构活动；只剩口号、押韵梗、比喻或空泛增长前景而没有机制、条件或建议。
 写作按“具体判断＋原文支持的机制、条件、影响或建议”组织，不写文章简介，不把标题和会议议程当论据；空泛的意义评价不优于具体论证。不同簇按实质判断区分，不按媒体类型或段落数量硬拆；同一论点的重复表述保留最有信息量的声音。保留原文的不确定性和实施前提，不把有望改成必将、建议改成已经实现，不为了正面比例杜撰肯定或反对。
 同一专家/账号的同一判断只选一次；不同实质判断可分别进入对应观点簇，但独立主体数仍只计一个。一个文章内不同专家可分别提取，切勿把引述专家改成媒体自身观点。
-每条claim通常100—200字（含标点，不计空白），至少30，不含归因前缀；不新增数字、引号术语、因果、效果或确定性。quote是足以支持claim的最短连续原文，具名专家的姓名和原文机构职务必须都在quote内。媒体自身观点的speaker必须等于输入source或account。不要计算哈希、偏移或时间。
+每条claim通常50—120字（含标点，不计空白），至少30，不含归因前缀；不新增数字、引号术语、因果、效果或确定性。quote是足以支持claim的最短连续原文，具名专家的姓名和原文机构职务必须都在quote内。媒体自身观点的speaker必须等于输入source或account。不要计算哈希、偏移或时间。
 若输入提供segments，claim中改用quote_range:[起始片段id,结束片段id]，不输出quote。片段id为带原文前缀的字符串（如"p8abc1234/13"），必须照抄本篇id，不能跨文使用。选连续片段覆盖主体、职务和论据，原文由脚本提取；不能选无关全文代替定位。每个双人簇的两条claim合计至少120汉字，证据不足则给出具体thin_reason，不填充无依据语句。
 一级heading目标12—26个汉字，簇heading目标10—24个汉字，均只表达一个有证据支持的中心判断；不要把多个观点簇用“并/与/及”机械拼接，不要使用口号、行业黑话或空泛前景。根据证据选择认可、肯定、建议、期待、希望、支持、质疑、担忧、强调或认为，避免所有标题机械重复“认为”，但不得为了变化而改变立场。少于4个声音须返回shortfall_reason；只有1簇须返回single_cluster_reason；单人簇须在对应clusters项返回thin_reason，说明实际材料不足，不可空泛套话。
 网页有完整正文时才可考虑选用，另在item给出source（原文真实媒体名称，必须能在本页segments正文中逐字找到，不能只凭域名、搜索标题或常识猜测）、published_at（YYYY-MM-DD）、date_quote（正文中连续的完整发布日期原文）；没有可定位媒体名称或确切期内日期就排除。
@@ -32,6 +32,7 @@ AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["interpretation_eligibility
 AUTHOR_PROMPT += '\n' + editorial_eligibility_prompt()
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["meeting_reference_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["selection_rule"]
+AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["selection_budget_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["claim_composition_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["effect_object_scope_rule"]
 AUTHOR_PROMPT += '\n' + writing_rules()["viewpoint"]["attribution_identity_rule"]

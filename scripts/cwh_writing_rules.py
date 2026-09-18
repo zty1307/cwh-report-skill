@@ -49,7 +49,7 @@ def editorial_template_prompt(stage: str, rules=None) -> str:
     """Small stage-specific frames, not a fixed agenda or a second drafting pass."""
     rules = rules or writing_rules()['viewpoint']
     if stage == 'selection':
-        return rules['paragraph_pairing_rule']
+        return rules['selection_budget_rule'] + '\n' + rules['paragraph_pairing_rule']
     if stage not in {'claim', 'revision'}:
         raise ValueError('Unknown editorial template stage: ' + stage)
     result = (rules.get('claim_length_policy', '') + '\n' + rules['claim_unit_rule'] + '\n以下是可选句式，不是必填栏目；原文已完整清楚时优先直接摘用，不为套句式改写。只选当前原文适用的一种，'

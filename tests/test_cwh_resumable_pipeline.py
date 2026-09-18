@@ -349,7 +349,8 @@ class CwhResumablePipelineTests(unittest.TestCase):
         task_rules = " ".join(MODULE.read_json(viewpoint_task)["rules"])
         self.assertIn("候选池", task_rules)
         self.assertIn("查询/抓取上限", task_rules)
-        self.assertIn("最多12个代表性独立声音", task_rules)
+        self.assertIn("每议题常规4至6处引述", task_rules)
+        self.assertIn("最多12个独立主体仅是异常兜底上限", task_rules)
         self.assertIn("formal_use=reserve", task_rules)
 
         analysis = {
@@ -581,7 +582,7 @@ class CwhResumablePipelineTests(unittest.TestCase):
             plan["topics"][0]["minimum_evidence"]["formal_sources_per_mature_cluster"],
         )
         self.assertEqual(
-            "bounded_2_to_4_with_audited_reserve",
+            "normally_two_complementary_voices_with_audited_exceptions",
             plan["topics"][0]["domestic_viewpoint_contract"]["topic_density"]["independent_voices_per_cluster"],
         )
         self.assertEqual("all_workbook_topics", plan["global_tasks"]["public_comments"]["target_topics"])

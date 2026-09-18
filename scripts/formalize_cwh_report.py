@@ -1626,7 +1626,7 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             details = clean_sentence(display_cluster_details(clusters[0]))
             body = details or clean_sentence(clusters[0].get("summary"))
             warning = ATTRIBUTION_REVIEW_TEXT if cluster_needs_attribution_review(clusters[0]) else ""
-            paragraphs = cluster_detail_paragraphs(clusters[0])
+            paragraphs = cluster_detail_paragraphs(clusters[0], first_lead=f"{topic_idx}.{topic_heading(item)}。")
             lines.append(f"{topic_idx}.{topic_heading(item)}。" + ('\n\n'.join(paragraphs) if paragraphs else body + '。') + warning)
             lines.append("")
             continue
@@ -1904,10 +1904,12 @@ def add_emphasized_details(paragraph: Any, details: str) -> None:
         paragraph.add_run(details[cursor:])
 
 
-def cluster_detail_paragraphs(cluster: dict[str, Any]) -> list[str]:
+def cluster_detail_paragraphs(cluster: dict[str, Any], *, first_lead: str | None = None) -> list[str]:
     """Layout only: keep complete attributed claims and all their conditions."""
     limit = writing_rules()['viewpoint']['paragraph_soft_max_chars']
     max_claims = writing_rules()['viewpoint']['paragraph_max_claims']
+    lead = first_lead if first_lead is not None else '一是' + clean_sentence(cluster.get('summary')) + '。'
+    lead_chars = len(re.sub(r'\s+', '', lead))
     evidence = [row for row in cluster.get('evidence') or [] if isinstance(row, dict)]
     if not evidence:
         text = clean_sentence(display_cluster_details(cluster))
@@ -1920,7 +1922,8 @@ def cluster_detail_paragraphs(cluster: dict[str, Any]) -> list[str]:
             continue
         seen.add(signature)
         sentence = sentence.rstrip('。') + '。'
-        if current and (len(current) + len(sentence) > limit or count >= max_claims):
+        total_chars = len(re.sub(r'\s+', '', current + sentence)) + (lead_chars if not result else 0)
+        if current and (total_chars > limit or count >= max_claims):
             result.append(current); current, count = '', 0
         current += sentence; count += 1
     if current:
@@ -1945,7 +1948,7 @@ def add_detail_blocks(document: Any, paragraph: Any, cluster: dict[str, Any]) ->
         pattern = '|'.join(map(re.escape, sorted(set(subjects), key=len, reverse=True)))
         prefix = re.match(r'(?:' + pattern + r')(?:' + verbs + r')', sentence) if pattern else None
         entries.append((sentence, prefix.end() if prefix else 0))
-    for index, details in enumerate(cluster_detail_paragraphs(cluster)):
+    for index, details in enumerate(cluster_detail_paragraphs(cluster, first_lead=paragraph.text)):
         target = paragraph if index == 0 else document.add_paragraph()
         if not entries:
             # No structured speaker mapping: keep prose plain, do not guess
@@ -2333,6 +2336,50 @@ def empty_comment_notice(data: dict[str, Any]) -> str:
     return rules['no_ready_quotes_unverified_candidates' if rows else 'no_comment_samples']
 
 
+def audit_domestic_writing_size(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
+    """Advisory measurements only; never delete claims or fail delivery on size."""
+    if section_override(data, 'two'):
+        return {'applicable': False, 'reason': 'explicit_domestic_section_override'}
+    rules = writing_rules()['viewpoint']
+    topics, warnings = [], []
+    for index, item in enumerate(report_topic_items(data), 1):
+        clusters = item.get('clusters') or []
+        rows = [row for cluster in clusters for row in cluster.get('evidence') or []
+                if isinstance(row, dict) and row.get('formal_claim')]
+        lengths = [len(re.sub(r'\s+', '', str(row['formal_claim']))) for row in rows]
+        topics.append({'topic_index': index, 'topic': item.get('topic'),
+                       'structured_claim_count': len(rows), 'group_count': len(clusters),
+                       'claim_body_chars': lengths})
+        if len(rows) > rules['topic_excerpt_range'][1]:
+            warnings.append({'kind': 'check_additional_information_gain', 'topic_index': index,
+                             'claim_count': len(rows)})
+        for row, size in zip(rows, lengths):
+            if size > rules['extended_claim_char_range'][1]:
+                warnings.append({'kind': 'check_long_claim_context', 'topic_index': index,
+                                 'evidence_id': row.get('evidence_id'), 'chars': size})
+    start, end = writing_rules()['document']['domestic_subsections'][:2]
+    active, found, paragraphs = False, False, []
+    for p in ET.fromstring(document_xml).findall('./' + qn('w:body') + '/' + qn('w:p')):
+        text = ''.join(node.text or '' for node in p.iter(qn('w:t'))).strip()
+        if text == start:
+            active, found = True, True
+            continue
+        if active and text == end:
+            break
+        if active and text:
+            size = len(re.sub(r'\s+', '', text))
+            paragraphs.append(size)
+            if size > rules['paragraph_soft_max_chars']:
+                warnings.append({'kind': 'check_long_rendered_paragraph',
+                                 'paragraph_index': len(paragraphs), 'chars': size})
+    return {'applicable': True, 'advisory_only': True, 'topics': topics, 'warnings': warnings,
+            'domestic_media_section_found': found, 'word_paragraph_chars': paragraphs,
+            'structured_claim_count': sum(t['structured_claim_count'] for t in topics),
+            'scope': 'Structured claims are not unique people or measured baseline attribution spans. '
+                     'Word lengths include headings/attributions; headings-only and gap paragraphs are included. '
+                     'No whole-report quota, automatic deletion, semantic approval or failure by size.'}
+
+
 def audit_formal_comment_quotes(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
     """Check actual domestic Word prose, not JSON approvals or appendix text."""
     approved = [row for row in (data.get('comments', {}).get('selected') or [])
@@ -2439,6 +2486,7 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
                              "verified_baseline_template": fixed_report_visuals,
                              "declared_authority": artifacts.get('chart_authority')},
         "domestic_comment_quotes": comment_quote_audit,
+        "domestic_writing_size": audit_domestic_writing_size(data, document_xml),
     }
 
 

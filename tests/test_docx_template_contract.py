@@ -77,7 +77,7 @@ def test_editorial_wording_does_not_relabel_sentiment_or_invent_counts():
     assert formal.total_event_paragraphs(data)[0].startswith('本次常务会引发境内外媒体广泛报道，境内外传播总量约4.1万条')
     assert '以积极正面和客观中立为主' in formal.comment_lead(data, [('建议改善服务', [{'content': '已审原话'}])])
     assert data == before
-    assert writing_rules()['viewpoint']['claim_char_range'] == [100, 200]
+    assert writing_rules()['viewpoint']['claim_char_range'] == [50, 120]
     assert writing_rules()['viewpoint']['minimum_claim_cjk'] == 30
 
 
