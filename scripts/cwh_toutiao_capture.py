@@ -1,4 +1,4 @@
-"""Normalize retained, successful no-login Toutiao comment response envelopes."""
+"""Normalize retained successful public Toutiao comment response envelopes."""
 import argparse
 import hashlib
 import json
@@ -27,6 +27,12 @@ def normalize(observations, start, end):
         parent = payload.get('group') or {}
         title = (payload.get('repost_params') or {}).get('title') or ''
         if not title:
+            if not payload.get('data'):
+                captures.append({'raw_file': str(path.resolve()), 'sha256': digest,
+                    'more_pages_exposed': bool(payload['has_more']), 'visible_top_level_rows': 0,
+                    'parent_id': parent_id, 'parent_title_status': 'unavailable_no_comment_rows',
+                    'scope': 'Empty observed API response only; no parent or comment relevance certification'})
+                continue
             raise ValueError('Parent title is unavailable; require a real parent-page capture')
         posts[parent_id] = {'id': parent_id, 'text': title, 'context_kind': 'api_parent_title_only',
             'source': parent.get('user_name') or '', 'published_at': '', 'url': check['seed_url'],

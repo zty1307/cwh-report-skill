@@ -1,0 +1,20 @@
+{
+  "version": "baseline-fill-v1",
+  "width": 856,
+  "height": 531,
+  "render_scale": 2,
+  "font_family": "Microsoft YaHei",
+  "color": "#003366",
+  "grid_color": "#E0E0E0",
+  "text_color": "#000000",
+  "title_size": 38,
+  "text_size": 22,
+  "subtitle_size": 26,
+  "trend": {"left": 114, "right": 796, "top": 154, "bottom": 451, "line_width": 2, "marker_radius": 6, "grid_levels": 6},
+  "topics": {"axis_x": 438, "right": 786, "top": 80, "bottom": 503, "bar_height": 18, "minimum_row_height": 68, "label_gap": 14, "line_height": 33},
+  "trend_title": "{date}国务院常务会议舆情走势",
+  "topic_title": "{date}国务院常务会议子议题传播量",
+  "total_title": "信息传播总量：{total}万条",
+  "legend": "信息传播量",
+  "table_grid_twips": [711, 1558, 944, 1040, 850, 993, 850, 813, 656]
+}

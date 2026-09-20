@@ -911,6 +911,19 @@ class PublicArticleEvidenceCorpusTests(unittest.TestCase):
         self.assertIn("专家甲", low["content"])
         self.assertIn("专家乙", low["content"])
 
+    def test_roundup_rule_does_not_remove_full_text_from_body_candidate_pool(self):
+        row = {"source_row": 8, "title": "新闻早餐：本期政策解读", "account": "媒体甲",
+               "url": "https://example.test/roundup", "read_count": 9,
+               "content": "国务院常务会议研究住房公积金工作。专家甲认为覆盖灵活就业人员有助改善其住房保障。其他新闻。"}
+        corpus = self.pipeline.build_public_article_evidence_corpus([row], self.config, self.metadata)
+        self.assertEqual(corpus['candidate_count'], 1)
+        self.assertEqual(corpus['candidates'][0]['content'], row['content'])
+        self.assertTrue(corpus['candidates'][0]['reading_hints']['roundup_title'])
+        self.assertTrue(corpus['candidates'][0]['reading_hints']['semantic_relevance_review_required'])
+        top = self.pipeline.filter_public_top([row], self.config, self.metadata)
+        self.assertEqual(top['selected'], [])
+        self.assertEqual(top['decisions'][0]['reason'], 'roundup_or_breakfast_digest')
+
     def test_exact_duplicates_and_nonmeeting_rows_keep_auditable_decisions(self):
         base = {
             "account": "账号甲",

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from urllib.parse import urlsplit
 
 from cwh_host_research import invoke, observed_tools, search_rows, semantic_json
@@ -255,15 +256,37 @@ def run_task(task_path):
     search_command = json.loads(os.environ['CWH_SEARCH_COMMAND_JSON'])
     semantic_command = json.loads(os.environ['CWH_SEMANTIC_COMMAND_JSON'])
     budget = max(1, int(task.get('remaining_budget_seconds') or task['time_budget_seconds']) - 8)
-    search_budget = min(75, max(25, int(budget * .28)))
+    deadline = time.monotonic() + budget
+    available = (task.get('repair_contract') or {}).get('missing_evidence') == 'deliver_available_with_gaps'
+    search_budget = min(75, max(1, int(budget * .28)))
     observations = collect_search(plan, registry, search_command, workspace, search_budget)
     candidates = media_candidates(observations, registry)
     pages = read_public_pages([row['url'] for row in candidates], timeout=8)
     full_packet = review_packet(plan, candidates, pages)
+    atomic_write_json(workspace / 'overseas_source_packet.json', full_packet)
     packet, deterministic_exclusions = partition_reviewable(full_packet)
+    deferred = []
     if packet['rows']:
-        reviewed, run = semantic_json(packet, PROMPT, semantic_command, workspace, 'overseas-review', budget-search_budget)
-        decisions = deterministic_exclusions + compile_review(packet, reviewed)
+        from cwh_host_research import HostModelError, SemanticResponseError
+        run = None
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining < 5:
+                raise TimeoutError('Overseas review budget exhausted before call')
+            reviewed, run = semantic_json(packet, PROMPT, semantic_command, workspace, 'overseas-review', remaining)
+            decisions = deterministic_exclusions + compile_review(packet, reviewed)
+        except (HostModelError, ValueError, TimeoutError) as exc:
+            if not available:
+                raise
+            from cwh_semantic_recovery import interruption
+            if isinstance(exc, ValueError) and not isinstance(exc, SemanticResponseError):
+                if not run:
+                    raise
+                exc = SemanticResponseError(str(exc), run)
+            failure = interruption(exc)
+            deferred = [{'id': row['id'], 'decision': 'deferred', **failure} for row in packet['rows']]
+            decisions = deterministic_exclusions + deferred
+            run = {'model_invoked': False, 'seconds': 0, 'review_interruption': failure}
     else:
         run, decisions = {'session_id': 'no-semantic-candidates', 'seconds': 0}, deterministic_exclusions
     by_decision = {row['id']: row for row in decisions}
@@ -283,14 +306,19 @@ def run_task(task_path):
                       'simplified_chinese_reviewed': True, 'reviewer_run_id': run['session_id'],
                       'region': 'overseas', 'source_type': 'overseas_media', 'origin': 'public_web_supplement'})
     social = social_audit(observations)
+    media_complete = not deferred and all(q['status'] == 'completed' for q in observations['queries'] if q['kind'] == 'media')
+    completed = media_complete and social['status'] in {'no_relevant_result', 'hit'}
     supplements = {'schema_version': '1.0', 'media': media[:10], 'comments': []}
     audit = {'schema_version': '1.0', 'created_at': utc_now(), 'registry_version': registry.get('version'),
              'attempted': True, 'run_attempted': True, 'dry_run': False,
-             'collection_completed': social['status'] in {'no_relevant_result', 'hit'},
-             'collection_status': 'completed' if social['status'] in {'no_relevant_result', 'hit'} else 'partial_completed',
-             'collector_exit_code': 0 if social['status'] in {'no_relevant_result', 'hit'} else 1,
-             'command_exit_code': 0 if social['status'] in {'no_relevant_result', 'hit'} else 1,
-             'media_collection': {'status': 'hit' if media else 'no_relevant_result', 'candidate_count': len(candidates),
+             'collection_completed': completed,
+             'collection_status': 'completed' if completed else 'partial_completed',
+             'collector_exit_code': 0 if completed else 1,
+             'command_exit_code': 0 if completed else 1,
+             'delivery_policy': 'deliver_available_with_gaps' if available else '',
+             'search_observations': observations, 'review_deferred_records': deferred,
+             'notice': '' if completed else '境外补充检索或审核未全部完成，仅保留已核验材料；未完成部分不作零结果结论。',
+             'media_collection': {'status': ('hit' if media else 'no_relevant_result') if media_complete else 'access_failed', 'candidate_count': len(candidates),
                                   'eligible_count': len(media), 'queries': [row for row in observations['queries'] if row['kind'] == 'media'],
                                   'page_reads': pages, 'decisions': decisions},
              'comment_collection': social, 'semantic_run': run,

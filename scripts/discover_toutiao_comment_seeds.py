@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import html
+from html.parser import HTMLParser
 import json
 import re
 import time
@@ -15,7 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit, parse_qs
 from urllib.request import Request, urlopen
 
 
@@ -35,8 +36,63 @@ def fetch_text(url: str, referer: str = "", timeout: int = 30) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
-def discover(query: str) -> dict[str, str]:
-    page = fetch_text(SEARCH_URL.format(quote(query)))
+def observed_article_id(url: str) -> str:
+    """Unwrap only observed Toutiao search links; never fetch a redirect here."""
+    for _ in range(5):
+        parsed = urlsplit(html.unescape(url))
+        if parsed.scheme not in {'http', 'https'} or parsed.username or parsed.password:
+            return ''
+        if parsed.hostname not in {'toutiao.com', 'www.toutiao.com', 'so.toutiao.com', 'sou.toutiao.com'}:
+            return ''
+        match = re.fullmatch(r'/(?:article/|group/|a)(\d{18,20})/?', parsed.path)
+        if match and parsed.hostname in {'toutiao.com', 'www.toutiao.com'}:
+            return match.group(1)
+        if parsed.path.rstrip('/') != '/search/jump':
+            return ''
+        values = parse_qs(parsed.query).get('url') or []
+        if len(values) != 1:
+            return ''
+        url = values[0]
+    return ''
+
+
+class SearchArticleLinks(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found, self.scoped, self.current_id, self.title = {}, {}, '', []
+        self.div_depth, self.card_depths, self.has_cards = 0, set(), False
+        self.current_in_card = False
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == 'div':
+            self.div_depth += 1
+            if 'cs-card' in attributes.get('class', '').split():
+                self.card_depths.add(self.div_depth)
+                self.has_cards = True
+        if tag == 'a':
+            self.current_id = observed_article_id(attributes.get('href', ''))
+            self.title = []
+            self.current_in_card = bool(self.card_depths)
+
+    def handle_data(self, data):
+        if self.current_id:
+            self.title.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == 'div':
+            self.card_depths.discard(self.div_depth)
+            self.div_depth = max(0, self.div_depth - 1)
+        if tag == 'a' and self.current_id:
+            title = ''.join(self.title).strip()
+            targets = [self.found, self.scoped] if self.current_in_card else [self.found]
+            for target in targets:
+                if title or self.current_id not in target:
+                    target[self.current_id] = title
+            self.current_id, self.title = '', []
+
+
+def parse_search_articles(page: str) -> dict[str, str]:
     found: dict[str, str] = {}
     for match in re.finditer(r'cr-params="([^"]+)"', page):
         params = html.unescape(match.group(1))
@@ -46,7 +102,20 @@ def discover(query: str) -> dict[str, str]:
             found[gid.group(1)] = html.unescape(title.group(1)) if title else ""
     for match in re.finditer(r'\\?"gid\\?"\s*:\s*(\d{18,20})', page):
         found.setdefault(match.group(1), "")
+    links = SearchArticleLinks()
+    links.feed(page)
+    if links.has_cards:
+        # Page-wide legacy gid fields may now belong to the navigation hotlist.
+        # On the observed card layout retain only actual result-card articles.
+        found = {gid: title for gid, title in found.items() if gid in links.scoped}
+    for gid, title in (links.scoped if links.has_cards else links.found).items():
+        if title or gid not in found:
+            found[gid] = title
     return found
+
+
+def discover(query: str, *, timeout: float = 30) -> dict[str, str]:
+    return parse_search_articles(fetch_text(SEARCH_URL.format(quote(query)), timeout=timeout))
 
 
 def comment_endpoint(gid: str, offset: int, count: int) -> str:

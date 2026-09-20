@@ -6,6 +6,18 @@ import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from cwh_host_research import observed_tools, search_rows, semantic_json, stream_metrics, terminal_transport_error, collect_topic, HostModelError
+
+
+def test_no_discovery_budget_keeps_explicit_unexecuted_queries(tmp_path, monkeypatch):
+    import cwh_host_research as host
+    monkeypatch.setattr(host, 'topic_search_tasks', lambda *a: [{'query': 'exact query'}])
+    def forbidden(*args, **kwargs):
+        raise AssertionError('No model call after discovery deadline')
+    monkeypatch.setattr(host, 'invoke', forbidden)
+    result = collect_topic({'topic': '公共服务'}, {}, [], tmp_path, 0)
+    assert result['queries'][0]['status'] == 'access_failed'
+    assert result['host_run']['model_invoked'] is False
+    assert result['all_queries_observed'] is False
 from cwh_semantic_compiler import make_packet, compile_topic, domain_matches
 from cwh_semantic_compiler import web_metadata_errors
 from cwh_semantic_compiler import labeled_publication_date, exclude_certain_period_misses
@@ -115,6 +127,18 @@ def test_host_compiler_keeps_source_and_does_not_self_certify():
     assert "semantic_review" not in evidence
     assert validate_analysis_mapping(bundle, require_semantic_review=False)["status"] == "passed"
     assert validate_analysis_mapping(bundle)["status"] == "blocked"
+
+
+def test_review_marks_prefix_as_partial_and_keeps_verified_absolute_excerpt_span():
+    from run_cwh_compiled_worker import independent_packet
+    bundle = compiled()
+    evidence = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]
+    packet = independent_packet(bundle)
+    source = packet['sources'][0]
+    assert source['reference_context_scope'] == 'article_prefix_only_not_full_text'
+    assert source['full_source_character_count'] >= len(source['reference_context'])
+    assert packet['claims'][0]['excerpt_source_span'] == [evidence['source_excerpt_start'], evidence['source_excerpt_end']]
+    assert 'sentence_splits_only' in packet['claims'][0]['excerpt_integrity']
 
 
 def test_metadata_quarantine_keeps_raw_voice_and_attributes_only_count_gaps_to_host():
@@ -242,6 +266,38 @@ def test_same_voice_distinct_claims_are_preserved_without_self_certification():
     assert evidence[1]["formal_claim"] == later["claim"]
     assert all("semantic_review" not in row for row in evidence)
     assert duplicate_voice_errors(decision) == []
+
+
+def test_native_reserved_claim_stays_eligible_in_audit_but_not_prose():
+    packet, decision, observation, plan = fixture()
+    reserved = copy.deepcopy(decision['items'][0]['claims'][0])
+    reserved.update(claim='另一条原生备选观点', formal_use='reserve',
+                    reserve_reason='本稿选择了更具代表性的论据', cluster='__formal_reserve__')
+    decision['items'][0]['claims'].append(reserved)
+    bundle = compile_topic(packet, decision, observation, plan, 'bounded_60m', 'v1', 'author')
+    evidence = bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence']
+    assert len(evidence) == 1
+    pool = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates']
+    row = next(row for row in pool if row.get('formal_use') == 'reserve')
+    assert row['decision'] == 'eligible'
+    assert row['semantic_claim'] == reserved
+    assert row['source_snapshot']['source_text']
+    with pytest.raises(ValueError, match='bounded mode'):
+        compile_topic(packet, decision, observation, plan, 'exhaustive', 'v1', 'author')
+
+
+def test_actual_thin_counts_do_not_claim_full_web_absence_or_semantic_approval():
+    packet, decision, observation, plan = fixture()
+    for cluster in decision['clusters']:
+        cluster.pop('thin_reason', None)
+    bounded = compile_topic(packet, decision, observation, plan, 'bounded_60m', 'v1', 'author')
+    cluster = bounded['viewpoints']['by_topic'][0]['clusters'][0]
+    gap = cluster['thin_cluster_exception']
+    assert gap['reviewed_by'] == 'host:actual_selected_counts'
+    assert '1个不同主体' in gap['reason'] and '不据此断言' in gap['reason']
+    assert all('semantic_review' not in row for row in cluster['evidence'])
+    exhaustive = compile_topic(packet, decision, observation, plan, 'exhaustive', 'v1', 'author')
+    assert 'thin_cluster_exception' not in exhaustive['viewpoints']['by_topic'][0]['clusters'][0]
 
 
 @pytest.mark.parametrize('profile', ['bounded_60m', 'exhaustive'])

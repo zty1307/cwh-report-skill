@@ -44,7 +44,8 @@ def has_ambiguous_meeting_reference(value: Any) -> bool:
     text = re.sub(r'\s+', '', str(value or ''))
     return bool(re.search(r'(?:本次|这次|此次|该|(?:\d{4}年)?[0-9一二三四五六七八九十]{1,2}月(?:[0-9一二三四五六七八九十]{1,2}日)?)会议', text)
                 or re.search(r'(?:按照|根据|落实)会议部署|(?:^|[，；。：:])会议(?:(?:既|首次|再次|重点|明确|进一步|专门|着重){0,2})(?:部署|提出|提及|新增|增加|要求|指出|强调|决定|审议|核准|释放|把|将)', text)
-                or re.search(r'(?:^|[，；。：:])会议(?:在|于)[^，。；：:]{1,60}(?:新增|增加|提出|强调|部署|审议|核准)', text))
+                or re.search(r'(?:^|[，；。：:])会议(?:在|于)[^，。；：:]{1,60}(?:新增|增加|提出|强调|部署|审议|核准)', text)
+                or re.search(r'(?:^|[，；。：:])会议(?:未给出|没有给出|并未给出|围绕|针对|明确|表示|认为|确定)', text))
 
 
 def _normalized(value: Any) -> str:
@@ -57,7 +58,9 @@ def _sha256_text(value: str) -> str:
 
 def _numbers(value: str) -> set[str]:
     normalized = unicodedata.normalize("NFKC", value)
-    arabic = set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?%?(?![\w.])", normalized))
+    # Unicode \w includes Chinese: it silently skipped 7月、30日、6亿元
+    # and 4.7%增长. Exclude Latin identifiers, not adjacent Chinese prose.
+    arabic = set(re.findall(r"(?<![A-Za-z0-9_.])\d+(?:\.\d+)?%?(?![A-Za-z0-9_.])", normalized))
     chinese = set(
         re.findall(
             r"[零〇一二两三四五六七八九十百千万亿]+(?:年|月|日|个|项|条|家|人|倍|亿元|万元|公里|种|类|轮|方面|%|％)",
@@ -73,6 +76,30 @@ def _quoted_terms(value: str) -> set[str]:
         for term in re.findall(r"[“\"]([^”\"]{2,40})[”\"]", value)
         if _normalized(term)
     }
+
+
+def mapped_meeting_dates(claim: str, source_text: str) -> list[dict[str, Any]]:
+    """Map only explicit dated meeting identities to the reviewer's frozen prefix.
+
+    This is not a full-article number allowance. A mapped date occurrence may
+    identify a meeting; the same digits in any other assertion still need the
+    selected excerpt. No inference, aliasing, or cross-sentence join is used.
+    """
+    result = []
+    pattern = r'(?<![0-9年月日])(?P<date>(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}日)(?P<name>[\u4e00-\u9fff]{2,32}?会议)'
+    for match in re.finditer(pattern, claim):
+        name = match['name'][:-2]
+        source_pattern = (r'(?<![0-9年月日])' + re.escape(match['date']) + r'[，, \t]*' +
+                          re.escape(name) + r'(?:召开|举行)?会议')
+        found = re.search(source_pattern, source_text[:2000])
+        if found:
+            result.append({'claim_date_start': match.start('date'),
+                           'claim_date_end': match.end('date'),
+                           'meeting_reference': match.group(),
+                           'source_start': found.start(), 'source_end': found.end(),
+                           'source_quote': found.group(),
+                           'scope': 'meeting_identity_only_in_reviewed_article_prefix'})
+    return result
 
 
 def _semantic_key(value: Any) -> str:
@@ -124,6 +151,7 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
     """Return a deterministic audit for an analysis_bundle/report_data payload."""
 
     issues: list[dict[str, Any]] = []
+    reference_mappings: list[dict[str, Any]] = []
     metadata = data.get("metadata") or {}
     if _text(metadata.get("evidence_mapping_version")) != MAPPING_VERSION:
         issues.append(
@@ -260,7 +288,13 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
                     issues.append(_issue("formal_claim_not_in_cluster", "正式观点没有逐字进入所属观点簇正文。", **context))
                 if _text(evidence.get("wording_fidelity")) not in VALID_FIDELITY:
                     issues.append(_issue("wording_fidelity_invalid", "wording_fidelity缺失或取值无效。", **context))
-                unsupported_numbers = sorted(_numbers(formal_claim) - _numbers(excerpt))
+                mapped_dates = mapped_meeting_dates(formal_claim, source_text)
+                reference_mappings.extend({**context, **row} for row in mapped_dates)
+                numeric_claim = formal_claim
+                for row in reversed(mapped_dates):
+                    numeric_claim = (numeric_claim[:row['claim_date_start']] +
+                                     numeric_claim[row['claim_date_end']:])
+                unsupported_numbers = sorted(_numbers(numeric_claim) - _numbers(excerpt))
                 if unsupported_numbers:
                     issues.append(_issue("claim_adds_numbers", "正式观点新增了原文片段中没有的数字：" + "、".join(unsupported_numbers), **context))
                 unsupported_terms = sorted(_quoted_terms(formal_claim) - _quoted_terms(excerpt))
@@ -333,6 +367,7 @@ def validate_analysis_mapping(data: dict[str, Any], *, require_semantic_review: 
         "snapshot_count": snapshot_count,
         "evidence_count": evidence_count,
         "mapped_evidence_count": mapped_count,
+        "meeting_reference_mappings": reference_mappings,
         "issues": issues,
     }
 

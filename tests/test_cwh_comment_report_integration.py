@@ -495,7 +495,7 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
         self.assertNotIn("以事实性报道为主", text)
         self.assertIn("相关解读如下", text)
         self.assertNotIn("围绕会议议题的政策影响展开解读", text)
-        self.assertIn('示例外媒文章《新兴产业与增长动能》称，', text)
+        self.assertIn('示例外媒《新兴产业与增长动能》称，', text)
         self.assertNotIn("一是事实性报道", text)
         self.assertIn("《中国国常会部署抗洪救灾》", text)
         self.assertNotIn("China cabinet", text)
@@ -575,7 +575,7 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
         }]
         self.assertEqual(FORMALIZE.comment_groups(rows), [])
 
-    def test_same_system_topic_is_never_split_into_multiple_numbered_groups(self) -> None:
+    def test_same_system_topic_keeps_distinct_reviewed_comment_judgments(self) -> None:
         base = {
             "topic": "审议通过住房公积金条例修改草案",
             "platform": "B站",
@@ -591,9 +591,11 @@ class CwhCommentReportIntegrationTests(unittest.TestCase):
             {**base, "comment_id": "c2", "content": "希望灵活就业和劳务派遣群体也能覆盖", "comment_heading": "期待扩大制度覆盖"},
         ]
         groups = FORMALIZE.comment_groups(rows)
-        self.assertEqual(1, len(groups))
-        self.assertEqual("期待公积金制度调整兼顾透明度和覆盖范围", groups[0][0])
-        self.assertEqual(2, len(groups[0][1]))
+        self.assertEqual(2, len(groups))
+        self.assertEqual(["期待提升政策透明度", "期待扩大制度覆盖"], [group[0] for group in groups])
+        self.assertEqual([1, 1], [len(group[1]) for group in groups])
+        rows[1]['comment_heading'] = rows[0]['comment_heading']
+        self.assertEqual(1, len(FORMALIZE.comment_groups(rows)))
 
     def test_domestic_viewpoint_heading_requires_stance_verb(self) -> None:
         issues = ORCHESTRATOR.domestic_viewpoint_quality_issues({"viewpoints": {"by_topic": [{

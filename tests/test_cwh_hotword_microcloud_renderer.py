@@ -16,6 +16,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class July19HierarchyRendererTests(unittest.TestCase):
+    def test_meeting_boilerplate_fragments_do_not_consume_candidate_slots(self) -> None:
+        for term in ('国务', '务院常务会', '国务院常务', '务院常务会议',
+                     '开国务院常务', '召开国务院常', '持召开国务院', '主持召开国务'):
+            self.assertFalse(MODULE.valid_candidate(term), term)
+        for term in ('数字中国', '经济形势', '民生保障', '公共服务', '政策协同',
+                     '行政法规', '法治建设', '医疗服务', '可持续城市更新'):
+            self.assertTrue(MODULE.valid_candidate(term), term)
+
     def test_sustainable_policy_phrase_is_not_rejected_as_particle_fragment(self) -> None:
         self.assertTrue(MODULE.valid_candidate("可持续更新模式"))
         self.assertTrue(MODULE.valid_candidate("可持续城市更新"))

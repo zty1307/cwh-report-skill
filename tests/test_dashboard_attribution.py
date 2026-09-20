@@ -15,10 +15,29 @@ SPEC.loader.exec_module(MODULE)
 
 
 def test_dashboard_image_resolution_skips_stale_paths(tmp_path: Path) -> None:
+    from PIL import Image
     valid = tmp_path / "wordcloud.png"
-    valid.write_bytes(b"reviewed-wordcloud")
+    Image.new('RGB', (20, 20), 'white').save(valid)
     uri = MODULE.first_image_data_uri(tmp_path / "missing.png", valid)
     assert uri.startswith("data:image/png;base64,")
+
+
+def test_dashboard_skips_existing_empty_and_corrupt_system_images(tmp_path: Path) -> None:
+    from PIL import Image
+    empty, corrupt, valid = [tmp_path / name for name in ('empty.png', 'corrupt.png', 'fixed.png')]
+    empty.write_bytes(b'')
+    corrupt.write_bytes(b'not-a-png')
+    Image.new('RGB', (20, 20), 'navy').save(valid)
+    assert MODULE.image_data_uri(empty) == MODULE.image_data_uri(corrupt) == ''
+    assert MODULE.first_image_data_uri(empty, corrupt, valid) == MODULE.image_data_uri(valid)
+
+
+def test_dashboard_retains_valid_svg_fallback_and_rejects_invalid_xml(tmp_path: Path) -> None:
+    path = tmp_path / 'fallback.svg'
+    path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>', encoding='utf-8')
+    assert MODULE.image_data_uri(path).startswith('data:image/svg+xml;base64,')
+    path.write_text('<broken', encoding='utf-8')
+    assert MODULE.image_data_uri(path) == ''
 
 
 def test_person_is_detected_from_evidence_summary() -> None:

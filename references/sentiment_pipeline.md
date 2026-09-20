@@ -36,6 +36,8 @@ For stepwise diagnosis, `--split-review` (worker option `CWH_COMMENT_SPLIT_REVIE
 
 Review instructions use only the context actually supplied. `api_parent_title_only` means a title, not an unread complete article. Standalone comments can still be reviewed; a comment whose meaning cannot be resolved without missing context must be excluded with an explicit reason, never completed by inference. Compact JSON and omission of empty nonformal headings reduce output formatting, not review coverage.
 
+For raw-input runs, supply the already reviewed current communique to both classification and independent quotation review. It defines policy objects and implementation scope, never creates a public-comment sample. A constructive suggestion can propose a new tool within that scope; it need not repeat a measure already announced. Independent quotation review explicitly returns `topic_alignment`: a wrong or uncertain assignment is removed from the formal denominator with the original classification and actual correction run preserved, never silently reassigned. A merely weak quotation or invalid display heading does not alter its otherwise valid sentiment label or membership. All accepted formal headings must satisfy the same renderer contract so an approved quote cannot silently disappear in Word.
+
 Required key:
 
 - `sample_id`: exact ID from `sentiment_input.csv`.

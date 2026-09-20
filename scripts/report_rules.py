@@ -244,10 +244,56 @@ def _named_people(text: str) -> set[str]:
     return {person for person in people if person not in GENERIC_VOICES}
 
 
+def approved_source_layout_issues(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Check current editorial usage without deleting evidence or rewriting claims."""
+    rules = writing_rules()['viewpoint']
+    uses, issues = {}, []
+    for item in _topic_viewpoints(data):
+        topic = str(item.get('topic') or '')
+        clusters = item.get('clusters') or []
+        for cluster in clusters:
+            keys = set()
+            for row in cluster.get('evidence') or []:
+                if row.get('formal_use') in {'reserve', 'excluded'}:
+                    continue
+                name = str(row.get('speaker_name') or row.get('attribution') or row.get('source') or '').strip()
+                if not name or name in GENERIC_VOICES:
+                    continue
+                # Preserve distinct people with the same name; no fuzzy publisher merge.
+                role = str(row.get('speaker_role') or '') if row.get('attribution_status') == 'named_person' else ''
+                key = (_voice_key(name), _voice_key(role))
+                keys.add(key)
+                uses.setdefault(key, []).append((topic, row.get('evidence_id'), name))
+                from cwh_writing_rules import formal_claim_char_count
+                count = formal_claim_char_count(row)
+                if count > rules.get('max_formal_claim_chars', 150):
+                    issues.append({'code': 'formal_claim_over_limit', 'severity': 'error', 'topic': topic,
+                                   'evidence_id': row.get('evidence_id'),
+                                   'message': f'正式样本{count}字，超过150字；须在冻结前精简并独立核验，不能在渲染时截断。'})
+                text = ' '.join(str(row.get(k) or '') for k in ('attribution', 'formal_claim'))
+                if '援引业内人士观点称' in text:
+                    issues.append({'code': 'anonymous_relay_attribution', 'severity': 'error', 'topic': topic,
+                                   'message': '不采用匿名转述句；查明真实主体，不将其意见改归媒体。'})
+            if len(clusters) > 1 and len(keys) < rules.get('numbered_cluster_min_sources', 2):
+                issues.append({'code': 'numbered_cluster_source_shortfall', 'severity': 'error', 'topic': topic,
+                               'cluster': cluster.get('summary'),
+                               'message': '该分点不足两个独立有效样本；须补选或重新分组，不能取消编号后继续分段，不能虚构第二来源。'})
+    for entries in uses.values():
+        topics = [entry[0] for entry in entries]
+        if len(entries) > rules.get('source_max_report_uses', 2):
+            issues.append({'code': 'source_report_use_limit', 'severity': 'error',
+                           'message': f'{entries[0][2]}全篇引用{len(entries)}处，超过两处；其余有效材料应保留备选。'})
+        for topic in dict.fromkeys(topics):
+            if topics.count(topic) > rules.get('source_max_topic_uses', 1):
+                issues.append({'code': 'source_repeated_within_topic', 'severity': 'error', 'topic': topic,
+                               'message': f'{entries[0][2]}在同一议题重复引用；本轮用户要求再次引用须跨议题且观点不同。'})
+    return issues
+
+
 def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Return generic formal-writing issues for domestic viewpoint prose."""
 
-    issues: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = approved_source_layout_issues(data)
     cross_topic_voices: dict[str, set[str]] = {}
     voice_labels: dict[str, str] = {}
     topic_heading_prefixes: list[str] = []
@@ -484,6 +530,9 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
         advisory_codes = {
             "viewpoint_heading_lacks_stance", "viewpoint_cluster_heading_lacks_stance",
             "attributed_claim_too_short",
+            "anonymous_relay_attribution", "numbered_cluster_source_shortfall",
+            "source_report_use_limit", "source_repeated_within_topic",
+            "formal_claim_over_limit",
         }
         for issue in issues:
             if issue["code"] in advisory_codes and issue["severity"] == "error":

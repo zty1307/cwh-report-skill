@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -151,6 +152,7 @@ DEFAULT_FOCUS_ANCHORS = (
 )
 
 GENERIC_TERMS = {
+    "主持召开国务院常务会议",
     "国务院",
     "国务院常务会议",
     "国务院常务会",
@@ -281,6 +283,15 @@ def canonical_document_key(row: dict[str, Any]) -> str:
         return title
     url = normalize_text(row.get("url"))
     return url or f"row:{row.get('source_row', '')}"
+
+
+def primary_reviewed_topic(term: str, reviewed_hits: list[int], topic_titles: list[str]) -> tuple[int, str]:
+    """Choose display ownership only inside AI-approved topics; preserve all hits."""
+    exact = [hit for hit in reviewed_hits if len(normalize_text(term)) >= 2
+             and normalize_text(term) in normalize_text(topic_titles[hit - 1])]
+    if len(exact) == 1:
+        return exact[0], 'unique_literal_term_in_reviewed_topic_title'
+    return reviewed_hits[0], 'reviewed_topic_order_no_unique_literal_match'
 
 
 def topic_for_term(term: str, topic_aliases: list[list[str]]) -> list[int]:
@@ -452,10 +463,11 @@ def valid_candidate(term: str) -> bool:
         return False
     if term in GENERIC_TERMS:
         return False
-    # Reject short pieces cut out of recurring meeting boilerplate, such as
-    # “国务”“务院”“国常”“常会”. They are not valid semantic terms even when
-    # a sliding n-gram extractor sees them in many titles.
-    if len(term) <= 3 and any(term in generic for generic in GENERIC_TERMS if len(generic) > len(term)):
+    # Reject exact substrings of known boilerplate at every candidate length.
+    # Four-to-six-character slices such as “务院常务会” previously filled
+    # the finite shortlist before the model could see actual policy concepts.
+    # This is only mechanical screening, never semantic hotword approval.
+    if any(term in generic for generic in GENERIC_TERMS if len(generic) > len(term)):
         return False
     if (term[0] in GENERIC_PARTICLES and not term.startswith("可持续")) or term[-1] in GENERIC_PARTICLES:
         return False
@@ -464,6 +476,14 @@ def valid_candidate(term: str) -> bool:
     if len(set(term)) <= 1:
         return False
     return bool(re.fullmatch(r"[\u3400-\u9fffA-Za-z0-9＋+－-]+", term))
+
+
+def reviewed_topic_label_valid(row: dict[str, Any]) -> bool:
+    """Shared author-to-render label contract; contextual terms stay supporting."""
+    return row.get("standalone_topic_label") is True or (
+        str(row.get("evidence_tier") or "").strip().lower() == "supporting"
+        and row.get("contextual_topic_label") is True
+    )
 
 
 def looks_like_pure_geography(term: str) -> bool:
@@ -803,11 +823,12 @@ def build_hotword_review_packet(
         "required_review_method": "ai_semantic_review",
         "instructions": [
             "逐项审查候选词，删除虚词、通用动词、人名、日期、媒体名、会议套话和残缺切片。",
-            "只保留单独展示时即可指向一个会议议题、政策目标、政策工具、治理机制、产业基础设施或公众关切的短语。",
+            "核心议题词应单独可理解；具体政策工具、机制、公众关切词可依托明确的本题语境理解，不强迫每个词重复完整政策名称。必须对应本期原文中的实质内容。",
             "召开、听取、研究、审议、通过、决定、修改、废止、核准等会议程序动作不得作为热词；投资、项目、工程、市场等无领域限定的载体词不得作为热词。",
             "单独的地名、项目所在地、领导姓名、机构名、媒体名和日期不得作为热词；地域词只有与政策目标、治理机制或产业议题组成完整概念时才可保留。",
-            "为每个入选词填写semantic_type，并明确standalone_topic_label=true；如果读者脱离上下文不能判断它在讲什么议题，就必须删除或补成完整政策短语。",
+            "为每个入选词填写semantic_type。单独可理解的词填standalone_topic_label=true；依托本题才可理解的具体关切词，须填evidence_tier=supporting、standalone_topic_label=false、contextual_topic_label=true，并在selection_reason交代对应议题及原文含义。core词仍必须独立可理解。不得以语境为由保留空泛动词、残片或没有领域含义的载体词。",
             "合并同义词，并按topics中的实际议题数量检查每个议题是否都有实质性词项。",
+            "词云是关键词展示，不是议程清单。通常优先2—6字、可独立理解且原文中真实出现的核心概念、政策工具和具体关切；确有必要的完整专名可更长，不机械截字。原文同时出现长全称与同义短称时通常择短称，不把完整法规名称、完整战略名称都放成大词，也不将同一概念的嵌套长短词重复计为不同主题。若长短表达确实指不同对象或机制则分别保留。",
             "候选不足时，从document_samples的标题和正文摘录中补提有原文证据的新词。",
             "core词至少命中2条独立文档；supporting词可命中1条，但必须是AI确认的实质性议题表达。",
             "不得为凑数量保留噪声；若审核后少于最低数量，继续从证据中补提，而不是回退到规则词。",
@@ -835,6 +856,7 @@ def build_hotword_review_packet(
                     "evidence_tier": "core",
                     "semantic_type": "policy_tool",
                     "standalone_topic_label": True,
+                    "contextual_topic_label": False,
                     "evidence_aliases": ["原文中的完整证据措辞"],
                     "selection_reason": "说明该词为何代表实质议题并通过语义审核",
                     "ai_representativeness": "高",
@@ -939,6 +961,7 @@ def apply_hotword_ai_review(
         tier = str(raw.get("evidence_tier") or "").strip().lower()
         semantic_type = str(raw.get("semantic_type") or "").strip().lower()
         standalone_topic_label = raw.get("standalone_topic_label") is True
+        contextual_topic_label = raw.get("contextual_topic_label") is True
         topic_hits = raw.get("topic_hits") or []
         if not term or not valid_candidate(term):
             errors.append(f"第{index}项“{term or '<empty>'}”是泛化词、残缺词或非法词")
@@ -955,8 +978,8 @@ def apply_hotword_ai_review(
         if semantic_type not in HOTWORD_SEMANTIC_TYPES:
             errors.append(f"第{index}项“{term}”缺少有效semantic_type")
             continue
-        if not standalone_topic_label:
-            errors.append(f"第{index}项“{term}”未通过脱离上下文仍可指向议题的standalone测试")
+        if not reviewed_topic_label_valid(raw):
+            errors.append(f"第{index}项“{term}”既未通过standalone测试，也无supporting语境关切审核")
             continue
         if any(term.startswith(marker) or term.endswith(marker) for marker in PROCEDURAL_HOTWORD_MARKERS):
             errors.append(f"第{index}项“{term}”仍是会议程序动作，不是事件议题词")
@@ -987,6 +1010,7 @@ def apply_hotword_ai_review(
             ai_representativeness=raw.get("ai_representativeness"),
         )
         reviewed_topic_hits = sorted(set(topic_hits))
+        display_topic, display_basis = primary_reviewed_topic(term, reviewed_topic_hits, topic_titles)
         seen.add(term)
         output.append(
             {
@@ -996,10 +1020,12 @@ def apply_hotword_ai_review(
                 # Overwrite any candidate-stage topic_index. A term may have
                 # appeared near several agenda aliases; the reviewed mapping
                 # is authoritative for the report handoff.
-                "topic_index": reviewed_topic_hits[0],
+                "topic_index": display_topic,
+                "display_topic_basis": display_basis,
                 "evidence_tier": tier,
                 "semantic_type": semantic_type,
-                "standalone_topic_label": True,
+                "standalone_topic_label": standalone_topic_label,
+                "contextual_topic_label": contextual_topic_label,
                 "selection_reason": reason,
                 "ai_reviewed": True,
                 "ai_representativeness": raw.get("ai_representativeness", "高"),
@@ -1061,6 +1087,11 @@ def build_hotword_payload(
     selected = []
     status = "ai_review_required"
     method = "ai_review_required"
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if review is not None and is_deferred_hotwords(review):
+        return {**review, 'candidates': candidates, 'review_packet': review_packet,
+                'settings': settings, 'corpus_audit': {'raw_document_count': len(rows),
+                    'deduplicated_relevant_document_count': len(documents), 'candidate_count': len(candidates)}}
     if review is not None:
         selected = apply_hotword_ai_review(
             review,
@@ -1079,6 +1110,7 @@ def build_hotword_payload(
         "method": method,
         "review_method": review.get("review_method") if review else None,
         "second_pass_completed": bool(review and review.get("second_pass_completed") is True),
+        "batch_review_audit": copy.deepcopy((review or {}).get('batch_review_audit') or {}),
         "settings": {
             "term_count": term_count,
             "minimum_term_count": 1 if deliver_available else minimum_term_count,
@@ -2139,7 +2171,7 @@ def _july19_text_sprite(
 def render_wordcloud_png(
     payload: dict[str, Any], output_path: Path, seed: int = 20260710
 ) -> dict[str, Any]:
-    """Render the approved July 19 hierarchy with small repeated background words."""
+    """Render the reusable approved cloud silhouette with fixed visual hierarchy."""
 
     settings = payload["settings"]
     width = int(settings.get("width") or DEFAULT_WIDTH)
@@ -2149,6 +2181,12 @@ def render_wordcloud_png(
     primary_minimum = int(settings.get("primary_font_min") or DEFAULT_PRIMARY_FONT_MIN)
     primary_maximum = int(settings.get("primary_font_max") or DEFAULT_PRIMARY_FONT_MAX)
     scale_exponent = float(settings.get("font_scale_exponent") or DEFAULT_FONT_SCALE_EXPONENT)
+    style_path = Path(__file__).resolve().parents[1] / 'config/wordcloud_visual_style.v1.json'
+    visual_style = json.loads(style_path.read_text(encoding='utf-8'))
+    display_scale = width / visual_style['basis_width']
+    primary_minimum = max(10, round(visual_style['primary_font_min'] * display_scale))
+    primary_maximum = max(primary_minimum, round(visual_style['primary_font_max'] * display_scale))
+    scale_exponent = visual_style['font_scale_exponent']
     font_path = resolve_font(settings.get("font_path"))
     allowed = cloud_mask(width, height, settings.get("mask_path"))
     allowed_image = Image.fromarray(np.where(allowed, 255, 0).astype(np.uint8))
@@ -2163,18 +2201,21 @@ def render_wordcloud_png(
     selected = sorted(payload.get("selected") or [], key=lambda item: -int(item.get("weight") or 1))
     if not selected:
         raise ValueError("词云没有可渲染的selected词条")
-    max_placed_instances = max(
-        len(selected),
-        int(settings.get("max_placed_instances") or DEFAULT_MAX_PLACED_INSTANCES),
-    )
+    requested_instances = int(settings.get('max_placed_instances') or DEFAULT_MAX_PLACED_INSTANCES)
+    max_placed_instances = max(len(selected),
+        int(visual_style['max_placed_instances']) if requested_instances == DEFAULT_MAX_PLACED_INSTANCES
+        else requested_instances)
 
     weights = [int(item.get("weight") or 1) for item in selected]
     low, high = min(weights), max(weights)
     primary_queue: list[tuple[dict[str, Any], int, int]] = []
-    for item in selected:
+    for rank, item in enumerate(selected):
         weight = int(item.get("weight") or 1)
         ratio = 0.5 if high == low else (weight - low) / (high - low)
         font_size = primary_font_size(ratio, primary_minimum, primary_maximum, scale_exponent)
+        floors = visual_style['headword_rank_floors']
+        if rank < len(floors):
+            font_size = max(font_size, round(primary_maximum * floors[rank]))
         primary_queue.append((item, font_size, 0))
     if len(primary_queue) > 1:
         primary_queue = [
@@ -2188,7 +2229,9 @@ def render_wordcloud_png(
             ),
         ]
     repeat_queue: list[tuple[dict[str, Any], int, int]] = []
-    for repeat_round, scale in enumerate(DEFAULT_REPEAT_SCALES, start=1):
+    needed_rounds = (max_placed_instances - len(selected) + len(selected) - 1) // len(selected)
+    repeat_scales = (*DEFAULT_REPEAT_SCALES, *([DEFAULT_REPEAT_SCALES[-1]] * max(0, needed_rounds - len(DEFAULT_REPEAT_SCALES))))
+    for repeat_round, scale in enumerate(repeat_scales, start=1):
         for item in selected:
             base_weight = int(item.get("weight") or 1)
             ratio = 0.5 if high == low else (base_weight - low) / (high - low)
@@ -2298,6 +2341,8 @@ def render_wordcloud_png(
     payload["image_path"] = str(output_path.resolve())
     payload["render_audit"] = {
         "method": "july19_hierarchy_edge_fill",
+        "visual_style": visual_style,
+        "visual_style_sha256": hashlib.sha256(style_path.read_bytes()).hexdigest(),
         "font_path": str(font_path.resolve()),
         "font_family": list(ImageFont.truetype(str(font_path), 32).getname()),
         "font_sha256": hashlib.sha256(font_path.read_bytes()).hexdigest(),

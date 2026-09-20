@@ -53,4 +53,4 @@ def test_exact_name_prefix_is_expanded_without_double_attribution():
     assert evidence_sentence(row) == '甲大学教授李明表示，需要统筹供需'
     assert row['formal_claim'] == '李明表示，需要统筹供需。'
     row['formal_claim'] = '李明所在城市需要统筹供需。'
-    assert evidence_sentence(row) == '甲大学教授李明认为，李明所在城市需要统筹供需'
+    assert evidence_sentence(row) == '甲大学教授李明称，李明所在城市需要统筹供需'

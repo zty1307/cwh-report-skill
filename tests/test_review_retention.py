@@ -38,6 +38,33 @@ def test_uncertain_claim_is_excluded_not_guessed_and_original_is_unchanged():
     assert repaired['research_audit']['domestic_media_research'] == source['research_audit']['domestic_media_research']
 
 
+@pytest.mark.parametrize('narrow', [False, True])
+def test_local_recheck_keeps_each_actual_reviewer_through_retention(narrow):
+    from domestic_evidence_mapping import validate_semantic_review_packet
+    source, initial, original_run = fixture()
+    raw = {'reviews': [{'id': 'e1', 'verdict': 'fully_supported', 'rationale': '原审核未变化。'},
+                       {'id': 'e2', 'verdict': 'uncertain', 'rationale': '本条局部补核。', 'revision': None}],
+           'review_field_retry': {'original_run': original_run,
+               'retry_run': {'session_id': 'local-recheck', 'completed_at': 'later-time'},
+               'retried_claim_ids': ['e2']}}
+    if narrow:
+        raw['reviews'][1]['revision'] = {'formal_claim': evidence_rows(source)[0][1]['formal_claim'],
+                                         'verdict': 'fully_supported', 'rationale': '局部收窄有依据。'}
+    later = raw['review_field_retry']['retry_run']
+    initial = compile_review(source, raw, later, 'original-hash')
+    assert initial['reviews'][0]['reviewed_at'] == original_run['completed_at']
+    assert initial['reviews'][0]['reviewer_run_id'] == original_run['session_id']
+    assert initial['reviews'][1]['reviewer_run_id'] == later['session_id']
+    repaired, actions = retain_reviewed_content(source, initial)
+    final = retention_packet(repaired, initial, actions, later, 'new-hash')
+    validate_combined(source, repaired, initial, final)
+    assert final['reviews'][0] == initial['reviews'][0]
+    if narrow:
+        assert final['reviews'][1]['reviewer_run_id'] == later['session_id']
+        assert final['reviews'][1]['reviewed_at'] == later['completed_at']
+    assert not validate_semantic_review_packet(repaired, final, source_bundle_sha256='new-hash')
+
+
 def test_retention_refuses_frozen_source_or_accepted_claim_edits():
     source, initial, run = fixture()
     repaired, actions = retain_reviewed_content(source, initial)
@@ -60,6 +87,41 @@ def test_invalid_reviewer_number_is_excluded_instead_of_waiving_draft_gate():
     assert any(i['code'] == 'claim_adds_numbers' for i in actions[0]['draft_gate_issues'])
     final = retention_packet(repaired, initial, actions, run, 'new-hash')
     validate_combined(source, repaired, initial, final)
+
+
+def test_native_approval_never_waives_an_unsupported_number_or_term():
+    from normalize_cwh_analysis import normalize_analysis
+    source, initial, run = fixture()
+    evidence_rows(source)[0][1]['formal_claim'] += '三年内增长，属于“原文没有的词”。'
+    source = normalize_analysis(source)
+    frozen_review = copy.deepcopy(initial)
+    repaired, actions = retain_reviewed_content(source, initial)
+    assert not evidence_rows(repaired)
+    failed = next(a for a in actions if a['evidence_id'] == initial['reviews'][0]['evidence_id'])
+    assert failed['action'] == 'excluded' and failed['original_review']['verdict'] == 'fully_supported'
+    assert failed['host_reference_gate']
+    assert initial == frozen_review
+    final = retention_packet(repaired, initial, actions, run, 'new-hash')
+    validate_combined(source, repaired, initial, final)
+
+
+def test_only_draft_wording_can_be_deferred_not_source_integrity(tmp_path):
+    import json
+    from normalize_cwh_analysis import normalize_analysis
+    from run_cwh_resumable_pipeline import validate_analysis_bundle
+    source, _, _ = fixture()
+    evidence_rows(source)[0][1]['formal_claim'] += '三年内增长。'
+    source = normalize_analysis(source)
+    path = tmp_path / 'draft.json'
+    def check(require_review=False, allow_repair=False):
+        path.write_text(json.dumps(source, ensure_ascii=False), encoding='utf-8')
+        return validate_analysis_bundle(path, ['公共服务'], require_semantic_review=require_review,
+            allow_claim_repair=allow_repair, allow_deferred_corpus=True)
+    assert any('新增了原文片段中没有的数字' in p for p in check())
+    assert not any('新增了原文片段中没有的数字' in p for p in check(allow_repair=True))
+    assert any('新增了原文片段中没有的数字' in p for p in check(require_review=True, allow_repair=True))
+    evidence_rows(source)[0][1]['source_excerpt_start'] = -1
+    assert any('位置越界' in p for p in check(allow_repair=True))
 
 
 def test_independently_supported_narrowing_is_retained_with_real_certification():

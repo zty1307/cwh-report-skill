@@ -14,6 +14,61 @@ from normalize_cwh_analysis import normalize_analysis, evidence_sentence
 from report_rules import domestic_viewpoint_quality_issues
 
 
+def test_experience_clause_uses_a_grammatical_connector_without_editing_identity():
+    from cwh_writing_rules import formal_attribution
+    row = {'attribution_status': 'named_person', 'speaker_name': '陈明',
+           'speaker_role': '从事公共服务工作12年', 'attribution': '从事公共服务工作12年陈明'}
+    before = copy.deepcopy(row)
+    assert formal_attribution(row) == '从事公共服务工作12年的陈明'
+    assert row == before
+    role = {'attribution_status': 'named_person', 'speaker_name': '陈明',
+            'speaker_role': '某院研究员', 'attribution': '某院研究员陈明'}
+    assert formal_attribution(role) == '某院研究员陈明'
+
+
+def test_only_determinate_media_quotation_printing_errors_are_normalized():
+    from cwh_writing_rules import normalize_display_quotation_marks
+    text = '从”分散管理“转向”协同管理“，从”单部门管理"转向“多部门管理”，从粗放规定“转向”精细制度“。'
+    fixed = normalize_display_quotation_marks(text)
+    assert fixed == '从“分散管理”转向“协同管理”，从“单部门管理”转向“多部门管理”，从粗放规定“转向”精细制度。'
+    for unchanged in ['他说“应完善管理”。', '他说“有关“管理”的理解”。', '未完成的“引语', '从旧方案转向新方案。']:
+        assert normalize_display_quotation_marks(unchanged) == unchanged
+
+
+def test_literal_attribution_after_reporting_connector_is_not_duplicated():
+    row = {'speaker_name': '陈明', 'speaker_role': '某院研究员', 'attribution_status': 'named_person',
+           'attribution': '某院研究员陈明', 'formal_claim': '对此，某院研究员陈明表示，建议公开实施安排。'}
+    original = copy.deepcopy(row)
+    assert evidence_sentence(row) == '对此，某院研究员陈明表示，建议公开实施安排'
+    assert row == original
+
+
+def test_postposed_literal_attribution_with_continuation_is_not_prepended_again():
+    row = {'speaker_name': '陈明', 'speaker_role': '某院研究员', 'attribution_status': 'named_person',
+           'attribution': '某院研究员陈明',
+           'formal_claim': '“建议公开实施安排。”某院研究员陈明表示，具体信息应按阶段发布。'}
+    before = copy.deepcopy(row)
+    assert evidence_sentence(row) == row['formal_claim'].rstrip('。')
+    assert row == before
+
+
+def test_literal_postposed_exact_attribution_is_not_duplicated_or_rewritten():
+    row = {'speaker_name': '张甲', 'speaker_role': '甲院研究员', 'attribution_status': 'named_person',
+           'attribution': '甲院研究员张甲', 'formal_claim': '“建议公开实施安排。”甲院研究员张甲表示。'}
+    original = copy.deepcopy(row)
+    text = evidence_sentence(row)
+    assert text == row['formal_claim'].rstrip('。') and text.count('张甲') == 1
+    assert row == original
+    document = Document()
+    paragraph = document.add_paragraph()
+    formal.add_detail_blocks(document, paragraph, {'evidence': [row]})
+    assert paragraph.text == original['formal_claim']
+    assert [run.text for run in paragraph.runs if run.bold] == ['甲院研究员张甲表示']
+    assert row == original
+    row['formal_claim'] = '“建议公开实施安排。”乙院研究员李乙表示。'
+    assert evidence_sentence(row).startswith('甲院研究员张甲')
+
+
 def test_invalid_shared_heading_uses_only_an_existing_single_approved_individual_heading():
     row = {'topic': '基础工程', 'platform': '境内平台', 'url': 'https://example.test/comment',
            'quote_verified': True, 'evidence_mode': 'platform_comment', 'comment_id': 'c1',
@@ -27,7 +82,7 @@ def test_invalid_shared_heading_uses_only_an_existing_single_approved_individual
     assert row == original
 
 
-def test_invalid_shared_heading_does_not_combine_distinct_individual_judgments():
+def test_invalid_shared_heading_preserves_distinct_reviewed_clauses_without_inventing_a_summary():
     base = {'topic': '基础工程', 'platform': '境内平台', 'url': 'https://example.test/comment',
             'quote_verified': True, 'evidence_mode': 'platform_comment', 'ai_formal_include': True,
             'ai_semantic_quality': 'substantive', 'topic_comment_heading': '基础工程影响'}
@@ -36,7 +91,10 @@ def test_invalid_shared_heading_does_not_combine_distinct_individual_judgments()
             {**base, 'comment_id': 'c2', 'content': '应公开实施安排。',
              'comment_heading': '建议公开实施安排'}]
     original = copy.deepcopy(rows)
-    assert formal.comment_groups(rows) == []
+    groups = formal.comment_groups(rows)
+    assert len(groups) == 2
+    assert [group[0] for group in groups] == ['希望保持基本服务覆盖', '建议公开实施安排']
+    assert [row['comment_id'] for group in groups for row in group[1]] == ['c1', 'c2']
     assert rows == original
 
 
@@ -60,7 +118,7 @@ def test_source_priority_is_stable_and_normalization_is_idempotent():
     normalized = normalize_analysis(payload)
     cluster = normalized["viewpoints"]["by_topic"][0]["clusters"][0]
     assert [row["speaker_name"] for row in cluster["evidence"]] == ["专家甲", "专家乙", "媒体甲", "账号甲"]
-    assert cluster["details"].startswith("专家甲认为，")
+    assert cluster["details"].startswith("专家甲称，")
     assert normalize_analysis(copy.deepcopy(normalized)) == normalized
 
 
@@ -72,7 +130,7 @@ def test_normalizer_never_keeps_unsupported_old_prose():
 
 
 def test_mentioning_subject_inside_claim_does_not_erase_attribution():
-    assert evidence_sentence({"speaker_name": "甲机构", "formal_claim": "该措施涉及甲机构的职责。"}).startswith("甲机构认为，")
+    assert evidence_sentence({"speaker_name": "甲机构", "formal_claim": "该措施涉及甲机构的职责。"}).startswith("甲机构称，")
 
 
 def test_exact_duplicated_institution_prefix_is_display_only_not_identity_rewrite():
@@ -94,7 +152,7 @@ def test_final_renderer_rebuilds_stale_attribution_from_unchanged_atomic_evidenc
                'details': '某主管部门某主管部门有关负责人表示，旧的预组装正文。'}
     original = copy.deepcopy(cluster)
     text = formal.cluster_wording(cluster)
-    assert '某主管部门有关负责人表示' in text
+    assert '某主管部门有关负责人称' in text
     assert '某主管部门某主管部门' not in text and '旧的预组装正文' not in text
     assert cluster == original
     from generate_dashboard import evidence_attribution
@@ -102,9 +160,13 @@ def test_final_renderer_rebuilds_stale_attribution_from_unchanged_atomic_evidenc
     assert cluster == original
 
 
-def test_chair_name_requires_explicit_current_source():
+def test_unapproved_chair_requires_current_source_and_neutral_profile_remains_available():
     generic = opening_paragraph({}, "1月2日", "研究公共服务工作")
-    assert "李强" not in generic
+    assert generic.startswith(writing_rules()['document']['approved_chair_default'])
+    neutral = copy.deepcopy(writing_rules())
+    neutral['document']['approved_chair_default'] = ''
+    with mock.patch('cwh_writing_rules.writing_rules', return_value=neutral):
+        assert '李强' not in opening_paragraph({}, '1月2日', '研究公共服务工作')
     assert "张某" not in opening_paragraph({"chair_name": "张某"}, "1月2日", "研究公共服务工作")
     sourced = opening_paragraph({"chair_name": "张某", "chair_source": "本期会议通稿"}, "1月2日", "研究公共服务工作")
     assert sourced.startswith("张某1月2日主持召开")
@@ -114,7 +176,7 @@ def test_noun_only_agenda_is_rendered_as_a_grammatical_sentence():
     agenda = formal.joined_agenda_topics(["城市更新", "农业农村现代化", "基础教育改革发展"])
     assert agenda == "城市更新、农业农村现代化和基础教育改革发展"
     text = opening_paragraph({}, "5月15日", agenda)
-    assert text.startswith("5月15日召开的国务院常务会议涉及")
+    assert text.startswith("国务院总理李强5月15日主持召开国务院常务会议，会议涉及")
     assert "等议题。" in text
 
 
@@ -139,31 +201,35 @@ def test_unsupported_padding_is_blocked_but_original_quote_is_preserved():
     assert row["formal_claim"] == claim
 
 
-def test_propagation_frames_do_not_invent_publisher_placement_or_peak():
+def test_approved_editorial_frames_do_not_invent_numeric_peak_data():
     paragraphs = formal.total_event_paragraphs({"meeting": {}, "statistics": {"total_spread": 100, "by_source_bucket": {"domestic_media": 80, "overseas_media": 0}}})
     text = "".join(paragraphs)
     assert "100条" in text
     assert "80条" in text
     assert "峰值" not in text
     assert "李强" not in text
-    assert "显著位置" not in text
-    assert "人民网" not in text
+    assert "显著位置" in text
+    assert "人民网" in text
 
 
 def test_more_than_eight_groups_are_not_dropped_and_docx_matches_markdown(tmp_path):
     clusters = [{"summary": f"建议落实第{index}项配套要求", "details": f"测试机构认为，应落实第{index}项配套要求并保留实施条件。", "evidence": []} for index in range(1, 10)]
     groups = [(f"建议回应第{index}项公共需求", [{"content": "建议明确职责并建立公开反馈机制。", "quote_verified": True, "url": "https://example.test/comment"}]) for index in range(1, 10)]
     data = {"meeting": {"date": "2025-01-02", "topics": ["研究公共服务工作"]}, "statistics": {}, "viewpoints": {"by_topic": [{"heading": "建议落实配套要求", "clusters": clusters}]}, "comments": {"selected": []}, "topic_stats": []}
-    with mock.patch.object(formal, "comment_groups", return_value=groups), mock.patch.object(formal, "ensure_docx_chart_images", return_value={}):
+    with mock.patch.object(formal, "report_comment_groups", return_value=groups), mock.patch.object(formal, "ensure_docx_chart_images", return_value={}):
         markdown = formal.render_formal_markdown(data, tmp_path)
         path = tmp_path / "report.docx"
         formal.write_docx(data, path)
     word = "\n".join(p.text for p in Document(path).paragraphs)
     assert ordinal_prefix(9) == "九是"
     assert ordinal_prefix(12) == "十二是"
-    for text in [opening_paragraph(data["meeting"], "1月2日", "研究公共服务工作"), formal.comment_lead(data, groups), "九是建议落实第9项配套要求", "九是建议回应第9项公共需求"]:
+    for text in [opening_paragraph(data["meeting"], "1月2日", "研究公共服务工作"), formal.comment_lead(data, groups), "建议落实第9项配套要求", "九是建议回应第9项公共需求"]:
         assert text in markdown
         assert text in word
+    # Numbering is structural, not evidence certification. Source-free legacy
+    # input must fail source-quality validation, not disguise multiple paragraphs.
+    assert '九是建议落实第9项配套要求' in markdown
+    assert '九是建议落实第9项配套要求' in word
 
 
 def test_hotword_frames_cover_all_topics_without_truncating_conditions():
@@ -176,14 +242,34 @@ def test_hotword_frames_cover_all_topics_without_truncating_conditions():
     assert text.startswith(writing_rules()["hotwords"]["opening"])
 
 
-def test_comment_lead_uses_short_first_clause_but_body_keeps_full_heading():
+def test_comment_lead_preserves_reviewed_stance_and_qualifying_clause():
     heading = "认为城市更新应优先保障居住安全，并完善长期运营和资金平衡机制"
     groups = [(heading, [{"content": "支持改善居住环境"}])]
     lead = formal.comment_lead({}, groups)
-    assert "围绕城市更新应优先保障居住安全" in lead
-    assert "围绕认为" not in lead
-    assert "长期运营" not in lead
+    assert "主要有" + heading in lead
     assert groups[0][0] == heading
+
+
+def test_comment_lead_uses_two_examples_without_dropping_body_groups():
+    groups = [
+        ('肯定公共服务改善生活', [{'system_topic': '服务', 'content': '原话甲'}]),
+        ('期待完善公共服务配套', [{'system_topic': '服务', 'content': '原话乙'}]),
+        ('认为交通建设方便出行', [{'system_topic': '交通', 'content': '原话丙'}]),
+        ('建议强化项目安全管理', [{'system_topic': '安全', 'content': '原话丁'}]),
+        ('未采到的议题', []),
+    ]
+    before = copy.deepcopy(groups)
+    lead = formal.comment_lead({}, groups)
+    assert '肯定公共服务改善生活、认为交通建设方便出行等。主要评论如下' in lead
+    assert '配套' not in lead and '安全管理' not in lead and '未采到' not in lead
+    assert groups == before
+
+
+def test_comment_lead_can_represent_two_judgments_in_one_topic():
+    groups = [(f'建议改善服务措施{index}', [{'system_topic': '服务'}]) for index in range(3)]
+    lead = formal.comment_lead({}, groups)
+    assert '措施0、建议改善服务措施1等' in lead
+    assert '措施2' not in lead
 
 
 def test_comment_cleanup_repairs_mixed_quotes_and_numeric_ranges():
@@ -192,7 +278,7 @@ def test_comment_cleanup_repairs_mixed_quotes_and_numeric_ranges():
 
 def test_comment_lead_preserves_a_complete_long_clause_without_cutting_a_word():
     heading = '认为公共服务改革应兼顾偏远地区特殊群体的长期基本保障需求'
-    groups = [(heading, [])]
+    groups = [(heading, [{'content': '已审核的真实原话'}])]
     original = copy.deepcopy(groups)
     assert heading.removeprefix('认为') in formal.comment_lead({}, groups)
     assert groups == original
@@ -215,9 +301,9 @@ def test_partial_verified_role_attribution_preserves_the_literal_frozen_claim():
     assert row == original
     # Unverified roles and a different speaker must not trigger this shortcut.
     row['formal_claim'] = '投资顾问张某认为，应依据实际需求确定投入节奏。'
-    assert evidence_sentence(row).startswith(row['attribution'] + '表示，')
+    assert evidence_sentence(row).startswith(row['attribution'] + '称，')
     row['formal_claim'] = '行业研究员李某认为，应依据实际需求确定投入节奏。'
-    assert evidence_sentence(row).startswith(row['attribution'] + '表示，')
+    assert evidence_sentence(row).startswith(row['attribution'] + '称，')
 
 
 def test_hotword_focus_with_stance_does_not_render_focus_thinks():
@@ -226,14 +312,17 @@ def test_hotword_focus_with_stance_does_not_render_focus_thinks():
         "viewpoints": {"by_topic": [{"topic": "研究公共服务工作", "clusters": [{"summary": "认为应完善基层服务机制"}]}]},
     }
     text = formal.hotword_paragraph(data)
-    assert "相关观点认为应完善基层服务机制" in text
+    assert "舆论认为应完善基层服务机制" in text
     assert "聚焦认为" not in text
 
 
-def test_topic_volume_order_does_not_invent_word_frequency_or_temporal_heat():
+def test_neutral_profile_does_not_invent_word_frequency_or_temporal_heat():
     data = {'hotwords': [{'topic': '公共服务', 'word': '制度覆盖面', 'count': 1}],
             'topic_stats': [{'topic': '公共服务', 'spread_count': 99999}]}
-    text = formal.hotword_paragraph(data)
+    rules = copy.deepcopy(writing_rules())
+    rules['hotwords']['use_editorial_rank_frames'] = False
+    with mock.patch.object(formal, 'writing_rules', return_value=rules):
+        text = formal.hotword_paragraph(data)
     assert '制度覆盖面' in text and '公共服务' in text
     assert all(phrase not in text for phrase in ('位居前列', '热度较高', '持续热传'))
 

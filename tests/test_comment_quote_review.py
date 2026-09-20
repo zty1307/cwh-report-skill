@@ -32,10 +32,11 @@ def test_review_subsets_only_formal_quotes_and_replaces_stale_group_title():
         assert {k: new[k] for k in ('id', 'topic', 'label', 'reason', 'text')} == {
             k: old[k] for k in ('id', 'topic', 'label', 'reason', 'text')}
     assert [row['id'] for row in result['rows'] if row['formal']] == [2]
-    assert result['topic_headings'] == answer()['topic_headings']
+    assert result['topic_headings'] == {}
+    assert result['rows'][1]['heading'] == frozen['rows'][1]['heading']
 
 
-@pytest.mark.parametrize('change', ['duplicate', 'extra', 'relabel', 'stale_heading'])
+@pytest.mark.parametrize('change', ['duplicate', 'extra', 'relabel', 'missing_reason'])
 def test_invalid_review_cannot_create_a_formal_handoff(change):
     reviewed = answer()
     if change == 'duplicate':
@@ -45,7 +46,7 @@ def test_invalid_review_cannot_create_a_formal_handoff(change):
     elif change == 'relabel':
         reviewed['reviews'][1]['label'] = 'negative'
     else:
-        reviewed['topic_headings']['2'] = '没有保留评论的议题'
+        reviewed['reviews'][1]['reason'] = ''
     with pytest.raises(ValueError):
         apply_quote_review(decisions(), reviewed)
 
@@ -68,6 +69,38 @@ def test_empty_selection_does_not_spend_another_model_call(tmp_path):
         result, audit = review_formal_selection({'rows': []}, original, [], tmp_path, 45)
     call.assert_not_called()
     assert result == original and audit['status'] == 'not_needed'
+
+
+def test_empty_unused_topic_index_does_not_discard_independently_approved_quotes(tmp_path):
+    reply = answer()
+    reply['topic_headings']['2'] = ' '
+    frozen = copy.deepcopy(reply)
+    with patch('cwh_comment_semantics.semantic_json', return_value=(reply, {'session_id': 'review-test'})):
+        result, audit = review_formal_selection({'rows': [{'id': 1}, {'id': 2}]},
+                                               decisions(), [], tmp_path, 10)
+    assert [row['id'] for row in result['rows'] if row['formal']] == [2]
+    assert result['topic_headings'] == {}
+    assert audit['status'] == 'review_complete'
+    assert audit['transport_repairs']['ignored_legacy_topic_headings'] == frozen['topic_headings']
+    assert audit['decisions'] == frozen and reply == frozen
+
+
+@pytest.mark.parametrize('headings', [{}, {'1': ''}, {'1': '有效索引', '2': None},
+                                     {'1': '有效索引', '2': '不属于所选议题的判断'}])
+def test_legacy_index_is_never_used_as_reviewed_heading(headings):
+    reply = answer()
+    reply['topic_headings'] = headings
+    result = apply_quote_review(decisions(), reply)
+    assert [r['id'] for r in result['rows'] if r['formal']] == [2]
+    assert result['rows'][1]['heading'] == decisions()['rows'][1]['heading']
+    assert result['topic_headings'] == {}
+
+
+def test_quote_review_needs_no_redundant_model_authored_topic_index():
+    reply = answer()
+    reply.pop('topic_headings')
+    result = apply_quote_review(decisions(), reply)
+    assert [r['id'] for r in result['rows'] if r['formal']] == [2]
 
 
 def test_independent_reviewer_cannot_keep_a_quote_without_an_existing_individual_heading():

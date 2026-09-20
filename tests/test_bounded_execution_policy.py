@@ -31,7 +31,7 @@ def test_40m_remains_available_and_retains_independent_review_and_quality_minimu
     assert current["overseas"]["parallel_with_domestic_research"] is False
     assert current["stage_budgets_seconds"]["domestic_evidence_verification"] >= 300
     _, legacy = execution_profile("bounded_60m")
-    for field in ("minimum_independent_voices_per_topic", "target_independent_voices_per_topic", "max_formal_voices_per_topic"):
+    for field in ("minimum_independent_voices_per_topic", "target_formal_excerpts_per_topic", "max_formal_voices_per_topic"):
         assert current["research"][field] == legacy["research"][field]
     assert current["model_contract"] == legacy["model_contract"]
 
@@ -61,27 +61,28 @@ def test_preflight_checks_all_shipped_profiles():
     }
 
 
-def test_standard_input_reallocates_raw_budget_without_extending_deadlines():
+def test_input_budgets_prioritize_body_within_the_one_hour_limit():
     _, selected = execution_profile("bounded_60m")
     raw = resolved_stage_budgets(selected, "raw_workbook")
     standard = resolved_stage_budgets(selected, "standard_workbook")
-    assert raw["workbook"] == 1260 and standard["workbook"] == 30
-    assert raw["domestic_viewpoints"] == 600 and standard["domestic_viewpoints"] == 1290
-    assert standard["domestic_viewpoints"] - raw["domestic_viewpoints"] == 690
-    assert standard["domestic_evidence_verification"] - raw["domestic_evidence_verification"] == 300
+    assert raw["workbook"] == 780 and standard["workbook"] == 30
+    assert raw["domestic_viewpoints"] == 1080 and standard["domestic_viewpoints"] == 1290
+    assert raw["domestic_evidence_verification"] == 600 and standard["domestic_evidence_verification"] == 600
     assert standard["overseas_evidence"] - raw["overseas_evidence"] == 180
     assert standard["hotwords"] - raw["hotwords"] == 60
-    assert sum(raw.values()) == sum(standard.values())
-    assert selected["wall_clock_budget_seconds"] == 3600 and selected["research_deadline_seconds"] == 2700
-    for stage in ("domestic_evidence_verification", "render", "delivery_gate"):
-        assert raw[stage] <= standard[stage]
+    assert sum(raw.values()) == 3225 and sum(standard.values()) == 2925
+    assert selected["wall_clock_budget_seconds"] == 3600 and selected["research_deadline_seconds"] == 3000
+    for allocation in (raw, standard):
+        assert sum(allocation.values()) + selected['reserved_delivery_buffer_seconds'] <= 3600
+        assert allocation['render'] == 180 and allocation['delivery_gate'] == 120
 
 
-def test_raw_review_time_moves_from_already_reviewed_handoffs_not_writing_or_delivery():
+def test_raw_appendices_cannot_consume_the_primary_body_allocation():
     _, selected = execution_profile("bounded_60m")
     raw = resolved_stage_budgets(selected, "raw_workbook")
     assert raw["overseas_evidence"] == 60 and raw["hotwords"] == 30
-    assert raw["domestic_viewpoints"] == 600 and raw["domestic_evidence_verification"] == 300
+    assert raw["domestic_viewpoints"] == 1080 and raw["domestic_evidence_verification"] == 600
+    assert raw['domestic_viewpoints'] + raw['domestic_evidence_verification'] > 2 * raw['workbook']
     assert raw["domestic_comments_sentiment"] == 300
     assert raw["render"] == 180 and raw["delivery_gate"] == 120
     assert sum(raw.values()) + selected["reserved_delivery_buffer_seconds"] == 3600

@@ -1,4 +1,5 @@
 import sys
+import pytest
 from pathlib import Path
 
 
@@ -8,17 +9,30 @@ sys.path.insert(0, str(SCRIPTS))
 from cwh_fast_comment_collection import apply_review_cap, query_variants, relevant_parent_title, topic_fragments
 
 
+def test_exhausted_collection_budget_keeps_a_gap_without_network_or_zero_claim(tmp_path, monkeypatch):
+    import time
+    import cwh_fast_comment_collection as collector
+    monkeypatch.setattr(collector, 'discover', lambda *a, **kw: pytest.fail('Must not search after deadline'))
+    accepted, searches = collector.discover_topic('公共服务', '2026-01-01', '2026-01-02', tmp_path,
+                                                  deadline=time.monotonic() - 1)
+    assert accepted == []
+    assert searches[0]['status'] == 'access_failed'
+    assert 'not executed' in searches[0]['error']
+
+
 def test_topic_query_variants_are_current_topic_driven():
     queries = query_variants("绿色低碳转型")
-    assert queries[0] == "国务院常务会议部署绿色低碳转型工作"
+    assert queries[0] == "国常会 绿色低碳转型"
+    assert '绿色低碳转型' in queries[:5]
     assert "国务院常务会议研究绿色低碳转型" in queries
     assert all("2026" not in query for query in queries)
 
 
 def test_declared_aliases_are_searched_inside_default_five_query_cutoff():
     queries = query_variants('某公共服务管理条例修订', ['公共服务', '服务条例', '公共服务', ''])[:5]
-    assert queries[0] == '国务院常务会议部署某公共服务管理条例修订工作'
-    assert '国务院常务会议公共服务' in queries and '国务院常务会议服务条例' in queries
+    assert queries[0] == '国常会 某公共服务管理条例修订'
+    assert '国常会 公共服务' in queries and '国常会 服务条例' in queries
+    assert '公共服务' in queries
     assert len(queries) == len(set(queries))
 
 
@@ -117,6 +131,37 @@ def test_multi_topic_parent_cannot_be_frozen_to_first_matching_topic():
     with pytest.raises(ValueError, match='semantic topic routing'):
         collection_topic_routes({'rows': [], 'posts': []}, ['动态甲', '动态乙'],
             {'multi_topic_parents': [{'parent_post_id': 'p1', 'topic_candidates': ['动态甲', '动态乙']}]})
+
+
+@pytest.mark.parametrize('has_state', [True, False])
+def test_auto_intake_aliases_reach_comment_search_without_external_metadata(tmp_path, has_state):
+    import json
+    from cwh_fast_comment_collection import metadata_topic_aliases
+    (tmp_path / 'artifacts').mkdir()
+    generated = tmp_path / 'artifacts/run_metadata.json'
+    generated.write_text(json.dumps({'topic_titles': ['当期公共服务条例修订'],
+        'topic_aliases': [['公共服务', '服务条例']]}), encoding='utf-8')
+    if has_state:
+        (tmp_path / 'pipeline_state.json').write_text('{"input_contract":{}}', encoding='utf-8')
+    aliases, provenance = metadata_topic_aliases(tmp_path / 'tasks/comments.json', ['当期公共服务条例修订'])
+    assert aliases == {'当期公共服务条例修订': ['公共服务', '服务条例']}
+    assert provenance['basis'] == 'current_job_generated_metadata'
+    assert '国常会 公共服务' in query_variants('当期公共服务条例修订', aliases['当期公共服务条例修订'])[:5]
+
+
+@pytest.mark.parametrize('metadata', [
+    {'topic_titles': ['其他一期'], 'topic_aliases': [['公共服务']]},
+    {'topic_titles': ['当期议题'], 'topic_aliases': [[123]]},
+    {'topic_titles': ['当期议题'], 'topic_aliases': []},
+])
+def test_invalid_comment_aliases_are_isolated_not_silently_mislabeled(tmp_path, metadata):
+    import json
+    from cwh_fast_comment_collection import metadata_topic_aliases
+    (tmp_path / 'artifacts').mkdir()
+    (tmp_path / 'artifacts/run_metadata.json').write_text(json.dumps(metadata), encoding='utf-8')
+    aliases, provenance = metadata_topic_aliases(tmp_path / 'tasks/comments.json', ['当期议题'])
+    assert aliases == {} and provenance['status'] == 'ignored'
+    assert provenance['reason'] and provenance['metadata_sha256']
 
 
 def test_review_cap_balances_topics_and_retains_omitted_rows():

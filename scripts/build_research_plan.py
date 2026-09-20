@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any
 
 from ingest_monitoring_workbook import ingest_workbook
 from cwh_model_contract import WRITING_RULES_PATH, execution_profile
+from cwh_writing_rules import writing_rules
 
 
 SOURCE_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "config" / "source_registry.v1.json"
@@ -129,6 +131,34 @@ def policy_search_subject(topic: str) -> str:
     return value if len(value) >= 3 else original
 
 
+def apply_search_aliases(plan: dict, aliases_by_topic: dict) -> dict:
+    """Use current intake aliases for discovery, never rename an official topic."""
+    result = copy.deepcopy(plan)
+    for row in result.get('topics') or []:
+        topic = row.get('topic', '')
+        aliases = aliases_by_topic.get(topic)
+        if not isinstance(aliases, list):
+            continue
+        aliases = list(dict.fromkeys(a.strip() for a in aliases
+                                    if isinstance(a, str) and 2 <= len(a.strip()) <= 30
+                                    and not re.search(r'[\r\n"()]', a)))[:2]
+        if not aliases:
+            continue
+        subject = '(' + ' OR '.join('"' + a + '"' for a in aliases) + ')'
+        previous = row.get('search_subject') or policy_search_subject(topic)
+        row.update(search_subject=subject, search_aliases=aliases,
+                   search_subject_source='current_intake_topic_aliases')
+        for family, queries in (row.get('queries') or {}).items():
+            if family != 'official_confirmation':
+                row['queries'][family] = [q.replace(previous, subject) for q in queries]
+        for task in row.get('stable_source_tasks') or []:
+            if task.get('tier') == 'authoritative' or task.get('source_id') == 'lane_authoritative':
+                continue
+            task['query'] = task['query'].replace(previous, subject)
+            task['query_families'] = [q.replace(previous, subject) for q in task.get('query_families') or []]
+    return result
+
+
 def research_queries(topic: str, meeting_date: str) -> dict[str, list[str]]:
     subject = policy_search_subject(topic)
     return {
@@ -200,6 +230,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
             "max_full_page_fetches_per_topic": int(research_policy.get("max_full_page_fetches_per_topic") or 0),
             "max_monitoring_full_article_reviews_per_topic": int(research_policy.get("max_monitoring_full_article_reviews_per_topic") or 12),
             "initial_public_page_fetches_per_topic": int(research_policy.get("initial_public_page_fetches_per_topic") or 4),
+            "reading_budget_policy": dict(research_policy.get("reading_budget_policy") or {}),
             "max_named_entity_expansions_per_topic": int(research_policy.get("max_named_entity_expansions_per_topic") or 0),
             "required_lanes": list(research_policy.get("required_lanes") or []),
             "stage_budgets_seconds": dict(profile.get("stage_budgets_seconds") or {}),
@@ -287,7 +318,7 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                         ),
                     },
                     "formal_selection_rule": (
-                        "Select the strongest independent voices across distinct viewpoint families for formal prose. "
+                        "In bounded profiles normally select 4-6 attributed excerpts across 2-3 judgments per topic, not a quota of distinct people; additional material must add indispensable information. "
                         "In bounded profiles, retain additional valid candidates as decision=eligible, formal_use=reserve with "
                         "a reserve_reason; reserve rows stay in audit and do not expand prose. In exhaustive mode every "
                         "eligible row enters formal prose. Exact mirrors remain duplicate audit records."
@@ -295,10 +326,14 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                     "max_formal_voices_per_topic": int(research_policy.get("max_formal_voices_per_topic") or 0),
                 },
                 "domestic_viewpoint_contract": {
+                    "selection_budget_rule": writing_rules()["viewpoint"]["selection_budget_rule"],
+                    "target_formal_excerpts_per_topic": writing_rules()["viewpoint"]["topic_excerpt_range"],
                     "distinct_voice_per_cluster": True,
-                    "same_voice_once_per_topic_by_default": True,
+                    "same_voice_once_per_topic_by_default": False,
+                    "same_voice_distinct_claims_allowed": True,
+                    "independent_voice_count_basis": "distinct_subject_not_claim_count",
                     "preserve_source_excerpt": True,
-                    "preferred_claim_cjk_range": [45, 120],
+                    "preferred_claim_char_range": writing_rules()["viewpoint"]["claim_char_range"],
                     "minimum_claim_cjk": 30,
                     "media_voice_form": "某媒体认为/称/建议",
                     "named_person_form": "完整机构+职务+姓名+认为/指出/建议",
@@ -309,11 +344,11 @@ def build_plan(workbook_path: str, agenda: str = "", execution_profile_name: str
                         "同一人物同一观点因转载链接不同而重复成文",
                     ],
                     "topic_density": {
-                        "normal_mature_clusters": [2, 4],
+                        "normal_mature_clusters": writing_rules()["viewpoint"]["topic_cluster_range"],
                         "independent_voices_per_cluster": (
-                            "bounded_2_to_4_with_audited_reserve" if bounded else "all_eligible_no_upper_cap"
+                            "normally_two_complementary_voices_with_audited_exceptions" if bounded else "all_eligible_no_upper_cap"
                         ),
-                        "preferred_claim_cjk_range_per_voice": [45, 120],
+                        "preferred_claim_char_range_per_voice": writing_rules()["viewpoint"]["claim_char_range"],
                         "cluster_detail_length": "scales_with_eligible_voice_count_no_upper_cap",
                         "single_cluster_rule": (
                             "A substantive topic normally has at least two independently supported viewpoint clusters. "

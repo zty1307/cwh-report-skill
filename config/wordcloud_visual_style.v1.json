@@ -1,0 +1,10 @@
+{
+  "version": "1.1",
+  "basis_width": 1600,
+  "primary_font_min": 26,
+  "primary_font_max": 198,
+  "font_scale_exponent": 2.0,
+  "headword_rank_floors": [1.0, 0.84, 0.73, 0.62, 0.54],
+  "max_placed_instances": 360,
+  "scope": "Display hierarchy only. Never change reviewed terms, evidence counts or weights. Keep the shipped font, color, rotation and cloud silhouette."
+}

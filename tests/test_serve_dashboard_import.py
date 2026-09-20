@@ -76,11 +76,24 @@ class DashboardImportTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
-    def test_metadata_comes_from_current_dashboard_topics(self) -> None:
-        metadata = self.app._raw_metadata({"agenda": "2026年7月10日国务院常务会"})
-        self.assertEqual(metadata["topic_titles"], ["听取数字中国建设情况汇报"])
-        self.assertIn("数字中国建设", metadata["topic_aliases"][0])
-        self.assertEqual(metadata["meeting_title"], "2026年7月10日国务院常务会议")
+    def test_previous_dashboard_topics_cannot_label_new_upload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不能沿用"):
+            self.app._raw_metadata({"agenda": "2026年7月10日国务院常务会"})
+
+    def test_communique_update_reuses_files_and_refuses_running_job(self) -> None:
+        job = self.app.start_import({"agenda": "2026-07-31", "agenda_order_confirmed": True})
+        self.app.upload_file(job['job_id'], 'keep.json', b'{}')
+        updated = self.app.update_communique({'job_id': job['job_id'], 'agenda': '2026-07-31',
+                                             'communique_url': 'https://www.gov.cn/a', 'agenda_order_confirmed': True})
+        self.assertTrue(updated['agenda_order_confirmed'])
+        self.assertEqual(len(updated['files']), 1)
+        self.assertTrue(updated['communique_supplement_url'])
+        directory = self.app._job_directory(job['job_id'])
+        self.app._update_manifest(directory, status='workbook_running')
+        with self.assertRaisesRegex(ValueError, '不能替换'):
+            self.app.update_communique({'job_id': job['job_id']})
+        with self.assertRaisesRegex(ValueError, '重复启动'):
+            self.app.commit_import(job['job_id'])
 
     def test_service_manifest_describes_native_workbench(self) -> None:
         manifest = self.app.service_manifest()
@@ -611,16 +624,8 @@ class DashboardImportTests(unittest.TestCase):
         thread.assert_called_once()
 
     def test_full_agenda_replaces_previous_report_topics_for_raw_mapping(self) -> None:
-        metadata = self.app._raw_metadata(
-            {
-                "agenda": (
-                    "国务院常务会议进一步部署防汛抗洪救灾工作；"
-                    "听取数字中国建设情况汇报；研究新兴支柱产业培育有关工作"
-                )
-            }
-        )
-        self.assertEqual(len(metadata["topic_titles"]), 3)
-        self.assertIn("数字中国建设", metadata["topic_titles"][1])
+        with self.assertRaisesRegex(ValueError, "本期通稿"):
+            self.app._raw_metadata({"agenda": "国务院常务会议听取数字中国建设情况汇报；研究其他工作"})
 
 
 if __name__ == "__main__":

@@ -8,6 +8,31 @@ from build_research_plan import load_source_registry, research_queries, stable_s
 from cwh_host_research import topic_search_tasks
 
 
+def test_current_aliases_reach_actual_search_but_leave_official_titles_and_proof_unchanged():
+    import copy
+    from build_research_plan import apply_search_aliases
+    topic, date = '听取公共服务设施建设情况汇报', '2028-03-12'
+    plan = {'topics': [{'topic': topic, 'search_subject': policy_search_subject(topic),
+                       'queries': research_queries(topic, date), 'query_execution_limit': 10,
+                       'stable_source_tasks': stable_source_tasks(
+                           topic, date, load_source_registry()['sources'], profile_name='bounded_60m')}]}
+    original = copy.deepcopy(plan)
+    updated = apply_search_aliases(plan, {topic: ['公共服务设施', '服务资源配置']})
+    row = updated['topics'][0]
+    tasks = topic_search_tasks(row, {'start': date})
+    assert row['topic'] == topic and len(tasks) == 10 and plan == original
+    assert row['queries']['official_confirmation'] == original['topics'][0]['queries']['official_confirmation']
+    assert topic in next(t['query'] for t in tasks if t['source_id'] == 'lane_authoritative')
+    for task in tasks:
+        if task['source_id'] != 'lane_authoritative':
+            assert '("公共服务设施" OR "服务资源配置")' in task['query']
+            assert topic not in task['query']
+    assert any(t['source_id'] == 'open_web' and '国常会' not in t['query']
+               and '国务院常务会议' not in t['query'] for t in tasks)
+    assert apply_search_aliases(plan, {'其他议题': ['旧关键词']}) == original
+    assert apply_search_aliases(plan, {topic: ['', None, '\n错误词']}) == original
+
+
 def test_academic_discovery_uses_alternative_source_types_not_all_types_at_once():
     query = research_queries('公共服务政策', '2026-07-31')['academic_and_think_tank_viewpoints'][1]
     assert '(研究院 OR 智库 OR 学者 OR 协会 OR 学会)' in query

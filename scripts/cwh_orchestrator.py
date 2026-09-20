@@ -3292,6 +3292,9 @@ def build_system_audit(
 ) -> dict[str, Any]:
     gaps = list(collection_gaps)
     blockers: list[str] = []
+    research_budget_gaps = list((analysis_metadata or {}).get('research_budget_gaps') or [])
+    gaps.extend(research_budget_gaps)
+    blockers.extend(research_budget_gaps)
     validation = system_data.get("validation") or []
     for item in validation:
         message = str(item.get("message") or item)
@@ -3717,6 +3720,10 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
          "deferred_documents": len(set(row.get("deferred_record_ids") or [])), "deferral_reason": row.get("deferral_reason") or ""}
         for row in corpus_reviews if isinstance(row, dict)
     ]
+    from cwh_meeting_lead import report_agenda_fields
+    meeting_fields, meeting_lead_audit = report_agenda_fields(
+        getattr(args, 'meeting_context', ''), agenda, topics)
+    audit.setdefault('quality_summary', {})['meeting_lead'] = meeting_lead_audit
     data = {
         "version": SCHEMA_VERSION,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -3726,6 +3733,7 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
             "topics": topics,
             "topic_keywords": {topic: extract_terms(topic) for topic in topics},
             "search_queries": {topic: keywords_for(topic) for topic in topics},
+            **meeting_fields,
         },
         "collection": {
             "data_mode": "system" if system_mode else "crawler_or_samples",
@@ -3815,6 +3823,13 @@ def orchestrate(args: argparse.Namespace) -> dict[str, Any]:
         from formalize_cwh_report import apply_hotword_audit
 
         apply_hotword_audit(data, Path(args.hotword_audit))
+    for notice in (sentiment_summary.get('notice'), supplied_foreign_audit.get('notice')):
+        if notice:
+            audit = data.setdefault('audit', {})
+            audit.setdefault('data_gaps', []).append(notice)
+            acceptance = audit.setdefault('acceptance', {})
+            acceptance['ready_for_formal_delivery'] = False
+            acceptance.setdefault('blockers', []).append(notice)
     write_outputs(data, out_dir)
     return data
 
@@ -3833,6 +3848,7 @@ def main() -> None:
     parser.add_argument("--system-workbook", default="", help="Authoritative monitoring-system CWH workbook (.xlsx).")
     parser.add_argument("--system-details", default="", help="Optional system-exported detail CSV/JSON for media articles and netizen comments.")
     parser.add_argument("--analysis-bundle", default="", help="Internal AI/research evidence bundle generated automatically by the skill.")
+    parser.add_argument("--meeting-context", default="", help="Optional reviewed current communique; preserve sourced agenda verbs in the fixed opening.")
     parser.add_argument(
         "--overseas-supplements",
         default="",

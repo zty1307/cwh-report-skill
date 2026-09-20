@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from cwh_viewpoint_gate import cluster_density_result
+from cwh_viewpoint_gate import cluster_density_result, independent_voice_keys
 from cwh_orchestrator import build_system_audit
 from run_cwh_resumable_pipeline import validate_analysis_bundle
 
@@ -64,3 +64,24 @@ def test_exception_cannot_waive_empty_prose_or_missing_evidence():
         cluster["thin_cluster_exception"] = EXCEPTION
         cluster[key] = value
         assert cluster_density_result(cluster)["passed"] is False
+
+
+@pytest.mark.parametrize('people,claims_per_person', [(1, 13), (4, 4), (13, 1)])
+def test_bounded_formal_cap_and_shortfall_count_subjects_not_claims(tmp_path, people, claims_per_person):
+    evidence = [{'candidate_id': f'c{p}-{i}', 'speaker_name': f'主体{p}',
+                 'url': 'https://example.test/article'}
+                for p in range(people) for i in range(claims_per_person)]
+    assert len(independent_voice_keys(evidence)) == people
+    pool = {'topic': '公共服务', 'candidates': [
+        {'candidate_id': row['candidate_id'], 'decision': 'eligible'} for row in evidence],
+        'saturation': {'stop_reason': 'coverage_minimum_then_one_zero_new_round_or_budget_exhausted'}}
+    bundle = {'viewpoints': {'by_topic': [{'topic': '公共服务', 'clusters': [
+        {**thin_cluster(), 'evidence': evidence}]}]},
+        'research_audit': {'domestic_media_research': {'candidate_pool_by_topic': [pool]}}}
+    path = tmp_path / 'draft.json'
+    path.write_text(json.dumps(bundle), encoding='utf-8')
+    problems = validate_analysis_bundle(path, ['公共服务'], require_semantic_review=False)
+    assert any('超过12个硬上限' in p for p in problems) == (people > 12)
+    assert any('低于4个且缺少evidence_shortfall' in p for p in problems) == (people < 4)
+    # These synthetic rows are deliberately not valid evidence.
+    assert any('缺少字段' in p for p in problems)

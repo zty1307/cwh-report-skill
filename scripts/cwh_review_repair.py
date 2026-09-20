@@ -99,8 +99,6 @@ def combine(analysis, earlier, later, repaired_ids, source_hash):
 def validate_combined(original, repaired, initial, combined):
     provenance = combined['repair_provenance']
     failed = {r['evidence_id'] for r in initial['reviews'] if r['verdict'] != 'fully_supported'}
-    if failed != set(provenance['repaired_evidence_ids']):
-        raise ValueError('Repair list differs from actual independent rejections')
     digest = hashlib.sha256(json.dumps(initial, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if digest != provenance['earlier_review_sha256'] or initial['source_bundle_sha256'] != provenance['original_source_bundle_sha256']:
         raise ValueError('Initial independent review provenance mismatch')
@@ -108,11 +106,13 @@ def validate_combined(original, repaired, initial, combined):
         from cwh_review_retention import validate_retention
         validate_retention(original, repaired, initial, combined)
         return
+    if failed != set(provenance['repaired_evidence_ids']):
+        raise ValueError('Repair list differs from actual independent rejections')
     validate_identity(original, repaired, failed)
     rows = {r['evidence_id']: r for r in combined['reviews']}
     for row in initial['reviews']:
         if row['evidence_id'] not in failed:
-            expected = {**row, 'reviewer_run_id': initial['reviewer_run_id']}
+            expected = {**row, 'reviewer_run_id': row.get('reviewer_run_id') or initial['reviewer_run_id']}
             if rows.get(row['evidence_id']) != expected:
                 raise ValueError('An unchanged verdict or its real reviewer was rewritten')
     if provenance.get('mode') == 'reviewer_narrowing_v1':
@@ -189,9 +189,12 @@ def reviewer_narrowing_packet(repaired, initial, raw_result, revisions, run, sou
     if 'heading_repair_runs' in raw_result:
         final_result['heading_repair_runs'] = raw_result['heading_repair_runs']
     final = compile_review(repaired, final_result, run, source_hash)
+    earlier_reviews = {row['evidence_id']: row for row in initial['reviews']}
     for row in final['reviews']:
-        row['reviewer_run_id'] = run['session_id']
-    final['reviewer_run_ids'] = [run['session_id']]
+        earlier = earlier_reviews[row['evidence_id']]
+        row.update(reviewed_by=earlier['reviewed_by'], reviewed_at=earlier['reviewed_at'],
+                   reviewer_run_id=earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+    final['reviewer_run_ids'] = list(initial.get('reviewer_run_ids') or [initial['reviewer_run_id']])
     final['repair_provenance'] = {
         'mode': 'reviewer_narrowing_v1',
         'original_source_bundle_sha256': initial['source_bundle_sha256'],

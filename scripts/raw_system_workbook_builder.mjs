@@ -13,6 +13,9 @@ if (!normalizedPath || !outputPath || !previewsDir || !verificationPath) {
 }
 
 const data = JSON.parse(await fs.readFile(normalizedPath, "utf8"));
+const topicChartStyle = JSON.parse(await fs.readFile(
+  new URL("../config/chart_style.v1.json", import.meta.url), "utf8"
+)).topic_distribution;
 const workbook = Workbook.create();
 
 const SHEET_ORDER = [
@@ -320,7 +323,7 @@ function buildChildSummary() {
   const series = chart.series.add("总量（万条）");
   series.categoryFormula = `'子事件数据汇总'!$B$20:$B$${helperLastRow}`;
   series.formula = `'子事件数据汇总'!$C$20:$C$${helperLastRow}`;
-  series.fill = "#5B9BD5";
+  series.fill = topicChartStyle.bar_color;
   chart.hasLegend = false;
   chart.xAxis = { numberFormatCode: "0.0", textStyle: { fontSize: 9 } };
   chart.yAxis = { textStyle: { fontSize: 9 } };

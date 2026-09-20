@@ -34,7 +34,7 @@ class NormalizeAnalysisTests(unittest.TestCase):
         normalized = MODULE.normalize_analysis(payload)
         cluster = normalized["viewpoints"]["by_topic"][0]["clusters"][0]
         self.assertEqual(
-            "甲研究院认为，政策实施应强化跨部门协同。李明指出应建立长效评估机制。",
+            "甲研究院称，政策实施应强化跨部门协同。李明指出应建立长效评估机制。",
             cluster["details"],
         )
         self.assertEqual(

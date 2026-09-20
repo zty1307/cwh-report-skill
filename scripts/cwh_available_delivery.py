@@ -12,6 +12,13 @@ def available_delivery(data: dict) -> bool:
     return (data.get("metadata") or {}).get("delivery_policy") == DELIVERY_POLICY
 
 
+def has_unmapped_formal_candidates(candidates, *, bounded):
+    """Audited reserves are not formal selections or independently approved claims."""
+    return any(c.get('decision') == 'eligible' and not (
+        bounded and str(c.get('formal_use') or '').strip().lower() == 'reserve'
+        and str(c.get('reserve_reason') or '').strip()) for c in candidates)
+
+
 def valid_gap(topic: dict) -> bool:
     gap = topic.get("evidence_gap") or {}
     return not topic.get("clusters") and gap.get("status") == "no_usable_interpretation_in_reviewed_material" and all(
@@ -31,6 +38,39 @@ def prepare_available_delivery(data: dict) -> dict:
     research = (result.get("research_audit") or {}).get("domestic_media_research") or {}
     pools = {p["topic"]: p for p in research.get("candidate_pool_by_topic") or []}
     reviews = {p["topic"]: p for p in (research.get("public_article_corpus_review") or {}).get("topic_reviews") or []}
+    from cwh_search_budget import query_budget_evidence
+    budget_notices = list(result['metadata'].get('upstream_review_gaps') or [])
+    for topic, review in reviews.items():
+        completed = len(set(review.get('reviewed_record_ids') or []))
+        deferred = len(set(review.get('deferred_record_ids') or []))
+        if deferred and completed < min(12, completed + deferred):
+            notice = f'{topic}本轮仅完成{completed}篇原文审核，另有{deferred}篇待审；未达到阅读目标，仅交付已核验内容。'
+            review['reading_shortfall_notice'] = notice
+            budget_notices.append(notice)
+    for pool in pools.values():
+        delayed = (pool.get('reading_scope') or {}).get('semantic_reading_deferred_item_ids') or []
+        if delayed:
+            budget_notices.append(f"{pool['topic']}有{len(delayed)}篇已取得原文但模型阅读未完成的材料暂未审完；现稿不包含其未获核验的观点，不代表相关解读不存在。")
+        saturation = pool.get('saturation') or {}
+        rounds = saturation.get('rounds') or []
+        if rounds and int(rounds[-1].get('new_independent_viewpoints') or 0) > 0:
+            proof = query_budget_evidence(saturation, research.get('execution_profile'))
+            if proof:
+                saturation['completed'] = False
+                saturation['budget_stop'] = proof
+                budget_notices.append(f"{pool['topic']}已达到本轮{proof['configured_max_queries']}次查询上限，但最后一轮仍有新增观点；检索未证明饱和，保留现有证据交付。")
+    if budget_notices:
+        result['metadata']['research_budget_gaps'] = budget_notices
+    synthesis_gaps = [t['topic'] + '：分组未完成，已提取观点暂按来源顺序排列，待独立核验。'
+        for t in (result.get('viewpoints') or {}).get('by_topic') or []
+        if any(c.get('cluster_key') == 'source_order' for c in t.get('clusters') or [])]
+    if synthesis_gaps:
+        result['metadata']['research_budget_gaps'] = list(dict.fromkeys(
+            result['metadata'].get('research_budget_gaps', []) + synthesis_gaps))
+    review_gaps = [row['notice'] for row in result['metadata'].get('independent_review_gaps', [])]
+    if review_gaps:
+        result['metadata']['research_budget_gaps'] = list(dict.fromkeys(
+            result['metadata'].get('research_budget_gaps', []) + review_gaps))
     for topic in (result.get("viewpoints") or {}).get("by_topic") or []:
         pool = pools.get(topic["topic"], {})
         executions = [q for r in (pool.get("saturation") or {}).get("rounds") or [] for q in r.get("executions") or []]
@@ -59,9 +99,15 @@ def prepare_available_delivery(data: dict) -> dict:
             topic.setdefault("single_cluster_exception", exception(count_note))
         for cluster in clusters:
             cluster.setdefault("thin_cluster_exception", exception(count_note))
-        if not clusters and not any(c.get("decision") == "eligible" for c in pool.get("candidates") or []):
+        candidates = pool.get('candidates') or []
+        if not clusters and not has_unmapped_formal_candidates(candidates,
+                bounded=str(research.get('execution_profile') or '').startswith('bounded_')):
+            reserved = [c['candidate_id'] for c in candidates if c.get('decision') == 'eligible']
             topic["heading"] = topic["topic"]
             topic["evidence_gap"] = {"status": "no_usable_interpretation_in_reviewed_material",
                                      "notice": GAP_NOTICE, "search_evidence": audit,
                                      "recorded_by": "controller", "scope": count_note}
+            if reserved:
+                topic['evidence_gap']['reserved_candidate_ids'] = reserved
+                topic['evidence_gap']['scope'] += f'另有{len(reserved)}条备选未进入正式选材，原文及原生取舍保留；不视为已通过独立核验。'
     return result

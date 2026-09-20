@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 from cwh_pipeline_runtime import atomic_write_json
@@ -52,15 +53,17 @@ def query_variants(topic: str, aliases=()) -> list[str]:
     fragments = topic_fragments(topic)
     primary = fragments[0]
     suffixes = fragments[1:] or fragments
-    queries = [
-        f"国务院常务会议部署{primary}工作",
-    ]
+    queries = [f"国常会 {primary}"]
     # Put current, declared short names inside the bounded search cutoff,
     # rather than using them only after discovery for parent-title matching.
     declared = [re.sub(r'\s+', '', alias) for alias in aliases
                 if isinstance(alias, str) and len(alias.strip()) >= 3]
-    queries.extend(f"国务院常务会议{alias}" for alias in list(dict.fromkeys(declared))[:2]
-                   if alias != primary)
+    short_names = [alias for alias in dict.fromkeys(declared) if alias != primary][:2]
+    queries.extend(f"国常会 {alias}" for alias in short_names)
+    # Search policy-specific titles as well. The returned parent still needs
+    # meeting and topic evidence below; a broader query is not a relevance pass.
+    queries.append(short_names[0] if short_names else primary)
+    queries.append(f"国务院常务会议{primary}")
     queries.extend([f"国务院常务会议研究推进{primary}", f"国务院常务会议研究{primary}"])
     queries.extend(f"国务院常务会议部署加快建设{fragment}" for fragment in reversed(suffixes))
     queries.append(f"国务院常务会议{primary}")
@@ -94,6 +97,7 @@ def discover_topic(
     max_articles: int = 3,
     timeout: int = 15,
     aliases=(),
+    deadline=None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     left = parse_bound(start)
     right = parse_bound(end, end=True)
@@ -101,8 +105,12 @@ def discover_topic(
     searches: list[dict[str, Any]] = []
     tried: set[str] = set()
     for query in query_variants(topic, aliases)[:max_queries]:
+        if deadline is not None and deadline - time.monotonic() < 1:
+            searches.append({'query': query, 'status': 'access_failed', 'result_count': 0,
+                             'error': 'Topic collection budget exhausted; query not executed', 'model_invoked': False})
+            break
         try:
-            found = discover(query)
+            found = discover(query) if deadline is None else discover(query, timeout=min(timeout, max(.1, deadline - time.monotonic())))
             search_record = {"query": query, "status": "completed", "result_count": len(found),
                              "error": "", "candidate_outcomes": []}
             searches.append(search_record)
@@ -112,8 +120,13 @@ def discover_topic(
             continue
         candidates = [(gid, title) for gid, title in found.items() if gid not in tried][:max_candidates_per_query]
         tried.update(gid for gid, _ in candidates)
+        def bounded_fetch(gid, title):
+            remaining = timeout if deadline is None else min(timeout, deadline - time.monotonic())
+            if remaining < .1:
+                raise TimeoutError('Candidate collection budget exhausted; request not executed')
+            return fetch_candidate(gid, title, remaining)
         with ThreadPoolExecutor(max_workers=6) as pool:
-            futures = [pool.submit(fetch_candidate, gid, title, timeout) for gid, title in candidates]
+            futures = [pool.submit(bounded_fetch, gid, title) for gid, title in candidates]
             for future in futures:
                 try:
                     item = future.result()
@@ -239,23 +252,34 @@ def apply_review_cap(
     return capture, len(omitted)
 
 
-def metadata_topic_aliases(task_path: Path) -> tuple[dict, dict]:
-    state_path = Path(task_path).resolve().parent.parent / 'pipeline_state.json'
-    if not state_path.is_file():
-        return {}, {}
-    contract = json.loads(state_path.read_text('utf-8-sig')).get('input_contract') or {}
-    raw = contract.get('metadata')
-    if not raw:
-        return {}, {}
-    path = Path(raw)
-    metadata = json.loads(path.read_text('utf-8-sig'))
-    titles, aliases = metadata.get('topic_titles') or [], metadata.get('topic_aliases') or []
-    if not aliases:
-        return {}, {}
-    if len(titles) != len(aliases) or any(not isinstance(row, list) for row in aliases):
-        raise ValueError('Current input metadata aliases do not align with topic_titles')
-    return dict(zip(titles, aliases)), {'metadata_file': str(path.resolve()),
-        'metadata_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'basis': 'current_input_declared_aliases_not_historical_seed'}
+def metadata_topic_aliases(task_path: Path, topics=None) -> tuple[dict, dict]:
+    root = Path(task_path).resolve().parent.parent
+    state_path = root / 'pipeline_state.json'
+    provenance = {}
+    try:
+        contract = (json.loads(state_path.read_text('utf-8-sig')).get('input_contract') or {}) if state_path.is_file() else {}
+        raw = contract.get('metadata')
+        path = Path(raw) if raw else root / 'artifacts/run_metadata.json'
+        if not path.is_file():
+            return {}, {}
+        contents = path.read_bytes()
+        provenance = {'metadata_file': str(path.resolve()),
+            'metadata_sha256': hashlib.sha256(contents).hexdigest(),
+            'basis': 'current_input_declared_aliases_not_historical_seed' if raw else 'current_job_generated_metadata'}
+        metadata = json.loads(contents.decode('utf-8-sig'))
+        titles, aliases = metadata.get('topic_titles') or [], metadata.get('topic_aliases') or []
+        if topics is not None and titles != list(topics):
+            raise ValueError('Metadata topic names/order do not match this comment research plan')
+        if len(titles) != len(aliases) or any(not isinstance(row, list) or
+                any(not isinstance(alias, str) for alias in row) for row in aliases):
+            raise ValueError('Current metadata aliases do not align with topic_titles')
+        if not all(isinstance(title, str) and title for title in titles) or len(set(titles)) != len(titles):
+            raise ValueError('Metadata topic names must be nonempty and unique')
+        return dict(zip(titles, aliases)), {**provenance, 'status': 'used'}
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        # Optional aliases improve recall; a bad alias file must not prevent the
+        # original topic queries or become evidence of missing public comments.
+        return {}, {**provenance, 'status': 'ignored', 'reason': str(exc)}
 
 
 def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
@@ -269,7 +293,7 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     start = str(plan["monitoring_period"]["start"])
     end = str(plan["monitoring_period"]["end"])
     topics = [str(row["topic"]) for row in plan.get("topics") or []]
-    alias_map, alias_provenance = metadata_topic_aliases(task_path)
+    alias_map, alias_provenance = metadata_topic_aliases(task_path, topics)
     if not topics:
         raise ValueError("Research plan has no workbook topics")
 
@@ -277,8 +301,13 @@ def collect(task_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     searches_by_topic: dict[str, list[dict[str, Any]]] = {}
     claimed_urls: set[str] = set()
     observations = {"checks": []}
-    for topic in topics:
-        accepted, searches = discover_topic(topic, start, end, raw_dir, aliases=alias_map.get(topic, []))
+    available = (task.get('repair_contract') or {}).get('missing_evidence') == 'deliver_available_with_gaps'
+    remaining = float(task.get('remaining_budget_seconds') or task.get('time_budget_seconds') or 300)
+    collection_deadline = time.monotonic() + max(0, (remaining - 15) * .5)
+    for number, topic in enumerate(topics):
+        topic_deadline = time.monotonic() + max(0, collection_deadline - time.monotonic()) / (len(topics) - number)
+        accepted, searches = discover_topic(topic, start, end, raw_dir, aliases=alias_map.get(topic, []),
+            **({'deadline': topic_deadline} if available else {}))
         # One parent URL may not be routed to multiple topics.
         accepted = [row for row in accepted if row["url"] not in claimed_urls]
         claimed_urls.update(row["url"] for row in accepted)

@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 import ipaddress
 import re
 import socket
+import codecs
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from cwh_pipeline_runtime import utc_now
@@ -56,6 +57,24 @@ class PageText(HTMLParser):
                 self.title_parts.append(text)
 
 
+def decode_public_html(data, declared_charset):
+    """Strict decoding only; legacy Chinese labels may use their GB18030 superset.
+
+    No replacement characters or arbitrary charset guessing are allowed. Keep
+    the actual decoder in retrieval provenance, not a claim of source review.
+    """
+    declared = declared_charset or 'utf-8'
+    if data.startswith(codecs.BOM_UTF8):
+        return data.decode('utf-8-sig', errors='strict'), 'utf-8-sig'
+    try:
+        return data.decode(declared, errors='strict'), declared
+    except UnicodeDecodeError:
+        canonical = codecs.lookup(declared).name
+        if canonical not in {'gb2312', 'gbk'}:
+            raise
+        return data.decode('gb18030', errors='strict'), 'gb18030'
+
+
 def read_public_page(url, timeout=12):
     result = {"url": url, "captured_at": utc_now(), "capture_method": "unauthenticated_public_http_html_text"}
     try:
@@ -71,13 +90,14 @@ def read_public_page(url, timeout=12):
             charset = response.headers.get_content_charset()
             match = re.search(br"charset\s*=\s*[\"']?([\w-]+)", data[:5000], re.I)
             charset = charset or (match.group(1).decode("ascii") if match else "utf-8")
-            raw_text = data.decode(charset, errors="strict")
+            raw_text, decoded_charset = decode_public_html(data, charset)
             page = PageText()
             page.feed(raw_text)
             text = "\n".join(line.strip() for line in "".join(page.parts).splitlines() if line.strip())
             if len(text) < 100 or any(x in text[:500] for x in ("访问过于频繁", "访问验证", "安全验证", "验证码", "Access Denied")):
                 raise ValueError("No readable full page, or an access challenge was returned")
-            result.update(status="completed", source_text=text, page_title="".join(page.title_parts).strip(), final_url=response.geturl())
+            result.update(status="completed", source_text=text, page_title="".join(page.title_parts).strip(), final_url=response.geturl(),
+                          declared_charset=charset, decoded_charset=decoded_charset)
     except Exception as exc:
         result.update(status="access_failed", blocker=f"{type(exc).__name__}: {exc}")
     return result

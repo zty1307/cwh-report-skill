@@ -4,6 +4,7 @@
   "profiles": {
     "bounded_40m": {
       "formal": true,
+      "raw_workbook_finalization_reserve_seconds": 180,
       "wall_clock_budget_seconds": 2400,
       "input_mode_budget_overrides": {
         "raw_workbook": {"workbook": 480, "domestic_comments_sentiment": 180, "overseas_evidence": 150, "hotwords": 30},
@@ -41,14 +42,15 @@
         "required_lanes": ["monitoring_corpus", "official_mainstream", "industry_expert", "public_platform"],
         "max_query_executions_per_topic": 10,
         "max_monitoring_full_article_reviews_per_topic": 16,
+        "reading_budget_policy": {"base_monitoring_articles": 12, "base_public_pages": 4, "baseline_topic_seconds": 360, "expanded_topic_seconds": 660},
         "initial_public_page_fetches_per_topic": 8,
         "max_results_per_query": 8,
         "max_full_page_fetches_per_topic": 18,
         "max_named_entity_expansions_per_topic": 2,
         "required_zero_new_rounds": 1,
         "minimum_independent_voices_per_topic": 4,
-        "target_independent_voices_per_topic": [6, 12],
-        "target_mature_clusters_per_topic": [2, 4],
+        "target_formal_excerpts_per_topic": [4, 6],
+        "target_mature_clusters_per_topic": [2, 3],
         "max_formal_voices_per_topic": 12,
         "reserve_policy": "retain additional eligible candidates in audit with formal_use=reserve",
         "blocked_platform_policy": "record blocker and continue available lanes",
@@ -78,12 +80,13 @@
     },
     "bounded_60m": {
       "formal": true,
+      "raw_workbook_finalization_reserve_seconds": 180,
       "carry_forward_unused_budget": true,
       "wall_clock_budget_seconds": 3600,
-      "research_deadline_seconds": 2700,
-      "reserved_delivery_buffer_seconds": 675,
+      "research_deadline_seconds": 3000,
+      "reserved_delivery_buffer_seconds": 375,
       "input_mode_budget_overrides": {
-        "raw_workbook": {"workbook": 1260, "domestic_viewpoints": 600, "overseas_evidence": 60, "hotwords": 30},
+        "raw_workbook": {"workbook": 780, "domestic_viewpoints": 1080, "domestic_evidence_verification": 600, "overseas_evidence": 60, "hotwords": 30},
         "standard_workbook": {"workbook": 30, "domestic_viewpoints": 1290, "domestic_evidence_verification": 600}
       },
       "stage_budgets_seconds": {
@@ -92,7 +95,7 @@
         "workbook": 900,
         "research_plan": 30,
         "domestic_viewpoints": 720,
-        "domestic_evidence_verification": 300,
+        "domestic_evidence_verification": 600,
         "domestic_comments_sentiment": 300,
         "overseas_evidence": 240,
         "hotwords": 90,
@@ -113,6 +116,8 @@
         "on_validation_error": "repair_only_reported_fields"
       },
       "research": {
+        "preparation_fraction": 0.25,
+        "minimum_optional_priority_seconds": 30,
         "parallel_lanes": false,
         "required_lanes": [
           "monitoring_corpus",
@@ -122,14 +127,15 @@
         ],
         "max_query_executions_per_topic": 10,
         "max_monitoring_full_article_reviews_per_topic": 20,
+        "reading_budget_policy": {"base_monitoring_articles": 12, "base_public_pages": 4, "baseline_topic_seconds": 360, "expanded_topic_seconds": 660},
         "initial_public_page_fetches_per_topic": 10,
         "max_results_per_query": 8,
         "max_full_page_fetches_per_topic": 24,
         "max_named_entity_expansions_per_topic": 4,
         "required_zero_new_rounds": 1,
         "minimum_independent_voices_per_topic": 4,
-        "target_independent_voices_per_topic": [6, 12],
-        "target_mature_clusters_per_topic": [2, 4],
+        "target_formal_excerpts_per_topic": [4, 6],
+        "target_mature_clusters_per_topic": [2, 3],
         "max_formal_voices_per_topic": 12,
         "reserve_policy": "retain additional eligible candidates in audit with formal_use=reserve",
         "blocked_platform_policy": "record blocker and continue available lanes",

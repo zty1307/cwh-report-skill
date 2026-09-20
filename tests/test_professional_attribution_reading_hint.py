@@ -5,6 +5,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from prepare_cwh_corpus_index import professional_quote_hint
 
 
+def test_told_outlet_and_later_same_source_name_are_reading_hints():
+    text = '某研究院政策研究总监赵明向行业报的记者表示，公共交通改革有助于接驳改善。\n赵明指出，公共交通实际效果取决于末端配套。'
+    assert professional_quote_hint(text, ['公共交通']) == 2
+    assert professional_quote_hint(text, ['医疗保障']) == 0
+
+
 def test_named_professional_telling_outlet_is_not_missed():
     text = '研究院首席专家赵明对某财经媒体记者表示，物流体系改革须改善标准协同。'
     assert professional_quote_hint(text, ['物流体系']) == 1
@@ -30,3 +36,16 @@ def test_hint_remains_capped_and_handles_direct_attribution():
 def test_interview_bridge_and_expert_committee_role_are_recognized():
     text = '某经济专家委员会委员赵明在接受财经媒体记者采访时表示，物流体系需协同。'
     assert professional_quote_hint(text, ['物流体系']) == 1
+
+
+def test_neighbouring_background_cannot_lend_topic_to_expert():
+    text = ('此前曾开展交通设施改革。\n'
+            '研究员赵明认为，医疗保障应兼顾地区差异。\n'
+            '另一个议题是交通设施改革。')
+    assert professional_quote_hint(text, ['交通设施改革']) == 0
+    assert professional_quote_hint(text, ['医疗保障']) == 1
+
+
+def test_same_paragraph_policy_context_before_named_attribution_is_retained():
+    text = '交通设施改革有何影响？研究员赵明认为，需要考虑地区差异。'
+    assert professional_quote_hint(text, ['交通设施改革']) == 1

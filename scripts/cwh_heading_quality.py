@@ -3,19 +3,25 @@ import copy
 import hashlib
 import json
 import re
+import time
+from pathlib import Path
 from cwh_writing_rules import writing_rules, judgment_heading
 
 
 HEADING_REVIEW_PROMPT = '''同时返回heading_reviews数组，每个headings输入ID恰好一次：
 {"id":"h1","verdict":"supported|needs_revision|uncertain","rationale":"具体说明标题对应哪些论据、是否夸大或改变立场","supporting_claim_ids":["e1"],"scope_preserved":true或false,"replacement":null或{"text":"有出处的单一中心判断","verdict":"supported","rationale":"具体支持理由"}}。
 标题只能依据本标题claim_ids内的原文；观点有revision时以收窄后的观点为准。不能把政策发布事实写成专家肯定，不能把建议写成已经实现的效果，保留可能、前提、风险等限定。一级标题提炼主判断，分簇标题区分具体机制、条件、影响或建议；避免不同簇反复说同一件事。不要为了凑正面、凑簇数或换动词新增立场。标题supported时replacement为null；needs_revision可提出已逐项核对原文的替代标题；实在没有依据则uncertain且replacement为null。不要改写证据原文或发言人身份。'''
-HEADING_REVIEW_PROMPT += '\n替代一级标题12—26个汉字，分簇标题10—24个汉字；只保留一个中心判断，不带专家强调、媒体认为等套头，不堆砌并列论点。只有客观细则而没有评价依据时用中性标题，不凭空补肯定或认可。'
+HEADING_REVIEW_PROMPT += '\n替代一级标题12—26个汉字，分簇标题10—24个汉字；一级概括本题反馈的主方向，二级提炼共同判断，不带专家强调、媒体认为等套头，不堆砌并列论点。只有客观细则而没有评价依据时返回uncertain，不把裸议程判为合格舆论标题，也不凭空补肯定或认可。建议或分析可如实用建议、认为概括，不要求所有来源都直接说过肯定二字。'
 HEADING_REVIEW_PROMPT += '\n专家对机制或影响的实质判断可准确概括为认为、强调，不要求原文逐字出现同一个标题动词；但政策发布事实不能改成舆论赞扬、已经实现的效果或额外主张。'
 HEADING_REVIEW_PROMPT += '\n标题语义受支持但带“机构解读”“专家强调”“媒体认为”“审慎提示”等来源标签或审核动作套头，也应needs_revision：直接写具体判断，不把审核过程当观点。不要改变真实批评、风险或建议的强度，不因有部分审慎建议就将同簇明确批评一律软化为提示。'
 HEADING_REVIEW_PROMPT += '\n单独的“认为/建议/认可/期待”等是合法判断动词，不是来源标签；不能仅因标题以“认为”开头就判needs_revision或删去它。“专家认为/机构解读”等额外来源套头才须去掉；保留原判断立场，标题是否改写取决于语义、具体程度和单一中心，而不是要求所有标题无态度动词。'
 HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint']['heading_support_rule']
+HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint'].get('approved_heading_rule', '')
+HEADING_REVIEW_PROMPT += '\n' + writing_rules()['viewpoint'].get('heading_verb_style_rule', '')
 HEADING_REVIEW_PROMPT += '\ncluster_index不为null时，逐条核对该簇全部保留claim_ids都支持同一个中心判断；supporting_claim_ids必须完整覆盖，不得只选适合新标题的一名主体而把其他不同对象或机制留在标题下。无法形成共同判断就uncertain，不能把多个中心用顿号拼起来，也不能删除组员的观点。'
-HEADING_REVIEW_PROMPT += '\ncluster_index为null是一级议题标题。scope_preserved须为原生布尔值，确认替代标题仍保留输入topic实际全部政策对象，不要求不同立场赞同同一评价。议题有多个政策对象时，不能为缩短标题只剩一个子对象或第一簇机制；无法提炼有依据的共同判断时直接用输入topic作中性标题并确认范围，不硬拼多个结论。'
+HEADING_REVIEW_PROMPT += '\ncluster_index为null是一级议题标题。scope_preserved须为原生布尔值，确认替代标题保留本题实际政策对象，可用不遗漏范围的共同上位概念，不要求复述完整议程、所有动作或每种机制，也不要求不同立场赞同同一评价。议题有多个政策对象时，不能为缩短标题只剩一个子对象或第一簇机制。有实质评价依据时应提炼态度＋对象＋概括判断，不能仅因各组机制不同就退回裸议题名称；确无可支持的概括判断时才保留中性标题并记录编辑缺口，不伪造肯定或硬拼多个结论。'
+HEADING_REVIEW_PROMPT += '\nscope_preserved检查的是最终准备展示的标题：有replacement时检查replacement.text，无replacement时检查输入text。不能仅因旧标题需修改就填false；若替代标题仍漏掉政策对象或扩大范围则必须false并说明，不以replacement.verdict=supported代替范围核对。'
+HEADING_REVIEW_PROMPT += '\n每条rationale只写一句简短具体理由，不逐条复述所有观点；输出紧凑JSON，不复制输入。'
 
 
 def cross_topic_exact_duplicate_groups(analysis):
@@ -91,7 +97,8 @@ def repair_runs(packet):
 
 def review_retained_headings(analysis, packet, command, workspace, timeout):
     """Optional compact recheck after claim retention; never reuse old claim IDs."""
-    from cwh_host_research import semantic_json, HostModelError
+    from cwh_host_research import semantic_json, HostModelError, SemanticResponseError
+    deadline = time.monotonic() + timeout
     manifest = heading_manifest(analysis)
     if not manifest:
         return packet
@@ -110,24 +117,44 @@ def review_retained_headings(analysis, packet, command, workspace, timeout):
               for i, ev in enumerate((ev for topic in analysis['viewpoints']['by_topic']
                   for cluster in topic['clusters'] for ev in cluster['evidence']), 1)]
     try:
-        result, run = semantic_json({'headings': manifest, 'claims': claims},
+        try:
+            result, run = semantic_json({'headings': manifest, 'claims': claims},
             '只复审当前已独立核验观点对应的标题，返回且只返回JSON对象{"heading_reviews":[...]}，不是数组或Markdown。'
             '不修改观点或复做观点审核。以下formal_claim是当前保留和收窄后的完整判断，已通过独立原文审核；'
             '标题只能由这些判断支持，不从旧标题推回已经删除的论据、因果或程度。原始原文仍保留在宿主审计，'
             '本步骤不重传，以免把已被删除的原文内容重新带回标题。原始旧短ID已经作废，按本输入ID审核。\n' + HEADING_REVIEW_PROMPT,
-            command, workspace, 'retained-heading-review', min(90, timeout), reuse_cache=False)
+                command, workspace, 'retained-heading-review', min(150, timeout), reuse_cache=False)
+        except SemanticResponseError as exc:
+            from cwh_heading_transport import recover_heading_rows
+            run = exc.run or {}
+            log_path = Path(run.get('log') or '').resolve()
+            if (run.get('exit_code') != 0 or not log_path.is_file()
+                    or not log_path.is_relative_to(Path(workspace).resolve())):
+                raise
+            result = recover_heading_rows(log_path.read_text('utf-8'), {r['id'] for r in manifest})
+            if result is None:
+                raise
         reviews = result.get('heading_reviews')
         ids = [r.get('id') for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else []
-        if (not isinstance(reviews, list) or len(reviews) != len(manifest)
+        expected = {r['id'] for r in manifest}
+        if (not isinstance(reviews, list) or not reviews
                 or not all(isinstance(identity, str) for identity in ids)
-                or len(ids) != len(manifest) or len(ids) != len(set(ids)) or set(ids) != {r['id'] for r in manifest}):
+                or len(ids) != len(reviews) or len(ids) != len(set(ids)) or not set(ids) <= expected):
             return unavailable('incomplete_or_duplicate_heading_ids')
         final = copy.deepcopy(packet)
         final['heading_reviews'] = [{**r, 'reviewer_run_id': run['session_id']} for r in reviews]
         final['heading_repair_runs'] = [run]
         final['heading_repair_run'] = run
-        final['heading_recheck'] = {'status': 'completed', 'reviewer_run_id': run['session_id']}
-        return final
+        final['heading_recheck'] = {'status': 'completed' if set(ids) == expected else 'partial',
+            'reviewer_run_id': run['session_id'], 'missing_heading_ids': sorted(expected - set(ids))}
+        if result.get('heading_transport_recovery'):
+            final['heading_transport_recovery'] = copy.deepcopy(result['heading_transport_recovery'])
+        # Batched body reviews have no headings to repair in verify()'s earlier
+        # pass. Repair the actual retained-heading output here, using only the
+        # already reviewed current claims and the *remaining* original budget.
+        return repair_overlong_headings(
+            {'headings': manifest, 'claims': claims, 'sources': []}, final,
+            command, workspace, deadline - time.monotonic())
     except (HostModelError, ValueError, TimeoutError) as exc:
         return unavailable(str(exc))
 
@@ -150,6 +177,15 @@ def repair_overlong_headings(packet, result, command, workspace, timeout):
         if not isinstance(text, str):
             continue
         faults = []
+        stances = tuple(writing_rules()['viewpoint']['heading_stance_verbs'])
+        bare = re.sub(r'\s+', '', row.get('topic', '')).strip('。；;')
+        compact = re.sub(r'\s+', '', text).strip('。；;')
+        if not text.startswith(stances) or compact == bare or any(compact == v + bare for v in stances):
+            faults.append('缺少真实态度判断，或仅复述议程；根据已核验观点改写态度＋政策对象＋判断，不机械加认为')
+        if review.get('verdict') == 'uncertain' or (row['cluster_index'] is None and review.get('scope_preserved') is not True):
+            faults.append('上一轮未形成可采用的完整范围标题；根据现有论断寻找有依据的概括，不用裸议题兜底')
+        if row['cluster_index'] is not None and set(review.get('supporting_claim_ids') or []) != set(row['claim_ids']):
+            faults.append('标题没有覆盖本组全部成员；寻找共同政策判断，不能把某一来源独有的机制作整组标题')
         if sum('\u4e00' <= c <= '\u9fff' for c in text) > hi:
             faults.append('标题过长')
         if re.search(r'(?:转向|转为)[^，。]{0,8}转变', text):
@@ -232,6 +268,7 @@ def build_heading_audit(analysis, packet):
              'heading_repair_run': packet.get('heading_repair_run'),
              'heading_original_run': packet.get('heading_original_run'),
              'heading_repair_runs': packet.get('heading_repair_runs') or [],
+             'heading_transport_recovery': packet.get('heading_transport_recovery'),
              'approved': approved, 'fallbacks': fallbacks, 'warnings': warnings}
     duplicates = cross_topic_exact_duplicate_groups(analysis)
     audit['cross_topic_exact_duplicates'] = duplicates
@@ -244,16 +281,21 @@ def build_heading_audit(analysis, packet):
     identities = [r.get('id') for r in supplied if isinstance(r, dict)]
     expected = {r['id'] for r in manifest}
     if (len(identities) != len(supplied) or not all(isinstance(s, str) for s in identities)
-            or len(identities) != len(set(identities)) or set(identities) != expected):
-        warnings.append('标题审核ID覆盖不完整或重复；不采用任何替代标题。')
+            or len(identities) != len(set(identities)) or not set(identities) <= expected):
+        warnings.append('标题审核ID重复或包含未知项；不采用任何替代标题。')
         fallbacks.extend({**row, 'display_text': row['topic'] if row['cluster_index'] is None else '相关报道'} for row in manifest)
         return audit
     by_id = {r['id']: r for r in supplied}
+    if expected - set(by_id):
+        warnings.append('部分标题未取得完整审核，仅这些标题使用中性展示；其他标题仍须逐条通过观点支持及范围检查。')
     claims = [ev for topic in analysis['viewpoints']['by_topic'] for cl in topic['clusters'] for ev in cl['evidence']]
     verdicts = {r['evidence_id']: r.get('verdict') for r in packet.get('reviews') or []}
     supported = {f'e{i}': verdicts.get(ev['evidence_id']) == 'fully_supported' for i, ev in enumerate(claims, 1)}
     stances = tuple(writing_rules()['viewpoint']['heading_stance_verbs'])
     for row in manifest:
+        if row['id'] not in by_id:
+            fallbacks.append({**row, 'display_text': row['topic'] if row['cluster_index'] is None else '相关报道'})
+            continue
         review = by_id[row['id']]
         support_ids = review.get('supporting_claim_ids')
         valid_support = (isinstance(support_ids, list) and bool(support_ids)

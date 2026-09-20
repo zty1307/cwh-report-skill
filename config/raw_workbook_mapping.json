@@ -1,5 +1,9 @@
 {
   "version": 1,
+  "channel_display_labels": {
+    "domestic_mainstream": "境内主流媒体"
+  },
+  "channel_display_label_basis": "用户指定基准表显示名；基准配套Excel中境内主流媒体逐日直接引用境内新闻列。仅为既有统计口径的展示名称，不代表对每条来源重新进行主流媒体资格判定；原始列名、公式及数量保留审计。",
   "file_patterns": {
     "total_heat": "^总[0-9]+-.*热度分析\\.xlsx$",
     "child_heat": "^子([1-9][0-9]*)(?:-|\\.xlsx$).*(?:热度分析\\.xlsx)?$",

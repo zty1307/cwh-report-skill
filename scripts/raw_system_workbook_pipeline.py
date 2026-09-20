@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -502,7 +503,10 @@ def identify_inputs(raw_directory: Path, config: dict[str, Any]) -> InputBundle:
     for profile in heat_profiles:
         if profile is total_profile:
             continue
-        index = child_index_from_filename(profile["path"], config)
+        declared_index = (config.get("child_file_indices") or {}).get(profile["file"])
+        index = declared_index if declared_index is not None else child_index_from_filename(profile["path"], config)
+        if index is not None and (type(index) is not int or index < 1):
+            raise PipelineError(f"子事件序号必须为正整数：{profile['file']}")
         if index is None:
             raise PipelineError(
                 f"已确认{profile['file']}是子事件热度文件，但文件和工作簿均未提供可验证的子事件序号；"
@@ -517,8 +521,8 @@ def identify_inputs(raw_directory: Path, config: dict[str, Any]) -> InputBundle:
                 "role": "child_heat",
                 "child_index": index,
                 "confidence": 0.95,
-                "method": "sheet_schema_plus_child_index_hint",
-                "evidence": [*profile["evidence"], f"文件名解析出子事件序号{index}"],
+                "method": "confirmed_period_metadata" if declared_index is not None else "sheet_schema_plus_child_index_hint",
+                "evidence": [*profile["evidence"], f"已确认元数据指定子事件序号{index}" if declared_index is not None else f"文件名解析出子事件序号{index}"],
                 "filename_monitoring_window": profile.get("filename_monitoring_window") or {},
             }
         )
@@ -804,6 +808,7 @@ def build_overseas_review_packet(
             "解读性报道必须明确interpretive_verified=true，并从原始content逐字复制连续interpretive_excerpt，保留繁简、标点、空格和异常字符；不得改写、纠错或简繁转换，摘要不等于原文核实。",
             writing_rules()["overseas"]["interpretive_summary_rule"],
             writing_rules()["overseas"]["source_identity_rule"],
+            "发布站点的所在地身份与稿件原发媒体分开核查：转载自内地媒体，不等于实际转载站就是内地媒体。不能仅凭.cn/.com域名、服务器地址或监测系统预置名称断定国别；原标签与本页署名冲突时保留原标签，并按可核验站点资料纠正展示名。身份确实拿不准须在理由中标明待核，不能凭猜测排除。",
             "decision只能为include或exclude；不得仅凭关键词命中纳入。",
             "publisher_class只能为overseas_origin_media、mainland_outward_media或not_overseas_media。",
             "每条必须填写review_reason和0至1之间的classification_confidence。",
@@ -1021,6 +1026,7 @@ def apply_overseas_ai_review(
     if str(review.get("review_method") or "").strip().lower() not in {
         "ai_semantic_review",
         "ai_semantic_review_with_human_edits",
+        "host_partial_review",
     }:
         raise PipelineError("境外审核文件缺少有效review_method，不能据此改写传播统计")
 
@@ -1028,6 +1034,8 @@ def apply_overseas_ai_review(
     raw_by_id = {overseas_record_id(row): row for row in rows}
     raw_by_source_row = {int(row["source_row"]): row for row in rows}
     review_items = list(review.get("items") or [])
+    if review.get('review_method') == 'host_partial_review' and (review_items or review.get('supplemental_rows')):
+        raise PipelineError('宿主待审记录不能包含模型审核结论')
     matched: dict[str, dict[str, Any]] = {}
     for item in review_items:
         record_id = str(item.get("record_id") or "").strip()
@@ -1041,7 +1049,8 @@ def apply_overseas_ai_review(
         matched[record_id] = item
 
     missing = sorted(set(raw_by_id) - set(matched))
-    if missing:
+    from cwh_semantic_recovery import valid_raw_deferrals
+    if missing and not valid_raw_deferrals(review, raw_by_id, matched):
         raise PipelineError(f"境外AI审核未覆盖全部系统候选，缺少{len(missing)}条")
 
     decisions: list[dict[str, Any]] = []
@@ -1136,6 +1145,11 @@ def apply_overseas_ai_review(
         }
 
     for record_id, base in raw_by_id.items():
+        if record_id not in matched:
+            decisions.append({**base, 'record_id': record_id, 'decision': 'deferred',
+                              'reason': '模型审核未完成，原始记录留待复核；不纳入已审外媒附录。',
+                              'ai_reviewed': False, 'formal_include': False})
+            continue
         result = reviewed_row(base, matched[record_id], "system_raw")
         decisions.append(result)
         if result["count_include"]:
@@ -1179,8 +1193,9 @@ def apply_overseas_ai_review(
         item for item in deduplicated if item.get("publisher_class") == "mainland_outward_media"
     ]
     return {
-        "status": "ai_review_complete",
-        "counts_reconciled": True,
+        "status": "ai_review_partial" if missing else "ai_review_complete",
+        "counts_reconciled": not missing,
+        "deferred_records": copy.deepcopy(review.get('deferred_records') or []),
         "selected": appendix_selected,
         "appendix_selected": appendix_selected,
         "counted": deduplicated,
@@ -1310,6 +1325,12 @@ def filter_public_top(
     # real decisions instead of reverting forever to the original 30 rows.
     if review:
         prior_ids = {str(item.get('record_id') or '') for item in review.get('items') or []}
+        # An expanded review window includes both native decisions and explicit
+        # unfinished rows. Reconstruct that same contiguous window before the
+        # strict deferral check below; do not shrink it back to the first 30.
+        if review.get('delivery_policy') == 'deliver_available_with_gaps':
+            prior_ids.update(str(item.get('record_id') or '')
+                             for item in review.get('deferred_records') or [])
         prefix = []
         for row in ranked_raw:
             if review_id(row) not in prior_ids:
@@ -1372,16 +1393,25 @@ def filter_public_top(
     if str(review.get("review_method") or "").strip().lower() not in {
         "ai_semantic_review",
         "ai_semantic_review_with_human_edits",
+        "host_partial_review",
     }:
         raise PipelineError("公众TOP审核文件缺少有效review_method")
     packet_by_id = {item["record_id"]: item for item in review_packet["items"]}
+    if review.get('review_method') == 'host_partial_review' and review.get('items'):
+        raise PipelineError('宿主待审记录不能包含模型审核结论')
     reviewed_by_id = {str(item.get("record_id") or ""): item for item in review.get("items") or []}
+    if len(reviewed_by_id) != len(review.get('items') or []) or set(reviewed_by_id) - set(packet_by_id):
+        raise PipelineError('公众TOP审核含重复或未知记录')
     missing_review = sorted(set(packet_by_id) - set(reviewed_by_id))
-    if missing_review:
+    from cwh_semantic_recovery import valid_raw_deferrals
+    if missing_review and not valid_raw_deferrals(review, packet_by_id, reviewed_by_id):
         raise PipelineError(f"公众TOP AI审核未覆盖全部临界候选，缺少{len(missing_review)}条")
     ai_accepted: list[dict[str, Any]] = []
     ai_decisions: list[dict[str, Any]] = []
     for record_id, row in packet_by_id.items():
+        if record_id not in reviewed_by_id:
+            ai_decisions.append({**row, 'decision': 'deferred', 'reason': '模型审核未完成，原始记录保留待审。'})
+            continue
         item = reviewed_by_id[record_id]
         decision = str(item.get("decision") or "").strip().lower()
         reason = str(item.get("review_reason") or item.get("reason") or "").strip()
@@ -1425,7 +1455,11 @@ def filter_public_top(
     expansion_end = min(len(ranked_raw), max_candidates, len(review_batch) + 30)
     shortfall = None
     if len(selected) < top_n:
-        if expansion_end > len(review_batch):
+        if missing_review:
+            status = 'ai_review_partial'
+            shortfall = {'required': top_n, 'actual': len(selected), 'reason': 'native_review_incomplete',
+                         'deferred_record_ids': missing_review}
+        elif expansion_end > len(review_batch):
             review_packet['items'] = [
                 {**row, 'record_id': review_id(row),
                  'preliminary_topic_hits': topic_hits(normalize_text(f"{row.get('title', '')}{row.get('content', '')}"), aliases)}
@@ -1438,9 +1472,14 @@ def filter_public_top(
             shortfall = {'required': top_n, 'actual': len(selected),
                          'reviewed_candidates': len(review_batch), 'available_candidates': len(ranked_raw),
                          'reason': 'candidate_limit_reached' if len(review_batch) < len(ranked_raw) else 'candidates_exhausted'}
+    if missing_review:
+        status = 'ai_review_partial'
+        shortfall = {'required': top_n, 'actual': len(selected), 'reason': 'native_review_incomplete',
+                     'deferred_record_ids': missing_review}
     return {
         "status": status,
         "evidence_shortfall": shortfall,
+        "deferred_records": copy.deepcopy(review.get('deferred_records') or []),
         "review_method": review.get("review_method"),
         "selected": selected,
         "decisions": ai_decisions,
@@ -1496,9 +1535,10 @@ def build_public_article_evidence_corpus(
 
         reason = ""
         duplicate_of = ""
-        if roundup:
-            reason = "roundup_or_digest"
-        elif not (title_anchor or body_meeting_topic):
+        # A roundup is excluded from the TOP appendix, not from the separate
+        # full-text reading pool. Only the native reader can decide whether a
+        # current-policy passage contains a usable independently voiced view.
+        if not (title_anchor or body_meeting_topic):
             reason = "meeting_not_primary_focus"
         elif not all_topics:
             reason = "no_agenda_topic_hit"
@@ -1547,6 +1587,8 @@ def build_public_article_evidence_corpus(
                 "relevance_evidence": (
                     "title_meeting_anchor" if title_anchor else "body_meeting_anchor_and_topic"
                 ),
+                "reading_hints": {"roundup_title": roundup,
+                    "semantic_relevance_review_required": True},
                 "content_sha1": content_hash,
             }
         )
@@ -1568,6 +1610,7 @@ def build_public_article_evidence_corpus(
         "meeting_title": metadata.get("meeting_title"),
         "monitoring_window": metadata.get("monitoring_window") or {},
         "topic_titles": metadata.get("topic_titles") or [],
+        "topic_aliases": [list(group) for group in aliases],
         "raw_row_count": len(rows),
         "candidate_count": len(candidates),
         "candidate_count_by_topic": per_topic_counts,
@@ -1676,6 +1719,9 @@ def validate_declared_topic_mapping(metadata: dict[str, Any]) -> None:
 
 
 def channel_display_labels(config: dict[str, Any]) -> dict[str, str]:
+    explicit = (config.get('channel_display_labels') or {}).get('domestic_mainstream')
+    if explicit and config.get('channel_display_label_basis'):
+        return {'domestic_mainstream': explicit}
     domestic_label = ("境内新闻" if config["total_groups"].get("domestic_mainstream") == ["domestic_news"]
                       and config["child_groups"].get("domestic_mainstream") == ["domestic_news"] else "境内媒体")
     return {"domestic_mainstream": domestic_label}
@@ -1788,10 +1834,13 @@ def build_normalized_bundle(
                 and hotwords.get("status") == "ai_review_complete"
                 and public_top.get("status") == "ai_review_complete"
                 and not public_top.get('evidence_shortfall')
+                and not (hotwords.get('batch_review_audit') or {}).get('deferred_candidate_batches')
             ),
             "warnings": (["公众号TOP来源不足，保留实际审核结果，不代表完整TOP排名"]
                          if public_top.get('evidence_shortfall') else []),
             "blockers": [
+                *(["部分热词候选初审未完成，词云仅包含已完成二次审核的词"]
+                  if (hotwords.get('batch_review_audit') or {}).get('deferred_candidate_batches') else []),
                 *(
                     []
                     if overseas.get("status") == "ai_review_complete"
@@ -1873,6 +1922,22 @@ def compare_daily(raw_rows: list[dict[str, Any]], baseline_rows: list[dict[str, 
                     }
                 )
     return differences
+
+
+def domestic_difference_patterns(differences: list[dict[str, Any]]) -> dict[str, int]:
+    """Describe arithmetic only; a conserved pair does not prove its cause."""
+    by_date: dict[str, dict[str, Any]] = {}
+    for item in differences:
+        if item.get('field') in {'domestic_news', 'domestic_app'}:
+            by_date.setdefault(item['date'], {})[item['field']] = item
+    counts = {'conserved_pair_days': 0, 'net_change_days': 0, 'unresolved_days': 0}
+    for pair in by_date.values():
+        if any(not isinstance(item.get('delta'), (int, float)) for item in pair.values()):
+            counts['unresolved_days'] += 1
+            continue
+        delta = sum(item['delta'] for item in pair.values())
+        counts['conserved_pair_days' if len(pair) == 2 and delta == 0 else 'net_change_days'] += 1
+    return counts
 
 
 def decision_counts(decisions: list[dict[str, Any]]) -> Counter[str]:
@@ -2008,7 +2073,7 @@ def write_audit(
         lines.append("- 本次未提供基准表，跳过历史人工表对比。")
     else:
         total_diff_count = sum(len(items) for items in baseline_differences.values())
-        lines.append(f"- 共发现{total_diff_count}个右侧日趋势单元格差异。差异来自原始系统快照与人工表后续调整，不是生成脚本漏算。")
+        lines.append(f"- 共发现{total_diff_count}个右侧日趋势单元格差异。差额本身不证明原因；需分别核查公式、监测起点与小时趋势、境外审核回算及其他调整，不能先排除脚本漏算。")
         if overseas_review_complete:
             lines.append("- 本轮已按完整境外AI审核结果重算境外新闻；由此产生的境外新闻及依赖总量差异均记录在overseas_review_audit.json。")
             lines.append("- 除境外新闻外，其他渠道仍保留原始系统值；若基准表还存在其他人工重分类，必须另行提供可审计规则。")
@@ -2016,13 +2081,18 @@ def write_audit(
             lines.append("- 境外候选尚未完成AI审核，当前自动表保留原始境外新闻值；不能用附录条数直接替换总量。")
             lines.append("- 若基准表存在境内新闻、APP等其他人工重分类，必须另行提供可审计的来源级规则或明细表。")
         lines.append("")
-        lines.append("| 工作表 | 差异单元格数 | 境内新闻/APP重分类 | 境外新闻人工调整 | 其他快照差异 |")
+        lines.append("| 工作表 | 差异单元格数 | 境内新闻/APP差异 | 境外新闻差异 | 其他差异 |")
         lines.append("|---|---:|---:|---:|---:|")
         for sheet_name, differences in baseline_differences.items():
             reclassified = sum(1 for item in differences if item["field"] in {"domestic_news", "domestic_app"})
             overseas = sum(1 for item in differences if item["field"] == "overseas_news")
             other = len(differences) - reclassified - overseas
             lines.append(f"| {sheet_name} | {len(differences)} | {reclassified} | {overseas} | {other} |")
+        lines.extend(['', '| 工作表 | 新闻/APP等额反向变化天数 | 两列合计变化天数 | 数值待核天数 |', '|---|---:|---:|---:|'])
+        for sheet_name, differences in baseline_differences.items():
+            patterns = domestic_difference_patterns(differences)
+            lines.append(f"| {sheet_name} | {patterns['conserved_pair_days']} | {patterns['net_change_days']} | {patterns['unresolved_days']} |")
+        lines.append('- 等额反向差异只证明两列合计守恒，不证明具体重分类依据；首日净差需先与小时趋势及本期监测起点核对。不得按历史差额或比例自动调数。')
 
     lines.extend(
         [
@@ -2107,7 +2177,8 @@ def write_audit(
             "",
             "## 尚不能确认或不能从当前输入还原的规则",
             "",
-            "1. 人工基准表中“境内新闻→境内APP”的逐日移动量没有来源级明细或公式，不能可靠自动复刻。",
+            ("1. 已列出本次基准差异；尚无可追溯依据的差额不进入自动调数规则。"
+             if baseline_path else "1. 本次没有人工基准输入，未执行基准数值对比；不据此假定存在人工重分类。"),
             (
                 "2. 境外候选已完成AI审核，系统原始境外数已按可追溯审核结果回算。"
                 if overseas_review_complete
@@ -2171,6 +2242,10 @@ def main() -> None:
     config = load_json(args.config)
     metadata = load_json(args.metadata)
     validate_declared_topic_mapping(metadata)
+    if metadata.get("child_file_indices"):
+        if metadata.get("topic_mapping_confirmed") is not True:
+            raise PipelineError("child_file_indices需要明确确认的议题映射")
+        config["child_file_indices"] = metadata["child_file_indices"]
     overseas_review = load_json(args.overseas_review) if args.overseas_review else None
     hotword_review = load_json(args.hotword_review) if args.hotword_review else None
     public_review = load_json(args.public_review) if args.public_review else None
@@ -2248,18 +2323,21 @@ def main() -> None:
         json.dumps(normalized.get("public_article_evidence") or {}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    if normalized["public_top"].get("status") != "ai_review_complete":
+    if normalized["public_top"].get("status") not in {"ai_review_complete", "ai_review_partial"}:
         raise PipelineError(
             "公众号TOP临界候选必须完成逐篇AI正文审核；审核包已写入"
             f"{run_dir / 'public_top_review_packet.json'}，请生成审核JSON并用--public-review重跑"
         )
-    if normalized["hotwords"].get("status") != "ai_review_complete":
+    from cwh_semantic_recovery import is_deferred_hotwords
+    hotwords_deferred = is_deferred_hotwords(normalized['hotwords'])
+    if normalized["hotwords"].get("status") != "ai_review_complete" and not hotwords_deferred:
         raise PipelineError(
             "热词必须完成AI语义审核后才能生成词云；审核包已写入"
             f"{run_dir / 'hotword_review_packet.json'}，请生成审核JSON并用--hotword-review重跑"
         )
     wordcloud_path = run_dir / "cwh_wordcloud.png"
-    render_wordcloud_png(normalized["hotwords"], wordcloud_path)
+    if not hotwords_deferred:
+        render_wordcloud_png(normalized["hotwords"], wordcloud_path)
     normalized_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "hotword_audit.json").write_text(
         json.dumps(
@@ -2274,7 +2352,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    portable_mode = os.name != "nt" or os.environ.get("CWH_PORTABLE_XLSX", "").strip().lower() in {
+    portable_mode = hotwords_deferred or os.name != "nt" or os.environ.get("CWH_PORTABLE_XLSX", "").strip().lower() in {
         "1",
         "true",
         "yes",

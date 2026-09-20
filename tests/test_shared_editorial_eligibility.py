@@ -9,9 +9,12 @@ from cwh_author_batches import synthesis_prompt
 from run_cwh_compiled_worker import REVIEW_PROMPT
 
 
-def test_author_synthesis_repair_and_reviewer_share_editorial_criteria():
+def test_full_source_author_repair_and_reviewer_share_editorial_criteria():
     rule = editorial_eligibility_prompt()
-    assert all(rule in prompt for prompt in (AUTHOR_PROMPT, REPAIR_PROMPT, synthesis_prompt(), REVIEW_PROMPT))
+    assert all(rule in prompt for prompt in (AUTHOR_PROMPT, REPAIR_PROMPT, REVIEW_PROMPT))
+    # ID-only selection cannot certify source content absent from its input.
+    assert rule not in synthesis_prompt()
+    assert writing_rules()['viewpoint']['paragraph_pairing_rule'] in synthesis_prompt()
     assert all(row['description'] in rule for row in writing_rules()['viewpoint']['editorial_exclusions'])
     assert '不能因出现产业链、投资、受益等词就删除' in rule
 

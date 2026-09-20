@@ -17,7 +17,7 @@ class ModelContractTests(unittest.TestCase):
         name, profile = execution_profile()
         self.assertEqual("bounded_60m", name)
         self.assertEqual(3600, profile["wall_clock_budget_seconds"])
-        self.assertEqual(2700, profile["research_deadline_seconds"])
+        self.assertEqual(3000, profile["research_deadline_seconds"])
         stage_total = sum(profile["stage_budgets_seconds"].values())
         self.assertLessEqual(
             stage_total + profile["reserved_delivery_buffer_seconds"],

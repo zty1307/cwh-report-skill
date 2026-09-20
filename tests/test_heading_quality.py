@@ -123,6 +123,41 @@ def test_retained_heading_recheck_skips_short_budget_and_rejects_partial_coverag
         assert 'heading_reviews' not in result
 
 
+def test_retained_path_repairs_new_long_heading_with_current_claims_and_remaining_budget():
+    analysis = sample()
+    frozen = copy.deepcopy(analysis)
+    native = {'heading_reviews': packet()['heading_reviews']}
+    native['heading_reviews'][0]['replacement']['text'] = '建议根据不同地区实际服务需求优化资源配置同时保留基层服务覆盖及必要经费支持'
+    short = copy.deepcopy(native['heading_reviews'][0])
+    short['replacement']['text'] = '建议按需求优化布局并保留服务覆盖'
+    with patch('cwh_heading_quality.time.monotonic', side_effect=[100, 130]), patch(
+            'cwh_host_research.semantic_json', side_effect=[
+                (native, {'session_id': 'retained-native'}),
+                ({'heading_reviews': [short]}, {'session_id': 'style-native'}),
+            ]) as call:
+        revised = review_retained_headings(analysis, packet(), [], Path('.'), 70)
+    assert call.call_count == 2
+    request = call.call_args.args[0]
+    assert [row['id'] for row in request['headings']] == ['h1']
+    assert request['sources'] == []
+    assert request['claims'][0]['formal_claim'] == frozen['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0]['formal_claim']
+    assert call.call_args.args[-1] == 40
+    assert revised['heading_reviews'][0]['reviewer_run_id'] == 'style-native'
+    assert revised['heading_reviews'][1]['reviewer_run_id'] == 'retained-native'
+    assert set(r['session_id'] for r in revised['heading_repair_runs']) == {'retained-native', 'style-native'}
+    assert analysis == frozen
+
+
+def test_retained_style_repair_does_not_borrow_more_time():
+    native = {'heading_reviews': packet()['heading_reviews']}
+    native['heading_reviews'][0]['replacement']['text'] = '建议根据不同地区实际服务需求优化资源配置同时保留基层服务覆盖及必要经费支持'
+    with patch('cwh_heading_quality.time.monotonic', side_effect=[100, 160]), patch(
+            'cwh_host_research.semantic_json', return_value=(native, {'session_id': 'retained-native'})) as call:
+        revised = review_retained_headings(sample(), packet(), [], Path('.'), 70)
+    assert call.call_count == 1
+    assert revised['heading_reviews'][0]['replacement'] == native['heading_reviews'][0]['replacement']
+
+
 @pytest.mark.parametrize('supplied', [None, [], [{'id': 'h1'}]])
 def test_unavailable_heading_review_uses_neutral_display_without_mutating_claims(supplied):
     data, review = sample(), packet()

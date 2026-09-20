@@ -14,14 +14,30 @@ def density_policy() -> dict[str, Any]:
     return writing_rules()["viewpoint"]["density_gate"]
 
 
+def independent_voice_keys(evidence) -> set[str]:
+    """Count declared subjects, not their claims, URLs or attribution verbs.
+
+    This is bookkeeping only; source identity still requires evidence review.
+    """
+    return {
+        re.sub(r"\s+", "", str(row.get("speaker_name") or row.get("attribution") or row.get("source") or "")).casefold()
+        for row in evidence if isinstance(row, dict)
+    } - {""}
+
+
+def numbered_clusters_allowed(clusters) -> bool:
+    """Numbering is layout, not a reason to invent or merge source judgments."""
+    minimum = writing_rules()['viewpoint'].get('numbered_cluster_min_sources', 2)
+    return len(clusters) > 1 and all(len(independent_voice_keys([
+        row for row in cluster.get('evidence') or []
+        if row.get('formal_use') not in {'reserve', 'excluded'}])) >= minimum for cluster in clusters)
+
+
 def cluster_density_result(cluster: dict[str, Any]) -> dict[str, Any]:
     policy = density_policy()
     evidence = [row for row in cluster.get("evidence") or [] if isinstance(row, dict)]
     # A repeated speaker is one voice even across several URLs, claims or verbs.
-    voices = {
-        re.sub(r"\s+", "", str(row.get("speaker_name") or row.get("attribution") or row.get("source") or "")).casefold()
-        for row in evidence
-    } - {""}
+    voices = independent_voice_keys(evidence)
     details = str(cluster.get("details") or "").strip()
     cjk_length = len(re.findall(r"[\u4e00-\u9fff]", details))
     exception = cluster.get("thin_cluster_exception")

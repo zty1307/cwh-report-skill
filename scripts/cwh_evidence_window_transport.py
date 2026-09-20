@@ -55,6 +55,24 @@ def pool_hotword_windows(packet):
     return output
 
 
+def hotword_nomination_transport(packet):
+    """Discover new phrases from every retained source, without old ranking bookkeeping.
+
+    Original candidates and term bindings remain in the saved host packet and
+    full-source gates. Nomination uses the identical pooled source text, metadata,
+    URLs and topic map; it does not need old per-term frequency statistics.
+    """
+    output = pool_hotword_windows(packet)
+    for key in ('candidates', 'candidate_count', 'candidate_source_windows'):
+        output.pop(key, None)
+    output['transport_note'] = (
+        'Read every retained original source in source_window_pool. Text, offsets, '
+        'source metadata and URLs are unchanged. Old candidate rankings and '
+        'term-to-window indexes are not needed for new phrase nomination; the host '
+        'retains them separately for source verification. No source text was shortened.')
+    return output
+
+
 def reconstruct_term_windows(pooled):
     """Audit round-trip; restore each exact original evidence window."""
     output = copy.deepcopy(pooled)

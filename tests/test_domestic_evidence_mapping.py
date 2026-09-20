@@ -66,7 +66,7 @@ def valid_bundle() -> dict:
                     "topic": "城市更新",
                     "clusters": [
                         {
-                            "details": f"中指研究院研究总监吴建钦认为，{claim}",
+                            "details": f"中指研究院研究总监吴建钦称，{claim}",
                             "evidence": [
                                 {
                                     "evidence_id": "evidence-1",
@@ -168,6 +168,83 @@ def test_merged_speakers_and_unsupported_number_are_blocked() -> None:
     assert all(message.startswith("[议题=") for message in messages)
     assert any("合并了多个发言人" in message for message in messages)
     assert any("新增了原文片段中没有的数字" in message for message in messages)
+
+
+def test_arabic_numbers_next_to_chinese_prose_are_not_silently_skipped():
+    from domestic_evidence_mapping import _numbers
+    assert {'7', '30', '2025', '6', '10', '2030', '4.7%'} <= _numbers(
+        '7月30日讨论2025年产值近6万亿元，预计2030年超过10万亿元，增长4.7%。')
+    assert _numbers('AI2与5G和model_12不是数量') == set()
+    assert _numbers('２０２５年增长４．７％') == {'2025', '4.7%'}
+    assert {'7', '30'} == _numbers('7月30日中共中央政治局会议明确政策对象。')
+
+
+def test_added_arabic_date_is_blocked_even_when_semantic_reviewer_approves():
+    bundle = valid_bundle()
+    cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+    evidence = cluster['evidence'][0]
+    old = evidence['formal_claim']
+    evidence['formal_claim'] = '7月30日，' + old
+    cluster['details'] = cluster['details'].replace(old, evidence['formal_claim'])
+    evidence['semantic_review']['propositions'][0]['text'] = evidence['formal_claim']
+    issues = validate_analysis_mapping(bundle)['issues']
+    assert any(row['code'] == 'claim_adds_numbers' and '30' in row['message'] for row in issues)
+
+
+def contextual_meeting_bundle(prefix='7月30日，中共中央政治局召开会议。', extra=''):
+    bundle = valid_bundle()
+    candidate = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]
+    snapshot = candidate['source_snapshot']
+    snapshot['source_text'] = prefix + snapshot['source_text']
+    snapshot['source_text_sha256'] = hashlib.sha256(snapshot['source_text'].encode()).hexdigest()
+    cluster = bundle['viewpoints']['by_topic'][0]['clusters'][0]
+    ev = cluster['evidence'][0]
+    ev['source_excerpt_start'] += len(prefix)
+    ev['source_excerpt_end'] += len(prefix)
+    ev['formal_claim'] = '7月30日中共中央政治局会议提出，' + ev['formal_claim'] + extra
+    cluster['details'] = ev['attribution'] + '认为，' + ev['formal_claim']
+    proposition = ev['semantic_review']['propositions'][0]
+    proposition['text'] = ev['formal_claim']
+    proposition['source_quote_start'] += len(prefix)
+    proposition['source_quote_end'] += len(prefix)
+    return bundle
+
+
+def test_explicit_meeting_date_maps_to_frozen_review_context_without_editing_excerpt():
+    bundle = contextual_meeting_bundle()
+    frozen = copy.deepcopy(bundle)
+    audit = validate_analysis_mapping(bundle)
+    assert audit['status'] == 'passed'
+    mapping = audit['meeting_reference_mappings'][0]
+    assert mapping['source_quote'] == '7月30日，中共中央政治局召开会议'
+    assert mapping['source_start'] == 0
+    assert bundle == frozen
+
+
+def test_context_date_does_not_authorize_other_uses_of_same_digits():
+    audit = validate_analysis_mapping(contextual_meeting_bundle(extra='将新增30个项目。'))
+    assert any(row['code'] == 'claim_adds_numbers' for row in audit['issues'])
+
+
+def test_unmapped_or_unread_meeting_date_cannot_be_borrowed_from_article():
+    prefixes = ['7月29日，中共中央政治局召开会议。',
+                '7月30日，国务院常务会议召开。',
+                '7月30日公布数据。中共中央政治局召开会议。',
+                '7月30日，中共中央政治局未召开会议。',
+                '甲' * 2001 + '7月30日，中共中央政治局召开会议。']
+    for prefix in prefixes:
+        audit = validate_analysis_mapping(contextual_meeting_bundle(prefix))
+        assert not audit['meeting_reference_mappings']
+        assert any(row['code'] == 'claim_adds_numbers' for row in audit['issues'])
+
+
+def test_context_mapping_never_waives_source_hash_or_independent_review():
+    bundle = contextual_meeting_bundle()
+    candidate = bundle['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]['candidates'][0]
+    candidate['source_snapshot']['source_text_sha256'] = 'bad'
+    bundle['viewpoints']['by_topic'][0]['clusters'][0]['evidence'][0].pop('semantic_review')
+    codes = {r['code'] for r in validate_analysis_mapping(bundle)['issues']}
+    assert {'source_snapshot_hash_mismatch', 'semantic_review_missing'} <= codes
 
 
 def test_semantic_review_must_be_fully_supported() -> None:

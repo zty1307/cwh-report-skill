@@ -1,0 +1,204 @@
+import copy
+from pathlib import Path
+import sys
+import time
+import pytest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from cwh_hotword_batches import partition_candidates, subset_packet, review_hotword_batches, retain_native_extensions
+from cwh_hotword_batches import first_pass_scope
+
+
+def packet():
+    rows = [{'term': '公共服务', 'topic_index': 1, 'sample_url_refs': ['u1']},
+            {'term': '普惠托育', 'topic_hits': [2], 'sample_url_refs': ['u2']},
+            {'term': '基础设施', 'sample_url_refs': ['u3']}]
+    return {'candidates': rows, 'candidate_source_windows': [
+        {'term': row['term'], 'source_windows': [{'url_ref': f'u{i}', 'excerpt': row['term'],
+         'excerpt_start_in_packet': 0, 'excerpt_end_in_packet': len(row['term'])}]} for i, row in enumerate(rows, 1)],
+        'source_urls': {'u1': 'https://example.test/a', 'u2': 'https://example.test/b', 'u3': 'https://example.test/c'},
+        'topics': [{'index': 1}, {'index': 2}], 'target_term_count': 3,
+        'delivery_policy': 'deliver_available_with_gaps'}
+
+
+def test_partition_keeps_unassigned_anchors_and_all_candidates_exactly_once():
+    original = packet()
+    before = copy.deepcopy(original)
+    parts = partition_candidates(original)
+    assert [row for part in parts for row in part] == original['candidates']
+    assert original == before
+    selected = subset_packet(original, parts[1])
+    assert selected['topics'] == original['topics']
+    assert selected['candidate_source_windows'] == [original['candidate_source_windows'][1]]
+    assert selected['source_urls'] == {'u2': 'https://example.test/b'}
+    assert selected['candidate_count'] == 1
+
+
+def test_subset_count_describes_this_packet_not_the_original_corpus():
+    original = packet()
+    original['candidate_count'] = 3
+    subset = subset_packet(original, original['candidates'][:2])
+    nested = subset_packet(subset, subset['candidates'][:1])
+    assert original['candidate_count'] == 3
+    assert subset['candidate_count'] == 2 and nested['candidate_count'] == 1
+    assert nested['candidate_source_windows'] == original['candidate_source_windows'][:1]
+
+
+def test_first_pass_does_not_repeat_global_review_or_pad_missing_topics():
+    original = packet()
+    original['instructions'] = ['删除无实质含义的会议套话。',
+        '合并同义词，并按topics中的实际议题数量检查每个议题是否都有实质性词项。',
+        '不得为凑数量保留噪声；若审核后少于最低数量，继续从证据中补提，而不是回退到规则词。']
+    original['review_output_shape'] = {'second_pass_completed': True, 'selected': []}
+    before = copy.deepcopy(original)
+    scoped, prompt = first_pass_scope(original, '保留独立来源证据，完成二次自审与同义去重，不凑词。')
+    assert original == before
+    for key in ('candidates', 'candidate_source_windows', 'source_urls', 'topics'):
+        assert scoped[key] == original[key]
+    assert '删除无实质含义的会议套话。' in scoped['instructions']
+    assert '完成二次自审' not in prompt
+    assert '继续从证据中补提' not in ''.join(scoped['instructions'])
+    assert scoped['review_output_shape']['second_pass_completed'] is False
+    assert set(scoped['review_output_shape']['selected'][0]) == {'term', 'evidence_aliases'}
+    assert '宿主随后另行调用全表二审' in prompt
+
+
+def test_first_pass_minimal_output_does_not_replace_full_final_review_contract(tmp_path):
+    original = packet()
+    shape = {'review_method': 'ai_semantic_review', 'second_pass_completed': True,
+             'selected': [{'term': '示例词', 'semantic_type': 'policy_tool',
+                           'standalone_topic_label': True, 'selection_reason': '原文支持',
+                           'evidence_tier': 'core', 'topic_hits': [1]}]}
+    original['review_output_shape'] = copy.deepcopy(shape)
+    seen = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        seen.append(name)
+        if name == 'hotword-global-review':
+            assert part['review_output_shape'] == shape
+            assert all(set(r) == {'term', 'evidence_aliases'} for r in part['first_pass_selected'])
+        else:
+            assert set(part['review_output_shape']['selected'][0]) == {'term', 'evidence_aliases'}
+        return {'selected': [{'term': row['term'], 'evidence_aliases': []} for row in part['candidates']],
+                'second_pass_completed': name == 'hotword-global-review'}, {'session_id': name}
+    result = review_hotword_batches(original, 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert result['second_pass_completed'] is True
+    assert original['review_output_shape'] == shape
+    assert len(seen) == 4
+
+
+def test_first_pass_does_not_carry_global_taxonomy_but_keeps_every_source_window():
+    original = packet()
+    original.update(allowed_semantic_types=['policy_tool'], accepted_style_patterns=['global rule'],
+                    rejected_style_patterns=['global exclusion'])
+    frozen = copy.deepcopy(original)
+    first, prompt = first_pass_scope(original, 'global certification rules')
+    for key in ('candidates', 'candidate_source_windows', 'source_urls', 'topics'):
+        assert first[key] == frozen[key]
+    assert 'allowed_semantic_types' not in first and original == frozen
+    assert 'global certification rules' not in prompt
+
+
+def test_final_review_time_is_reserved_inside_deadline(tmp_path, monkeypatch):
+    import cwh_hotword_batches as batches
+    monkeypatch.setattr(batches.time, 'monotonic', lambda: 100.0)
+    calls = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        calls.append((name, timeout))
+        return {'selected': [{'term': r['term']} for r in part['candidates']],
+                'second_pass_completed': True}, {'session_id': name}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, 280.0, model)
+    assert calls[0][1] == 40.0  # (180 remaining - 60 final reserve) / 3 first passes
+    assert calls[-1][1] == 90.0
+    assert result['batch_review_audit']['final_review_reserve_seconds'] == 60.0
+
+
+def test_every_partition_then_real_global_pass_preserves_native_selections(tmp_path):
+    calls = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        calls.append(name)
+        assert timeout <= 90
+        return {'selected': [{'term': row['term']} for row in part['candidates']],
+                'second_pass_completed': True, 'review_method': 'ai_semantic_review'}, {'session_id': name}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert calls == ['hotword-batch-1', 'hotword-batch-2', 'hotword-batch-3', 'hotword-global-review']
+    assert len(result['selected']) == 3
+    assert result['batch_review_audit']['candidate_count'] == 3
+
+
+def test_native_source_backed_extensions_remain_allowed_without_inventing_counts():
+    original = packet()
+    before = copy.deepcopy(original)
+    expanded = retain_native_extensions(original, [{'term': '普惠托育服务', 'topic_hits': [2],
+                                                    'evidence_aliases': ['普惠托育']}])
+    assert expanded['candidates'][-1]['term'] == '普惠托育服务'
+    assert 'document_count' not in expanded['candidates'][-1]
+    assert expanded['candidate_source_windows'][-1]['source_windows'] == original['candidate_source_windows'][1]['source_windows']
+    assert original == before
+
+
+@pytest.mark.parametrize('fault', ['unknown', 'no_second_pass'])
+def test_no_invented_terms_or_host_certified_second_pass(tmp_path, fault):
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        return {'selected': [{'term': '凭空制造' if fault == 'unknown' else row['term']} for row in part['candidates']],
+                'second_pass_completed': False}, {'session_id': name}
+    with pytest.raises(ValueError):
+        review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+
+
+def test_failed_partition_cannot_be_misreported_as_global_completion(tmp_path):
+    from cwh_host_research import HostModelError
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append(args[4])
+        raise HostModelError('actual provider timeout', 124, run={'session_id': 'timeout-id'})
+    strict = packet()
+    strict.pop('delivery_policy')
+    with pytest.raises(HostModelError):
+        review_hotword_batches(strict, 'rules', [], tmp_path, time.monotonic() + 300, fail)
+    assert calls == ['hotword-batch-1']
+    assert (tmp_path / 'hotword-batch-1.packet.json').is_file()
+    assert not (tmp_path / 'hotword-global-review.packet.json').exists()
+
+
+def test_partial_timeout_keeps_successes_but_requires_real_global_review(tmp_path):
+    from cwh_host_research import HostModelError
+    calls = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        calls.append(name)
+        if name == 'hotword-batch-2':
+            raise HostModelError('timeout', 124, run={'session_id': name, 'exit_code': 124})
+        if name == 'hotword-supplement':
+            assert any('普惠托育' in window['excerpt'] for window in part['source_window_pool'].values())
+            return {'selected': [{'term': '普惠托育'}], 'second_pass_completed': False}, {'session_id': name, 'exit_code': 0}
+        return {'selected': [{'term': row['term']} for row in part['candidates']],
+                'second_pass_completed': True}, {'session_id': name, 'exit_code': 0}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert calls[-1] == 'hotword-supplement-review'
+    assert {r['term'] for r in result['selected']} == {'公共服务', '基础设施', '普惠托育'}
+    assert result['batch_review_audit']['deferred_candidate_batches'][0]['terms'] == ['普惠托育']
+    assert result['second_pass_completed'] is True
+
+
+def test_unwitnessed_extension_is_local_gap_not_a_whole_workbook_failure(tmp_path):
+    seen = []
+    def model(part, prompt, command, folder, name, timeout, **kwargs):
+        selected = [{'term': row['term']} for row in part['candidates']]
+        if name == 'hotword-batch-1':
+            selected.append({'term': '原文没有的新增词'})
+        seen.append(name)
+        return {'selected': selected, 'second_pass_completed': True}, {'session_id': name}
+    result = review_hotword_batches(packet(), 'rules', [], tmp_path, time.monotonic() + 300, model)
+    assert len(result['selected']) == 3
+    assert seen[-1] == 'hotword-global-review'
+    gaps = result['batch_review_audit']['source_witness_quarantines']
+    assert gaps[0]['native_selection'] == {'term': '原文没有的新增词'}
+    assert gaps[0]['native_run']['session_id'] == 'hotword-batch-1'
+    assert (tmp_path / 'hotword_source_quarantine.json').exists()
+
+
+def test_strict_delivery_still_rejects_unwitnessed_extension(tmp_path):
+    source = packet()
+    source.pop('delivery_policy')
+    def model(*args, **kwargs):
+        return {'selected': [{'term': '原文没有的新增词'}]}, {'session_id': 'actual'}
+    with pytest.raises(ValueError, match='no literal'):
+        review_hotword_batches(source, 'rules', [], tmp_path, time.monotonic() + 300, model)

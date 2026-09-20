@@ -32,8 +32,12 @@ from report_rules import (
     formal_sentiment_row_ready,
 )
 from source_identity import public_source_family
-from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label
-from normalize_cwh_analysis import assemble_cluster_details
+from cwh_writing_rules import chinese_number, opening_paragraph, ordinal_prefix, writing_rules, writing_rules_sha256, domestic_media_label, editorial_profile
+from cwh_viewpoint_gate import independent_voice_keys
+from normalize_cwh_analysis import assemble_cluster_details, evidence_sentence, terminated_sentence
+from cwh_docx_template import TEMPLATE, apply_template
+from cwh_chart_style import valid_image, write_topic_chart, verify_topic_chart_manifest
+from cwh_report_visuals import write_report_charts, verify_report_charts, add_fixed_topic_table, verify_topic_table
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +61,16 @@ def topic_display(topic: str) -> str:
 
 def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
     payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    from cwh_semantic_recovery import is_deferred_hotwords
+    if is_deferred_hotwords(payload):
+        data['hotwords'] = []
+        data['hotword_review_gap'] = payload['notice']
+        data.setdefault('audit', {}).setdefault('data_gaps', []).append(payload['notice'])
+        acceptance = data['audit'].setdefault('acceptance', {})
+        acceptance['ready_for_formal_delivery'] = False
+        acceptance.setdefault('blockers', []).append(payload['notice'])
+        data.setdefault('artifacts', {})['hotword_audit'] = str(audit_path)
+        return
     if payload.get("status") != "ai_review_complete":
         raise ValueError(f"词云审计未完成AI审核：{audit_path}")
     if payload.get("method") != "ai_semantic_review_with_evidence":
@@ -76,6 +90,7 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
         HOTWORD_SEMANTIC_TYPES,
         PROCEDURAL_HOTWORD_MARKERS,
         valid_candidate,
+        reviewed_topic_label_valid,
     )
 
     invalid_terms = []
@@ -90,7 +105,7 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
             or not str(row.get("selection_reason") or "").strip()
             or tier not in {"core", "supporting"}
             or semantic_type not in HOTWORD_SEMANTIC_TYPES
-            or row.get("standalone_topic_label") is not True
+            or not reviewed_topic_label_valid(row)
             or any(term.startswith(marker) or term.endswith(marker) for marker in PROCEDURAL_HOTWORD_MARKERS)
             or document_count < (2 if tier == "core" else 1)
         ):
@@ -152,6 +167,7 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
                 "evidence_tier": str(row.get("evidence_tier") or "core"),
                 "semantic_type": str(row.get("semantic_type") or ""),
                 "standalone_topic_label": row.get("standalone_topic_label") is True,
+                "contextual_topic_label": row.get("contextual_topic_label") is True,
                 "selection_reason": str(row.get("selection_reason") or ""),
                 "sample_titles": sample_titles,
                 "sample_urls": sample_urls,
@@ -161,6 +177,19 @@ def apply_hotword_audit(data: dict[str, Any], audit_path: Path) -> None:
             }
         )
     data["hotwords"] = normalized
+    # A separately verified recovery replaces this specific missing-review
+    # notice. Leaving the old flag suppresses the cloud even after success.
+    recovered_notice = data.pop('hotword_review_gap', None)
+    if recovered_notice:
+        audit = data.setdefault('audit', {})
+        audit.setdefault('resolved_data_gaps', []).append({
+            'notice': recovered_notice, 'resolution': 'reviewed_hotword_audit_applied',
+            'audit_path': str(audit_path.resolve()),
+            'audit_sha256': hashlib.sha256(audit_path.read_bytes()).hexdigest()})
+        for owner, key in ((audit, 'data_gaps'), (audit.get('acceptance') or {}, 'blockers')):
+            if isinstance(owner.get(key), list):
+                owner[key] = [value for value in owner[key] if value != recovered_notice]
+        # Other evidence, layout and count gaps still determine acceptance.
     shortfall = payload.get("count_shortfall") or {}
     if payload.get("delivery_policy") == "deliver_available_with_gaps" and shortfall.get("notice"):
         audit = data.setdefault("audit", {})
@@ -268,16 +297,31 @@ def display_cluster_details(cluster: dict[str, Any]) -> str:
     return cluster.get('details') or cluster.get('analysis') or ''
 
 
-def cluster_wording(cluster: dict[str, Any]) -> str:
-    summary = clean_sentence(cluster.get("summary"))
+def cluster_display_lead(cluster: dict[str, Any], prefix: str = '') -> str:
+    """A lone unnumbered source needs no second paraphrase before its quote.
+
+    Preserve the reviewed grouping in the data; this is presentation only.
+    Numbered groups and legacy prose without structured evidence keep a lead.
+    """
+    rows = [row for row in cluster.get('evidence') or [] if isinstance(row, dict)
+            and row.get('formal_use') not in {'reserve', 'excluded'}]
+    if not prefix and len(independent_voice_keys(rows)) == 1 and any(
+            row.get('formal_claim') for row in rows):
+        return ''
+    return f"{prefix}{clean_sentence(cluster.get('summary'))}。"
+
+
+def cluster_wording(cluster: dict[str, Any], *, prefix: str | None = None) -> str:
+    lead = (clean_sentence(cluster.get('summary')) + '。' if prefix is None
+            else cluster_display_lead(cluster, prefix))
     details = clean_sentence(display_cluster_details(cluster))
     warning = attribution_review_marker(cluster)
     if details:
-        return f"{summary}。{details}。{warning}"
+        return lead + '\n\n'.join(cluster_detail_paragraphs(cluster, first_lead=lead)) + warning
     evidence = evidence_text(cluster.get("evidence") or [])
     if evidence:
-        return f"{summary}。{evidence}。{warning}"
-    return f"{summary}。{warning}"
+        return f"{lead}{evidence}。{warning}"
+    return f"{lead}{warning}"
 
 
 ATTRIBUTION_REVIEW_TEXT = "【未识别到具体专家姓名，建议核验原文】"
@@ -538,16 +582,70 @@ def total_event_paragraphs(data: dict[str, Any]) -> list[str]:
     peak = peak_date_text({"by_date": dated_counts})
     peak_sentence = frames["peak_template"].format(peak_date=peak) if dated_counts else ""
     examples = frames["overseas_examples_template"].format(sources=overseas_sources) if overseas_sources and overseas > 0 else ""
+    # Current, explicitly sourced headline only; never borrow a benchmark headline.
+    meeting = data.get('meeting') or {}
+    focus = str(meeting.get('focus_title') or '').strip()
+    focus_sentence = frames['focus_template'].format(focus=focus) if focus and meeting.get('focus_source') else ''
     return [
-        frames["total_template"].format(total_text=total_text, peak_sentence=peak_sentence),
+        frames["total_template"].format(total_text=total_text, focus_sentence=focus_sentence, peak_sentence=peak_sentence),
         frames["domestic_template"].format(count=domestic, domestic_label=domestic_media_label(data)),
         frames["new_media_template"].format(wechat=wechat, weibo=weibo, video=video, other=other_new_media),
         frames["overseas_template"].format(count=overseas, examples=examples),
     ]
 
 
+def report_topics(data: dict[str, Any]) -> list[str]:
+    """Use current input order, never historical topic names or fuzzy assignment."""
+    values = [row.get('topic') or row.get('display') for row in data.get('topic_stats') or []]
+    if not values:
+        values = (data.get('meeting') or {}).get('topics') or []
+    if not values:
+        values = [row.get('topic') for row in (data.get('viewpoints') or {}).get('by_topic') or []]
+    return list(dict.fromkeys(str(value).strip() for value in values if isinstance(value, str) and value.strip()))
+
+
+def report_topic_items(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = list((data.get('viewpoints') or {}).get('by_topic') or [])
+    topics = report_topics(data)
+    if not topics:
+        return rows
+    output, consumed = [], set()
+    for topic in topics:
+        matches = [(index, row) for index, row in enumerate(rows) if str(row.get('topic') or '').strip() == topic]
+        if matches:
+            output.extend(row for _, row in matches)
+            consumed.update(index for index, _ in matches)
+        else:
+            output.append({'topic': topic, 'heading': topic, 'clusters': [],
+                           'evidence_gap': {'notice': '暂未取得该议题可引用的媒体自媒体观点。'}})
+    # Unmatched legacy rows remain visible, not silently reassigned or deleted.
+    output.extend(row for index, row in enumerate(rows) if index not in consumed)
+    return output
+
+
+def report_comment_groups(data: dict[str, Any]) -> list[tuple[str, list[dict[str, Any]]]]:
+    groups = comment_groups((data.get('comments') or {}).get('selected') or [])
+    if not writing_rules()['comments'].get('cover_all_topics'):
+        return groups
+    topics = report_topics(data)
+    if not topics:
+        return groups
+    output, consumed = [], set()
+    for topic in topics:
+        matches = [(index, group) for index, group in enumerate(groups)
+                   if all(str(row.get('system_topic') or row.get('topic') or row.get('subtopic') or '').strip() == topic
+                          for row in group[1])]
+        if matches:
+            output.extend(group for _, group in matches)
+            consumed.update(index for index, _ in matches)
+        else:
+            output.append((topic, []))
+    output.extend(group for index, group in enumerate(groups) if index not in consumed)
+    return output
+
+
 def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
-    groups: dict[str, list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in comments:
         if not is_actual_comment_row(item):
             continue
@@ -556,14 +654,15 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         text = clean_formal_comment(item.get("content") or item.get("title"))
         if not text or not comment_is_substantive(item, text):
             continue
-        reviewed_heading = (comment_stance_heading(item.get("topic_comment_heading"))
-                            or comment_stance_heading(item.get("comment_heading"))
-                            or comment_stance_heading(item.get("ai_comment_heading")))
+        reviewed_heading = (comment_stance_heading(item.get("comment_heading"))
+                            or comment_stance_heading(item.get("ai_comment_heading"))
+                            or comment_stance_heading(item.get("topic_comment_heading")))
         if not reviewed_heading:
             continue
-        # One system agenda/subtopic is one numbered report item.  Different
-        # reactions under the same agenda are evidence dimensions inside that
-        # item, never separate “一是/二是” headings.
+        # Group identical native-reviewed judgments, not just agenda IDs.
+        # One policy can have both approval and a distinct implementation wish.
+        # Scripts must neither join these into a compound heading nor infer
+        # that differently worded judgments are semantically identical.
         topic_key = re.sub(
             r"\s+",
             "",
@@ -571,7 +670,7 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
         )
         if not topic_key:
             topic_key = f"heading:{reviewed_heading}"
-        groups.setdefault(topic_key, []).append(
+        groups.setdefault((topic_key, reviewed_heading), []).append(
             {**item, "content": text, "_reviewed_comment_heading": reviewed_heading}
         )
     output = []
@@ -586,15 +685,10 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
             deduped.append(row)
         if not deduped:
             continue
-        group_headings = [
-            comment_stance_heading(row.get("topic_comment_heading"))
-            for row in deduped
-            if comment_stance_heading(row.get("topic_comment_heading"))
-        ]
         unique_row_headings = list(dict.fromkeys(
             row.get("_reviewed_comment_heading") for row in deduped if row.get("_reviewed_comment_heading")
         ))
-        heading = group_headings[0] if group_headings else (unique_row_headings[0] if len(unique_row_headings) == 1 else "")
+        heading = unique_row_headings[0] if unique_row_headings else ''
         if heading:
             output.append((heading, deduped))
     output.sort(key=lambda item: min(int(row.get("report_order") or 999) for row in item[1]))
@@ -603,17 +697,32 @@ def comment_groups(comments: list[dict[str, Any]]) -> list[tuple[str, list[dict[
 
 def comment_lead(data: dict[str, Any], groups: list[tuple[str, list[dict[str, Any]]]]) -> str:
     rules = writing_rules()["comments"]
-
-    def lead_summary(name: str) -> str:
-        value = clean_sentence(name)
-        clauses = [part.strip() for part in re.split(r"[，；]", value) if part.strip()]
-        value = clauses[0] if clauses else value
-        value = re.sub(r"^认为", "", value)
-        # Length is an authoring target, not permission to cut a Chinese word
-        # or qualification from a reviewed clause. Preserve the whole clause.
-        return value
-
-    summaries = "、".join(lead_summary(name) for name, _ in groups)
+    # All three reference reports introduce two examples, not the entire list.
+    # Select from already reviewed judgments in their existing order; no new
+    # semantic summary, stance substitution or changes to the body/quotes.
+    candidates = [(name, rows) for name, rows in groups if rows]
+    limit = max(1, int(rules.get('lead_example_count', 2)))
+    selected, seen_topics = [], set()
+    for index, (name, rows) in enumerate(candidates):
+        topic = str(rows[0].get('system_topic') or rows[0].get('topic') or rows[0].get('subtopic') or '').strip()
+        if topic and topic in seen_topics:
+            continue
+        selected.append(index)
+        if topic:
+            seen_topics.add(topic)
+        if len(selected) >= limit:
+            break
+    # If only one topic has comments, two different judgments can still appear.
+    for index in range(len(candidates)):
+        if len(selected) >= limit:
+            break
+        if index not in selected:
+            selected.append(index)
+    summaries = "、".join(clean_sentence(candidates[index][0]) for index in sorted(selected))
+    if not summaries:
+        return empty_comment_notice(data)
+    if rules.get('use_editorial_lead'):
+        return rules['lead_template'].format(stance_summaries=summaries)
     if formal_sentiment_available(data):
         return rules["sentiment_lead_template"].format(
             sentiment_lead=netizen_sentiment_lead(data).rstrip("。"), stance_summaries=summaries,
@@ -664,6 +773,8 @@ def comment_wording(rows: list[dict[str, Any]]) -> str:
 
 
 def hotword_paragraph(data: dict[str, Any]) -> str:
+    if data.get('hotword_review_gap'):
+        return str(data['hotword_review_gap'])
     frames = writing_rules()["hotwords"]
     hotwords = data.get("hotwords") or []
     if not hotwords:
@@ -691,14 +802,22 @@ def hotword_paragraph(data: dict[str, Any]) -> str:
         selected = [w for w in words if w][:frames["words_per_topic_in_prose"]]
         if not selected:
             continue
-        quoted = "、".join(f"“{word}”" for word in selected)
+        quoted = "".join(f"“{word}”" for word in selected)
         focus = focus_by_topic.get(topic)
         if focus and focus.startswith(STANCE_HEADING_PREFIXES):
             focus_clause = "，" + frames['stance_focus_subject'] + focus
         else:
             focus_clause = ("，" + focus_phrases[index % len(focus_phrases)] + focus) if focus else ""
         lead = "" if index < 4 else "此外，" if index == 4 else "同时，"
-        word_group = frames['word_group_template'].format(quoted=quoted, topic=topic)
+        if frames.get('use_editorial_rank_frames'):
+            phrases = frames['editorial_rank_phrases']
+            word_group = quoted + '等词' + phrases[min(index, len(phrases) - 1)]
+            if index == len(ordered_topics) - 1 and index >= 3:
+                lead = '此外，'
+            elif index >= 3:
+                lead = ''
+        else:
+            word_group = frames['word_group_template'].format(quoted=quoted, topic=topic)
         chunks.append(f"{lead}{word_group}{focus_clause}")
     if not chunks:
         return "从热词分布来看，当前批次样本不足，尚未形成稳定热词分布。"
@@ -790,7 +909,7 @@ def formal_overseas_summary(row: dict[str, Any]) -> str:
         maxsplit=1,
     )[0].strip()
     # Length is an authoring target, not permission to cut a reviewed condition.
-    match = re.match(r'^(?:原文|原分析)(?:认为|指出|表示|称)[，,:：\s]*', value)
+    match = re.match(r'^(?:原文|原分析|报道)(?:认为|指出|表示|称)[，,:：\s]*', value)
     if match and value[match.end():].strip():
         value = value[match.end():].strip()
     return value
@@ -1224,7 +1343,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
     frames = writing_rules()["overseas"]
     appendix_rows = appendix_overseas_rows(data)
     if not appendix_rows:
-        return ["数据周期内，暂未取得通过相关性、报道类型和简体中文门禁的境外报道样本，不据此推断整体关注度。"]
+        return [writing_rules()['overseas']['no_media_evidence_sentence']]
 
     factual_rows = [row for row in appendix_rows if row.get("_formal_category") == "事实性报道"]
     interpretive_rows = [
@@ -1244,7 +1363,7 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
             *[row for row in factual_rows if str(row.get("url") or row.get("title") or "") not in representative_keys],
         ]
         examples = "、".join(
-            f"{formal_overseas_source(row)}文章《{row.get('_formal_title_cn')}》"
+            f"{formal_overseas_source(row)}《{row.get('_formal_title_cn')}》"
             for row in ordered_rows[:frames["max_factual_examples"]]
         )
         factual_majority = len(factual_rows) > len(appendix_rows) / 2
@@ -1258,12 +1377,19 @@ def overseas_media_body_paragraphs(data: dict[str, Any]) -> list[str]:
             source = formal_overseas_source(row)
             title = str(row.get("_formal_title_cn") or "").strip()
             summary = clean_sentence(row.get("_formal_summary_cn"))
-            summary = re.sub(r"^(?:文章|报道|原(?:文)?分析)?(?:认为|指出|称)[，,:：\s]*", "", summary)
+            heading, separator, body = summary.partition('。')
+            has_heading = bool(separator and body.strip() and len(heading) <= 60 and
+                re.match(r'^(?:认为|认可|肯定|支持|建议|期待|希望|担忧|质疑|指出)', heading))
             # Reported analysis may belong to a quoted speaker, not the outlet.
-            descriptions.append(f"{source}文章《{title}》称，{summary}")
+            descriptions.append((heading if has_heading else '',
+                f"{source}《{title}》称，{body if has_heading else summary}"))
         # The factual paragraph has already introduced the interpretations.
         lead = "" if factual_rows else frames["interpretive_lead"]
-        paragraphs.append(lead + "；".join(descriptions) + "。")
+        if lead:
+            paragraphs.append(lead)
+        for index, (heading, description) in enumerate(descriptions, 1):
+            prefix = ordinal_prefix(index) if len(descriptions) > 1 else ''
+            paragraphs.append(prefix + (heading + '。' if heading else '') + description.rstrip('。') + '。')
 
     if not paragraphs:
         return ["数据周期内，暂未取得通过报道类型和简体中文门禁的境外报道样本。"]
@@ -1423,61 +1549,56 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
     chart_dir.mkdir(parents=True, exist_ok=True)
     stats = data.get("statistics", {})
     hotwords = {x.get("word", ""): x.get("count", 0) for x in data.get("hotwords", [])[:12]}
-    topic_values = {
-        str(row.get("display") or topic_display(row.get("topic", ""))): int(row.get("spread_count", 0) or row.get("total_samples", 0) or 0)
+    topic_values = [
+        (str(row.get("display") or topic_display(row.get("topic", ""))), int(row.get("spread_count", 0) or row.get("total_samples", 0) or 0))
         for row in data.get("topic_stats") or []
-    }
+    ]
     charts = {
         "platform_distribution": ("平台样本分布", stats.get("by_platform") or {}),
         "topic_distribution": ("子议题传播量", topic_values),
         "trend_distribution": ("传播走势", dict(sorted((stats.get("by_date") or {}).items()))),
         "hotword_distribution": ("候选热词", hotwords),
     }
-    output: dict[str, str] = {}
-    # A report can be regenerated from its structured JSON after the original
-    # workbook has been moved or reduced to a basename. Preserve the exact
-    # monitoring-system charts already extracted into the report directory
-    # instead of silently replacing them with program-drawn fallbacks.
-    for key in ("trend_distribution", "topic_distribution"):
-        existing_system_chart = chart_dir / f"{key}_system.png"
-        if existing_system_chart.exists() and existing_system_chart.stat().st_size > 0:
-            output[key] = str(existing_system_chart)
-    workbook_value = str((data.get("collection") or {}).get("system_workbook") or "").strip()
-    missing_system_keys = {"trend_distribution", "topic_distribution"} - set(output)
-    if workbook_value and missing_system_keys:
-        try:
-            from extract_system_excel_assets import extract_system_excel_assets
-
-            workbook_path = Path(workbook_value)
-            if workbook_path.is_file():
-                extracted = extract_system_excel_assets(workbook_path, chart_dir)
-                for key in missing_system_keys:
-                    candidate = Path(str(extracted.get(key) or ""))
-                    if candidate.is_file() and candidate.stat().st_size > 0:
-                        output[key] = str(candidate)
-        except Exception as exc:
-            data.setdefault("audit", {}).setdefault("data_gaps", []).append(
-                f"系统工作簿原图提取失败，已使用程序重绘兜底：{type(exc).__name__}: {exc}"
-            )
-    for key, artifact_key in [
-        ("trend_distribution", "trend_chart_image"),
-        ("topic_distribution", "topic_chart_image"),
-    ]:
-        explicit_value = str((data.get("artifacts") or {}).get(artifact_key) or "").strip()
-        if not explicit_value:
-            continue
-        explicit_path = Path(explicit_value)
-        if explicit_path.is_file() and explicit_path.stat().st_size > 0:
-            target = chart_dir / f"{key}_system.png"
-            if explicit_path.resolve() != target.resolve():
-                shutil.copyfile(explicit_path, target)
-            output[key] = str(target)
-        else:
-            data.setdefault("audit", {}).setdefault("data_gaps", []).append(
-                f"指定的监测系统图表不存在或为空：{explicit_value}"
-            )
+    output, visual_manifests = write_report_charts(data, chart_dir)
+    data.setdefault('audit', {})['report_visual_templates'] = visual_manifests
+    # Source charts remain untouched/auditable. They are no longer a styling
+    # authority: every report uses the same current-data baseline templates.
     artifacts = data.get("artifacts") or {}
     reviewed_image = reviewed_hotword_image_path(data)
+    def valid_raster(value):
+        if not value:
+            return False
+        candidate = Path(value)
+        try:
+            from PIL import Image
+            with Image.open(candidate) as raster:
+                if raster.format not in {'PNG', 'JPEG', 'GIF', 'BMP', 'TIFF'}:
+                    return False
+                raster.verify()
+            return True
+        except (OSError, ValueError):
+            return False
+    # A late successful hotword review may have no workbook-time image. Draw
+    # from its frozen reviewed payload using the same shipped cloud renderer;
+    # never mistake the generic SVG frequency chart for a reviewed PNG cloud.
+    if reviewed_hotword_pipeline_ready(data) and not any(valid_raster(p) for p in (
+            artifacts.get('wordcloud_image'), reviewed_image)):
+        audit_value = artifacts.get('hotword_audit')
+        if audit_value and Path(audit_value).is_file():
+            payload = json.loads(Path(audit_value).read_text('utf-8-sig'))
+            if (payload.get('status') == 'ai_review_complete'
+                    and payload.get('second_pass_completed') is True and payload.get('selected')):
+                from cwh_hotword_pipeline import render_wordcloud_png
+                target = chart_dir / 'hotword_distribution_reviewed.png'
+                render_wordcloud_png(payload, target)
+                if not valid_raster(target):
+                    raise ValueError('Reviewed wordcloud renderer did not emit a usable raster image')
+                data.setdefault('artifacts', {})['wordcloud_image'] = str(target)
+                artifacts = data['artifacts']
+                render_audit = chart_dir / 'wordcloud_render_audit.json'
+                render_audit.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+                artifacts['wordcloud_render_audit'] = str(render_audit)
+                reviewed_image = target
     # Regeneration often follows a copied or restored report directory.  A stale
     # absolute path must not mask the valid reviewed word cloud already copied
     # into that directory.  Try every authoritative candidate before allowing
@@ -1491,6 +1612,12 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         (artifacts.get("charts") or {}).get("hotword_distribution"),
         chart_dir / "hotword_distribution_system.png",
     ]
+    if data.get('hotword_review_gap'):
+        wordcloud_candidates = []
+        for owner in (data.setdefault('artifacts', {}), data.get('collection') or {}):
+            owner.pop('wordcloud_image', None)
+        for key in ('charts', 'docx_charts'):
+            (data['artifacts'].get(key) or {}).pop('hotword_distribution', None)
     explicit_wordcloud_value = ""
     invalid_wordcloud_values: list[str] = []
     for candidate_value in wordcloud_candidates:
@@ -1498,7 +1625,7 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
         if not candidate_text:
             continue
         candidate = Path(candidate_text)
-        if candidate.is_file() and candidate.stat().st_size > 0:
+        if valid_raster(candidate):
             explicit_wordcloud_value = candidate_text
             break
         invalid_wordcloud_values.append(candidate_text)
@@ -1519,25 +1646,24 @@ def ensure_docx_chart_images(data: dict[str, Any], out_dir: Path) -> dict[str, s
             data.setdefault("artifacts", {})["wordcloud_image"] = str(target)
             explicit_wordcloud_used = True
     for key, (title, values) in charts.items():
+        if key == 'hotword_distribution' and data.get('hotword_review_gap'):
+            output.pop(key, None)
+            continue
         if key in output:
             continue
         path = chart_dir / f"{key}.png"
         if key == "hotword_distribution":
             write_wordcloud_png(path, title, values)
+        elif key == 'topic_distribution':
+            data.setdefault('audit', {})['topic_chart_style'] = write_topic_chart(path, values)
         else:
             write_bar_png(path, title, values)
         output[key] = str(path)
     output.pop("source_workbook", None)
-    if (
-        explicit_wordcloud_used
-        and all("_system" in Path(output.get(key, "")).stem for key in ["trend_distribution", "topic_distribution"])
-    ):
-        chart_authority = "monitoring_system_assets_plus_pipeline_wordcloud"
-    elif all("_system" in Path(output.get(key, "")).stem for key in ["trend_distribution", "topic_distribution", "hotword_distribution"]):
-        chart_authority = "monitoring_system_embedded_assets"
-    else:
-        chart_authority = "mixed_system_and_program_fallback"
-    data.setdefault("artifacts", {})["chart_authority"] = chart_authority
+    # Monitoring assets remain source artifacts, never override fixed report styling.
+    data.setdefault("artifacts", {})["chart_authority"] = (
+        'baseline_template_plus_reviewed_wordcloud' if explicit_wordcloud_used
+        else 'baseline_template_without_reviewed_wordcloud')
     data.setdefault("artifacts", {}).setdefault("docx_charts", {}).update(output)
     return output
 
@@ -1564,12 +1690,12 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
     lines.extend(["", "### （二）子议题传播情况", ""])
     sentiment_visible = formal_sentiment_available(data)
     topic_headers = ["序号", "标题", domestic_media_label(data), "新媒体", "境外媒体", "总量"]
-    if sentiment_visible:
-        topic_headers.extend(["正面", "中立", "负面"])
-    lines.append(md_table(topic_headers, formal_topic_rows(data, sentiment_visible)))
+    topic_headers.extend(["正面", "中立", "负面"])
+    lines.append(md_table(topic_headers, [[('' if v == '待分析' else v) for v in row]
+                                         for row in formal_topic_rows(data, True)]))
 
     lines.extend(["", "## " + document_rules["fixed_chapters"][1], "", "### " + document_rules["domestic_subsections"][0], ""])
-    for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
+    for topic_idx, item in enumerate(report_topic_items(data), 1):
         clusters = item.get("clusters") or []
         if not clusters:
             lines.append(f"{topic_idx}.{topic_heading(item)}")
@@ -1580,23 +1706,25 @@ def render_formal_markdown(data: dict[str, Any], out_dir: Path) -> str:
             details = clean_sentence(display_cluster_details(clusters[0]))
             body = details or clean_sentence(clusters[0].get("summary"))
             warning = ATTRIBUTION_REVIEW_TEXT if cluster_needs_attribution_review(clusters[0]) else ""
-            lines.append(f"{topic_idx}.{topic_heading(item)}。{body}。{warning}")
+            paragraphs = cluster_detail_paragraphs(clusters[0], first_lead=f"{topic_idx}.{topic_heading(item)}。")
+            lines.append(f"{topic_idx}.{topic_heading(item)}。" + ('\n\n'.join(paragraphs) if paragraphs else body + '。') + warning)
             lines.append("")
             continue
         lines.append(f"{topic_idx}.{topic_heading(item)}")
         for idx, cluster in enumerate(clusters, 1):
             prefix = ordinal_prefix(idx)
-            lines.append(f"{prefix}{cluster_wording(cluster)}")
+            lines.append(cluster_wording(cluster, prefix=prefix))
         lines.append("")
 
     comments = data.get("comments", {}).get("selected") or []
     lines.extend(["### " + document_rules["domestic_subsections"][1], ""])
-    groups = comment_groups(comments)
+    groups = report_comment_groups(data)
     if groups:
         lines.append(comment_lead(data, groups))
         for idx, (name, rows) in enumerate(groups, 1):
             prefix = ordinal_prefix(idx)
-            lines.append(f"{prefix}{name}。{comment_wording(rows)}")
+            wording = comment_wording(rows) if rows else writing_rules()['comments']['missing_topic_notice']
+            lines.append(f"{prefix}{name}。{wording}")
     else:
         lines.append(empty_comment_notice(data))
 
@@ -1690,6 +1818,8 @@ def style_docx_table(table: Any, font_name: str, size_pt: int, widths_pt: list[f
                 paragraph.paragraph_format.first_line_indent = Pt(0)
                 paragraph.paragraph_format.space_before = Pt(0)
                 paragraph.paragraph_format.space_after = Pt(0)
+                # Keep all consecutive header rows with the first data row.
+                paragraph.paragraph_format.keep_with_next = is_header
                 for run in paragraph.runs:
                     set_docx_run_font(run, font_name, size_pt, is_header)
 
@@ -1768,36 +1898,7 @@ def add_table(
 
 def add_topic_table(document: Any, rows: list[list[Any]], include_sentiment: bool,
                     domestic_label: str = "境内主流媒体") -> Any:
-    if not include_sentiment:
-        return add_table(
-            document,
-            ["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"],
-            rows,
-            font_name="微软雅黑",
-            size_pt=11,
-            widths_pt=[35.5, 132.0, 55.0, 55.0, 50.0, 55.0],
-        )
-    table = document.add_table(rows=2, cols=9)
-    for idx, text in enumerate(["序号", "标题", domestic_label, "新媒体", "境外媒体", "总量"]):
-        table.cell(0, idx).merge(table.cell(1, idx)).text = text
-    table.cell(0, 6).merge(table.cell(0, 8)).text = "网民情感"
-    for idx, text in enumerate(["正面", "中立", "负面"], 6):
-        table.cell(1, idx).text = text
-    mark_row_as_header(table.rows[0])
-    mark_row_as_header(table.rows[1])
-    for row in rows:
-        cells = table.add_row().cells
-        for idx, value in enumerate(row):
-            cells[idx].text = "" if value is None else str(value)
-    style_docx_table(
-        table,
-        "微软雅黑",
-        11,
-        [35.5, 77.9, 47.2, 52.0, 42.5, 49.6, 42.5, 40.6, 32.8],
-    )
-    for row_index, row in enumerate(table.rows):
-        row.height = Pt(15.0 if row_index < 2 else (121.6 if row_index == 2 else 32.65))
-    return table
+    return add_fixed_topic_table(document, rows, domestic_label)
 
 
 def add_wechat_top_table(document: Any, rows: list[dict[str, Any]]) -> Any:
@@ -1883,20 +1984,90 @@ def add_emphasized_details(paragraph: Any, details: str) -> None:
         paragraph.add_run(details[cursor:])
 
 
+def cluster_detail_paragraphs(cluster: dict[str, Any], *, first_lead: str | None = None) -> list[str]:
+    """One semantic subpoint is one paragraph, including every attributed sample.
+
+    Length is edited before evidence freeze, never by introducing unnumbered
+    continuation paragraphs or by cutting frozen claims during rendering.
+    """
+    evidence = [row for row in cluster.get('evidence') or [] if isinstance(row, dict)]
+    if not evidence:
+        text = clean_sentence(display_cluster_details(cluster))
+        return [terminated_sentence(text)] if text else []
+    current, seen = '', set()
+    for row in evidence:
+        sentence = evidence_sentence(row)
+        signature = re.sub(r'[^0-9A-Za-z\u4e00-\u9fff]+', '', sentence).lower()
+        if not signature or signature in seen:
+            continue
+        seen.add(signature)
+        sentence = terminated_sentence(sentence)
+        current += sentence
+    return [current] if current else []
+
+
+def add_detail_blocks(document: Any, paragraph: Any, cluster: dict[str, Any]) -> Any:
+    from cwh_writing_rules import formal_attribution
+    entries = []
+    verbs = '|'.join(map(re.escape, sorted(writing_rules()['viewpoint']['attribution_verbs'], key=len, reverse=True)))
+    for row in cluster.get('evidence') or []:
+        if not isinstance(row, dict):
+            continue
+        sentence = terminated_sentence(evidence_sentence(row))
+        subject = re.sub(r'\s+', '', formal_attribution(row))
+        subjects = [subject] if subject else []
+        if row.get('attribution_status') == 'named_person' and row.get('speaker_name'):
+            name = re.sub(r'\s+', '', str(row['speaker_name']))
+            roles = re.split(r'[、，,；;]', str(row.get('speaker_role') or ''))
+            subjects.extend(re.sub(r'\s+', '', role) + name for role in roles if role)
+        pattern = '|'.join(map(re.escape, sorted(set(subjects), key=len, reverse=True)))
+        prefix = re.match(r'(?:' + pattern + r')(?:' + verbs + r')', sentence) if pattern else None
+        span = prefix.span() if prefix else None
+        if span is None and pattern:
+            tail = re.search(r'[”’"」』](?P<label>(?:' + pattern + r')(?:' + verbs + r'))。?$', sentence)
+            span = tail.span('label') if tail else None
+        entries.append((sentence, span))
+    target = paragraph
+    for index, details in enumerate(cluster_detail_paragraphs(cluster, first_lead=paragraph.text)):
+        target = paragraph if index == 0 else document.add_paragraph()
+        if not entries:
+            # No structured speaker mapping: keep prose plain, do not guess
+            # that a verb mentioned inside the claim is its attribution.
+            target.add_run(details)
+            continue
+        remainder = details
+        while remainder:
+            matched = next(((sentence, span) for sentence, span in entries if remainder.startswith(sentence)), None)
+            if not matched:
+                target.add_run(remainder)
+                break
+            sentence, span = matched
+            if span:
+                target.add_run(sentence[:span[0]])
+                target.add_run(sentence[span[0]:span[1]]).bold = True
+                target.add_run(sentence[span[1]:])
+            else:
+                target.add_run(sentence)
+            remainder = remainder[len(sentence):]
+    return target
+
+
 def add_cluster_paragraph(document: Any, prefix: str, cluster: dict[str, Any]) -> Any:
     paragraph = document.add_paragraph()
-    summary = clean_sentence(cluster.get("summary"))
-    lead = paragraph.add_run(f"{prefix}{summary}。")
-    lead.bold = True
+    lead_text = cluster_display_lead(cluster, prefix)
+    if lead_text:
+        lead = paragraph.add_run(lead_text)
+        lead.bold = True
     details = clean_sentence(display_cluster_details(cluster))
+    last_paragraph = paragraph
     if details:
-        add_emphasized_details(paragraph, f"{details}。")
+        last_paragraph = add_detail_blocks(document, paragraph, cluster)
     else:
         evidence = evidence_text(cluster.get("evidence") or [])
         if evidence:
             paragraph.add_run(f"{evidence}。")
     if cluster_needs_attribution_review(cluster):
-        run = paragraph.add_run(ATTRIBUTION_REVIEW_TEXT)
+        run = last_paragraph.add_run(ATTRIBUTION_REVIEW_TEXT)
         run.bold = True
         run.font.color.rgb = RGBColor(192, 0, 0)
     return paragraph
@@ -1907,13 +2078,14 @@ def add_single_topic_paragraph(document: Any, index: int, item: dict[str, Any], 
     lead = paragraph.add_run(f"{index}.{topic_heading(item)}。")
     lead.bold = True
     details = clean_sentence(display_cluster_details(cluster))
+    last_paragraph = paragraph
     if details:
-        add_emphasized_details(paragraph, f"{details}。")
+        last_paragraph = add_detail_blocks(document, paragraph, cluster)
     else:
         summary = clean_sentence(cluster.get("summary"))
         paragraph.add_run(f"{summary}。")
     if cluster_needs_attribution_review(cluster):
-        run = paragraph.add_run(ATTRIBUTION_REVIEW_TEXT)
+        run = last_paragraph.add_run(ATTRIBUTION_REVIEW_TEXT)
         run.bold = True
         run.font.color.rgb = RGBColor(192, 0, 0)
     return paragraph
@@ -1923,7 +2095,7 @@ def add_comment_group_paragraph(document: Any, prefix: str, name: str, rows: lis
     paragraph = document.add_paragraph()
     lead = paragraph.add_run(f"{prefix}{name}。")
     lead.bold = True
-    paragraph.add_run(comment_wording(rows))
+    paragraph.add_run(comment_wording(rows) if rows else writing_rules()['comments']['missing_topic_notice'])
     return paragraph
 
 
@@ -1943,6 +2115,8 @@ def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: s
     paragraph.paragraph_format.line_spacing = 1
     paragraph.paragraph_format.space_before = Pt(0)
     paragraph.paragraph_format.space_after = Pt(6)
+    section = document.sections[-1]
+    width = min(width, section.page_width - section.left_margin - section.right_margin)
     shape = paragraph.add_run().add_picture(image_path, width=width)
     if max_height is not None and shape.height > max_height:
         shape.width = round(shape.width * max_height / shape.height)
@@ -1953,7 +2127,7 @@ def add_centered_picture(document: Any, image_path: str, width: Any, alt_text: s
 
 
 def add_docx_title(document: Any, text: str) -> None:
-    paragraph = document.add_paragraph()
+    paragraph = document.add_paragraph(style='Title')
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.first_line_indent = Pt(0)
     paragraph.paragraph_format.space_before = Pt(0)
@@ -1982,7 +2156,7 @@ def add_docx_heading(document: Any, text: str, level: int) -> Any:
 
 
 def template_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "templates" / "formal_report_template_complete_20260714.docx"
+    return TEMPLATE
 
 
 def clear_document_body(document: Any) -> None:
@@ -1994,25 +2168,33 @@ def clear_document_body(document: Any) -> None:
 
 
 def remove_nonprinting_pagination_controls(document: Any) -> None:
-    """Remove paragraph flags that Word renders as black squares with marks on."""
-    tags = ("w:keepNext", "w:keepLines", "w:pageBreakBefore")
+    """Allow body flow while retaining heading/table pagination semantics.
+
+    Word's black paragraph squares are nonprinting UI marks, not document text.
+    Removing keepNext to hide them strands real headings and table headers.
+    """
+    tags = ("w:keepLines", "w:pageBreakBefore")
     for root in (document._element, document.styles.element):
         for tag in tags:
             for element in list(root.iter(qn(tag))):
                 parent = element.getparent()
                 if parent is not None:
                     parent.remove(element)
+    for paragraph in document.paragraphs:
+        if paragraph.style.name.startswith('Heading'):
+            paragraph.paragraph_format.keep_with_next = True
+        else:
+            # Body paragraphs and pictures should not create long keep chains.
+            paragraph.paragraph_format.keep_with_next = False
 
 
 def new_document() -> Any:
     from docx import Document
 
     path = template_path()
-    if path.exists():
-        document = Document(str(path))
-        clear_document_body(document)
-        return document
-    return Document()
+    document = Document(str(path))
+    clear_document_body(document)
+    return document
 
 
 def section_override(data: dict[str, Any], key: str) -> list[dict[str, str]]:
@@ -2151,7 +2333,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     else:
         add_docx_heading(document, document_rules["fixed_chapters"][1], 1)
         add_docx_heading(document, document_rules["domestic_subsections"][0], 2)
-        for topic_idx, item in enumerate(data.get("viewpoints", {}).get("by_topic", []), 1):
+        for topic_idx, item in enumerate(report_topic_items(data), 1):
             clusters = item.get("clusters") or []
             if not clusters:
                 add_docx_heading(document, f"{topic_idx}.{topic_heading(item)}", 3)
@@ -2167,7 +2349,7 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
 
         add_docx_heading(document, document_rules["domestic_subsections"][1], 2)
         comments = data.get("comments", {}).get("selected") or []
-        groups = comment_groups(comments)
+        groups = report_comment_groups(data)
         if groups:
             document.add_paragraph(comment_lead(data, groups))
             for idx, (name, rows) in enumerate(groups, 1):
@@ -2217,6 +2399,19 @@ def write_docx(data: dict[str, Any], out_path: Path) -> None:
     end_paragraph.paragraph_format.line_spacing = Pt(1)
     end_run = end_paragraph.add_run(" ")
     end_run.font.size = Pt(1)
+    if not any((one_override, two_override, three_override, four_override)):
+        data.setdefault('audit', {})['word_template'] = apply_template(document)
+        data['audit']['word_template']['editorial_profile'] = {
+            'id': editorial_profile()['profile_id'],
+            'source_template_sha256': editorial_profile()['source_template_sha256'],
+            'provenance': editorial_profile()['provenance'],
+            'writing_rules_sha256': writing_rules_sha256(),
+            'chair_origin': 'meeting_source' if meeting.get('chair_name') and meeting.get('chair_source') else 'editorial_default',
+            'does_not_certify_sentiment_or_collection': True,
+        }
+    else:
+        # Explicit user edits are a separate route, never silently labelled template-filled.
+        data.setdefault('audit', {})['word_template'] = {'mode': 'explicit_section_override'}
     remove_nonprinting_pagination_controls(document)
     document.save(out_path)
 def empty_comment_notice(data: dict[str, Any]) -> str:
@@ -2226,6 +2421,50 @@ def empty_comment_notice(data: dict[str, Any]) -> str:
     if any(is_actual_comment_row(row) and row.get('in_monitoring_window') is not False for row in rows):
         return rules['no_ready_quotes_verified_samples']
     return rules['no_ready_quotes_unverified_candidates' if rows else 'no_comment_samples']
+
+
+def audit_domestic_writing_size(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
+    """Advisory measurements only; never delete claims or fail delivery on size."""
+    if section_override(data, 'two'):
+        return {'applicable': False, 'reason': 'explicit_domestic_section_override'}
+    rules = writing_rules()['viewpoint']
+    topics, warnings = [], []
+    for index, item in enumerate(report_topic_items(data), 1):
+        clusters = item.get('clusters') or []
+        rows = [row for cluster in clusters for row in cluster.get('evidence') or []
+                if isinstance(row, dict) and row.get('formal_claim')]
+        lengths = [len(re.sub(r'\s+', '', str(row['formal_claim']))) for row in rows]
+        topics.append({'topic_index': index, 'topic': item.get('topic'),
+                       'structured_claim_count': len(rows), 'group_count': len(clusters),
+                       'claim_body_chars': lengths})
+        if len(rows) > rules['topic_excerpt_range'][1]:
+            warnings.append({'kind': 'check_additional_information_gain', 'topic_index': index,
+                             'claim_count': len(rows)})
+        for row, size in zip(rows, lengths):
+            if size > rules['extended_claim_char_range'][1]:
+                warnings.append({'kind': 'check_long_claim_context', 'topic_index': index,
+                                 'evidence_id': row.get('evidence_id'), 'chars': size})
+    start, end = writing_rules()['document']['domestic_subsections'][:2]
+    active, found, paragraphs = False, False, []
+    for p in ET.fromstring(document_xml).findall('./' + qn('w:body') + '/' + qn('w:p')):
+        text = ''.join(node.text or '' for node in p.iter(qn('w:t'))).strip()
+        if text == start:
+            active, found = True, True
+            continue
+        if active and text == end:
+            break
+        if active and text:
+            size = len(re.sub(r'\s+', '', text))
+            paragraphs.append(size)
+            if size > rules['paragraph_soft_max_chars']:
+                warnings.append({'kind': 'check_long_rendered_paragraph',
+                                 'paragraph_index': len(paragraphs), 'chars': size})
+    return {'applicable': True, 'advisory_only': True, 'topics': topics, 'warnings': warnings,
+            'domestic_media_section_found': found, 'word_paragraph_chars': paragraphs,
+            'structured_claim_count': sum(t['structured_claim_count'] for t in topics),
+            'scope': 'Structured claims are not unique people or measured baseline attribution spans. '
+                     'Word lengths include headings/attributions; headings-only and gap paragraphs are included. '
+                     'No whole-report quota, automatic deletion, semantic approval or failure by size.'}
 
 
 def audit_formal_comment_quotes(data: dict[str, Any], document_xml: bytes) -> dict[str, Any]:
@@ -2283,19 +2522,39 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
     for key in ["trend_distribution", "topic_distribution", "hotword_distribution"]:
         source = Path(str(((data.get("artifacts") or {}).get("docx_charts") or {}).get(key) or ""))
         chart_matches[key] = bool(
-            source.exists()
+            source.is_file()
             and hashlib.sha256(source.read_bytes()).hexdigest() in embedded_hashes
         )
     table_count = document_xml.count(b"<w:tbl>")
     hyperlink_count = document_xml.count(b"<w:hyperlink")
     image_count = sum(1 for name in names if name.startswith("word/media/"))
     comment_quote_audit = audit_formal_comment_quotes(data, document_xml)
+    artifacts = data.get('artifacts') or {}
+    chart_paths = artifacts.get('docx_charts') or {}
+    monitoring_assets = (artifacts.get('chart_authority') in {
+        'monitoring_system_embedded_assets', 'monitoring_system_assets_plus_pipeline_wordcloud'}
+        and all(chart_matches.values()))
+    topic_values = [(str(row.get('display') or topic_display(row.get('topic', ''))),
+                     int(row.get('spread_count', 0) or row.get('total_samples', 0) or 0))
+                    for row in data.get('topic_stats') or []]
+    fixed_topic_fallback = (
+        artifacts.get('chart_authority') == 'mixed_system_and_program_fallback'
+        and all(chart_matches.values())
+        and Path(chart_paths.get('trend_distribution') or '').stem == 'trend_distribution_system'
+        and Path(chart_paths.get('hotword_distribution') or '').stem in {
+            'hotword_distribution_system', 'hotword_distribution_pipeline'}
+        and verify_topic_chart_manifest(chart_paths.get('topic_distribution') or '',
+                                        (data.get('audit') or {}).get('topic_chart_style'), topic_values))
+    fixed_report_visuals = (
+        artifacts.get('chart_authority') == 'baseline_template_plus_reviewed_wordcloud'
+        and all(chart_matches.values())
+        and verify_report_charts(data, chart_paths, (data.get('audit') or {}).get('report_visual_templates') or {}))
     checks = {
-        "uses_monitoring_system_assets": (
-            (data.get("artifacts") or {}).get("chart_authority")
-            in {"monitoring_system_embedded_assets", "monitoring_system_assets_plus_pipeline_wordcloud"}
-            and all(chart_matches.values())
-        ),
+        "no_unfilled_template_slots": b'CWH_' not in document_xml,
+        "fixed_template_applied": (bool((data.get('audit') or {}).get('word_template', {}).get('filled_slots'))
+                                   or any(section_override(data, key) for key in ('one', 'two', 'three', 'four'))),
+        "uses_traceable_fixed_chart_assets": fixed_report_visuals,
+        "fixed_topic_table_layout": verify_topic_table(document_xml),
         "three_required_tables": table_count == 3,
         "three_required_images": image_count >= 3,
         "appendix_hyperlinks_present": hyperlink_count >= 10,
@@ -2309,12 +2568,32 @@ def audit_formal_docx(data: dict[str, Any], docx_path: Path) -> dict[str, Any]:
         "image_count": image_count,
         "hyperlink_count": hyperlink_count,
         "system_asset_hash_matches": chart_matches,
+        "chart_provenance": {"monitoring_system_assets": monitoring_assets,
+                             "verified_fixed_topic_fallback": fixed_topic_fallback,
+                             "verified_baseline_template": fixed_report_visuals,
+                             "declared_authority": artifacts.get('chart_authority')},
         "domestic_comment_quotes": comment_quote_audit,
+        "domestic_writing_size": audit_domestic_writing_size(data, document_xml),
     }
 
 
 def formalize_report(data: dict[str, Any], out_dir: Path) -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    from cwh_writing_rules import normalize_display_quotation_marks
+    from normalize_cwh_analysis import clean_sentence as clean_claim_sentence
+    punctuation_changes = []
+    for topic in (data.get('analysis_bundle') or {}).get('viewpoints', {}).get('by_topic', []):
+        for cluster in topic.get('clusters') or []:
+            for evidence in cluster.get('evidence') or []:
+                original = clean_claim_sentence(evidence.get('formal_claim'))
+                normalized = normalize_display_quotation_marks(original)
+                if normalized != original:
+                    punctuation_changes.append({'evidence_id': evidence.get('evidence_id'),
+                        'original_display': original, 'normalized_display': normalized,
+                        'words_and_numbers_unchanged': True})
+    data.setdefault('audit', {})['display_punctuation_normalization'] = {
+        'scope': 'Media-claim display only; frozen claims, sources and netizen comments unchanged',
+        'changes': punctuation_changes}
     apply_raw_public_top_audit(data)
     enrich_viewpoint_titles(data)
     data.setdefault("audit", {})["writing_rules_sha256"] = writing_rules_sha256()

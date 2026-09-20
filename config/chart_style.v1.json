@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "topic_distribution": {
+    "width": 1100,
+    "minimum_height": 700,
+    "row_height": 92,
+    "bar_color": "#17365D",
+    "axis_color": "#B7B7B7",
+    "text_color": "#333333",
+    "background": "#FFFFFF",
+    "sort": "descending_stable",
+    "label_unit": "万",
+    "decimals": 1,
+    "internal_title": false,
+    "label_width": 320,
+    "font_size": 24,
+    "wrap_labels": true
+  }
+}

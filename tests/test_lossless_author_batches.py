@@ -9,6 +9,14 @@ from cwh_author_batches import partition_author_packet, synthesis_packet, apply_
 import run_cwh_compiled_worker as worker
 from cwh_host_research import HostModelError
 import cwh_author_batches as author_batches
+from cwh_claim_synthesis import flat_packet
+
+
+def flat_response():
+    return {'heading': '认可动态判断', 'selected': [
+        {'key': 'k1', 'heading': '认可判断甲', 'claim_ids': ['c1']},
+        {'key': 'k2', 'heading': '建议判断乙', 'claim_ids': ['c2'],
+         'thin_reason': '当前只有一个独立主体'}], 'excluded': []}
 
 
 def fixture():
@@ -37,6 +45,60 @@ def test_partition_preserves_all_original_segments_and_order():
     assert [item for group in groups for item in group['items']] == original['items']
     assert all(len(json.dumps(group, ensure_ascii=False, separators=(',', ':'))) <= 600 for group in groups)
     assert packet == original
+
+
+def test_default_batches_bound_work_for_all_models_without_truncating():
+    packet = {'topic': '通用题', 'items': [{'id': f'r{i}', 'content': '完整原文' * 900} for i in range(8)]}
+    groups = partition_author_packet(packet)
+    assert max(len(group['items']) for group in groups) <= 3
+    assert [item for group in groups for item in group['items']] == packet['items']
+    assert all(len(json.dumps(group, ensure_ascii=False, separators=(',', ':'))) <= 20000 for group in groups)
+
+
+def test_synthesis_feedback_is_routed_without_dropping_article_errors():
+    from cwh_author_batches import is_synthesis_feedback
+    assert is_synthesis_feedback('[议题] Formal selection has 13 independent voices')
+    assert is_synthesis_feedback('[议题] Flat synthesis repeated claim ID: c1')
+    assert not is_synthesis_feedback('[议题] speaker missing from original quote')
+    assert not is_synthesis_feedback('[议题] contradictory interpretation without source support')
+
+
+def test_literal_claim_feedback_only_invalidates_the_affected_batch():
+    from cwh_author_batches import article_feedback_for_ids
+    error = '[动态议题] w11 claim[0] role missing from selected quote'
+    assert article_feedback_for_ids([error], ['r1', 'r2']) == []
+    assert article_feedback_for_ids([error], ['w10', 'w11']) == [error]
+    unscoped = 'Unknown article coverage problem'
+    assert article_feedback_for_ids([unscoped], ['r1']) == [unscoped]
+    assert article_feedback_for_ids(['Formal selection has 13 independent voices'], ['r1']) == []
+
+
+def test_synthesis_feedback_changes_selection_packet_only():
+    packet, decisions, _ = fixture()
+    request = synthesis_packet(packet, decisions)
+    before, mapping = flat_packet(request)
+    request['synthesis_validation_feedback'] = ['Formal selection has 13 independent voices']
+    after, after_mapping = flat_packet(request)
+    assert mapping == after_mapping
+    assert after.pop('synthesis_validation_feedback') == request['synthesis_validation_feedback']
+    assert after == before
+
+
+def test_many_cached_batches_can_resume_without_impossible_fixed_reservations(monkeypatch, tmp_path):
+    packet = {'topic': '动态议题', 'items': [{'id': f'r{i}', 'content': '原文'} for i in range(20)]}
+    groups = [{'items': [row]} for row in packet['items']]
+    deadlines = []
+    def cached(packets, prompt, command, workspace, deadline, **kwargs):
+        remaining = deadline - time.monotonic()
+        deadlines.append(remaining)
+        assert 15 < remaining < 90
+        return [{'items': [{'id': packets[0]['items'][0]['id'], 'decision': 'excluded',
+                            'reason': '原生缓存判断', 'claims': []}]}], {'seconds': 0, 'cache_reused': True}
+    monkeypatch.setattr(worker, 'author_topic_decisions', cached)
+    result, run = worker.review_author_article_batches(packet, groups, '', [], tmp_path,
+        time.monotonic() + 90, reuse_cache=True, feedback=[], maximum_request_seconds=90)
+    assert len(deadlines) == len(result['items']) == 20
+    assert run['synthesis_run']['model_invoked'] is False
 
 
 def test_single_oversized_article_is_not_truncated():
@@ -132,13 +194,12 @@ def test_oversized_author_runs_sequential_full_batches_then_native_synthesis(mon
     packet = {'topic': '动态议题', 'items': [{'id': f'r{i}', 'content': text, 'origin': 'raw_monitoring'} for i in range(8)]}
     calls = []
     def model(request, prompt, command, workspace, label, timeout, reuse_cache):
-        assert 0 < timeout <= 90
+        assert 0 < timeout <= (150 if label == 'topic-synthesis' else 180)
         calls.append((copy.deepcopy(request), label))
         if label == 'topic-synthesis':
-            assert 'eligible_items' in request
-            return {'heading': '建议优化配置', 'clusters': [{'key': 'all', 'heading': '建议协调实际需求'}],
-                'items': [{'id': row['id'], 'decision': 'eligible', 'reason': '不同独立来源判断',
-                          'claim_clusters': [{'index': 0, 'cluster': 'all'}]} for row in request['eligible_items']]}, {'session_id': label, 'seconds': 1}
+            assert 'candidates' in request
+            return {'heading': '建议优化配置', 'selected': [{'key': 'all', 'heading': '建议协调实际需求',
+                'claim_ids': [row['id'] for row in request['candidates']]}], 'excluded': []}, {'session_id': label, 'seconds': 1}
         assert all(''.join(seg['text'] for seg in row['segments']) == text for row in request['items'])
         assert all(row['id'] in prompt for row in request['items'])
         assert '“items”' not in prompt  # no host answers embedded
@@ -184,17 +245,19 @@ def test_completed_invalid_json_feedback_is_recoverable_but_transport_failure_is
 
 
 def test_invalid_synthesis_repairs_only_summary_preserving_native_claims(tmp_path):
-    packet, decisions, valid = fixture()
+    packet, decisions, _ = fixture()
+    valid = flat_response()
     request = synthesis_packet(packet, decisions)
     invalid = copy.deepcopy(valid)
-    invalid['items'][0]['claims'] = [{'claim': '模型改写不允许进入原判断'}]
+    invalid['claims'] = [{'claim': '模型改写不允许进入原判断'}]
     calls = []
     def model(packet, prompt, command, workspace, label, timeout, reuse_cache):
         calls.append((copy.deepcopy(packet), label, timeout, reuse_cache))
         return (invalid if len(calls) == 1 else valid), {'session_id': label, 'seconds': 2}
     result, run = native_topic_synthesis(request, decisions, [], tmp_path, 90, model, reuse_cache=True)
     assert [row[1] for row in calls] == ['topic-synthesis', 'synthesis-shape-repair']
-    assert calls[0][0] == calls[1][0] == request
+    assert calls[0][0] == flat_packet(request)[0]
+    assert calls[1][0] == {**calls[0][0], 'previous_synthesis': invalid}
     assert calls[1][2] <= 45 and calls[1][3] is False
     assert result['items'][0]['claims'][0]['claim'] == decisions[0]['claims'][0]['claim']
     assert result['transport_repairs'][-1]['original_response'] == invalid
@@ -224,7 +287,8 @@ def test_synthesis_index_feedback_names_exact_item_and_missing_claim():
 
 
 def test_synthesis_retry_workspace_retains_hash_bound_original_inputs(tmp_path):
-    packet, decisions, valid = fixture()
+    packet, decisions, _ = fixture()
+    valid = flat_response()
     request = synthesis_packet(packet, decisions)
     def model(*args, **kwargs):
         return valid, {'session_id': 'native', 'seconds': 1}

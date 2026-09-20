@@ -70,8 +70,9 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             root = Path(temp)
             chart_dir = root / "charts"
             chart_dir.mkdir()
-            (chart_dir / "trend_distribution_system.png").write_bytes(b"trend")
-            (chart_dir / "topic_distribution_system.png").write_bytes(b"topic")
+            from PIL import Image
+            Image.new('RGB', (20, 20), 'white').save(chart_dir / "trend_distribution_system.png")
+            Image.new('RGB', (20, 20), 'navy').save(chart_dir / "topic_distribution_system.png")
             data = {
                 "statistics": {"by_platform": {}, "by_date": {}},
                 "topic_stats": [],
@@ -83,17 +84,18 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
                 }],
             }
             FORMALIZE.ensure_docx_chart_images(data, root)
-        self.assertEqual(data["artifacts"]["chart_authority"], "mixed_system_and_program_fallback")
+        self.assertEqual(data["artifacts"]["chart_authority"], "baseline_template_without_reviewed_wordcloud")
 
     def test_stale_wordcloud_path_does_not_mask_copied_pipeline_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             chart_dir = root / "charts"
             chart_dir.mkdir()
-            (chart_dir / "trend_distribution_system.png").write_bytes(b"trend")
-            (chart_dir / "topic_distribution_system.png").write_bytes(b"topic")
+            from PIL import Image
+            Image.new('RGB', (20, 20), 'white').save(chart_dir / "trend_distribution_system.png")
+            Image.new('RGB', (20, 20), 'navy').save(chart_dir / "topic_distribution_system.png")
             pipeline = chart_dir / "hotword_distribution_pipeline.png"
-            pipeline.write_bytes(b"reviewed-pipeline-wordcloud")
+            Image.new('RGB', (20, 20), 'navy').save(pipeline)
             data = {
                 "statistics": {"by_platform": {}, "by_date": {}},
                 "topic_stats": [],
@@ -103,7 +105,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
             charts = FORMALIZE.ensure_docx_chart_images(data, root)
         self.assertEqual(charts["hotword_distribution"], str(pipeline))
         self.assertEqual(data["artifacts"]["wordcloud_image"], str(pipeline))
-        self.assertEqual(data["artifacts"]["chart_authority"], "monitoring_system_assets_plus_pipeline_wordcloud")
+        self.assertEqual(data["artifacts"]["chart_authority"], "baseline_template_plus_reviewed_wordcloud")
 
     def test_unreviewed_hotword_rows_do_not_authorize_pipeline_wordcloud(self) -> None:
         self.assertFalse(FORMALIZE.reviewed_hotword_pipeline_ready({
@@ -272,8 +274,8 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         }]}}
         text = "".join(FORMALIZE.overseas_media_body_paragraphs(data))
         self.assertIn("境外媒体以事实性报道为主", text)
-        self.assertIn("本轮未取得可引用的评论性文章", text)
-        self.assertIn("本轮已审核材料", text)
+        self.assertIn("暂无评论性文章", text)
+        self.assertIn("数据周期内", text)
         self.assertNotIn("一是", text)
 
     def test_interpretation_follows_factual_lead_without_category_numbering(self) -> None:
@@ -287,7 +289,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         self.assertIn("相关解读如下", paragraphs[0])
         self.assertNotIn("以事实性报道为主", paragraphs[0])
         self.assertNotIn("围绕会议议题的政策影响展开解读", paragraphs[1])
-        self.assertTrue(paragraphs[1].startswith('媒体乙文章《政策解读》称，'))
+        self.assertTrue(paragraphs[1].startswith('媒体乙《政策解读》称，'))
         self.assertNotIn("一是事实性报道", text)
         self.assertNotIn("二是解读性报道", text)
 
@@ -358,7 +360,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
         data['appendices']['overseas_reports'] = [rows[0]]
         self.assertEqual(1, len(FORMALIZE.representative_overseas_rows(data)))
         text = ''.join(FORMALIZE.overseas_media_body_paragraphs(data))
-        self.assertIn('香港（媒体名称待核）文章', text)
+        self.assertIn('香港（媒体名称待核）《', text)
 
     def test_existing_story_dedup_prefers_named_mirror_without_mutating_raw_rows(self) -> None:
         import copy
@@ -483,7 +485,7 @@ class CwhOverseasFormalizationTests(unittest.TestCase):
                'summary_cn': '政策效果仍取决于地方资金安排。'}
         original = json.loads(json.dumps(row))
         text = ''.join(FORMALIZE.overseas_media_body_paragraphs({'appendices': {'overseas_reports': [row]}}))
-        self.assertIn('文章《公共服务政策的实施条件》称，政策效果仍取决于地方资金安排', text)
+        self.assertIn('境外媒体甲《公共服务政策的实施条件》称，政策效果仍取决于地方资金安排', text)
         self.assertEqual(original, row)
 
 

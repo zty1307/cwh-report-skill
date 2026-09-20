@@ -34,3 +34,20 @@ def test_changed_raw_capture_is_rejected(tmp_path):
     raw.write_text('{}', encoding='utf-8')
     with pytest.raises(ValueError, match='changed'):
         validate_capture_rows(data)
+
+
+def test_empty_response_without_parent_title_preserves_capture_without_inventing_parent(tmp_path):
+    gid = '7000000000000000001'
+    raw = tmp_path / 'empty.json'
+    payload = {'message': 'success', 'has_more': False, 'group': {'group_id': int(gid)}, 'data': []}
+    raw.write_text(json.dumps({'status': 200, 'body': json.dumps(payload)}), encoding='utf-8')
+    checks = [{'source_id': 'toutiao_public_comments', 'status': 'actual_comment_response_requires_normalization',
+               'seed_url': f'https://www.toutiao.com/article/{gid}/', 'raw_file': str(raw)}]
+    normalized = normalize({'checks': checks}, '2030-01-01', '2030-01-01')
+    assert normalized['rows'] == normalized['posts'] == []
+    assert normalized['raw_captures'][0]['visible_top_level_rows'] == 0
+    assert normalized['raw_captures'][0]['parent_title_status'] == 'unavailable_no_comment_rows'
+    payload['group']['group_id'] = int(gid) + 1
+    raw.write_text(json.dumps({'status': 200, 'body': json.dumps(payload)}), encoding='utf-8')
+    with pytest.raises(ValueError, match='different parent'):
+        normalize({'checks': checks}, '2030-01-01', '2030-01-01')

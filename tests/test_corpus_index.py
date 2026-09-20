@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from prepare_cwh_corpus_index import prepare_corpus_index, complete_corpus_deferrals
+from prepare_cwh_corpus_index import prepare_corpus_index, complete_corpus_deferrals, load_reading_aliases
 from complete_cwh_evidence_structure import complete_analysis_structure
 from run_cwh_resumable_pipeline import validate_analysis_bundle
 
@@ -11,6 +11,73 @@ from run_cwh_resumable_pipeline import validate_analysis_bundle
 def corpus():
     return {"candidates": [{"record_id": f"r{i}", "title": f"议题分析{i}", "source": f"来源{i}",
                              "url": f"https://example.test/{i}", "topic_hits": [1], "content": f"完整原文{i}"} for i in range(15)]}
+
+
+def test_auto_intake_aliases_reach_reading_order(tmp_path):
+    topics = ['研究推进某项公共服务改革']
+    generated = tmp_path / 'run_metadata.json'
+    generated.write_text(json.dumps({'topic_titles': topics, 'topic_aliases': [['服务改革']]}), encoding='utf-8')
+    aliases = load_reading_aliases('', generated, topics)
+    data = {'candidates': [
+        {'record_id': 'bulletin', 'title': topics[0], 'source': '甲', 'topic_hits': [1], 'content': topics[0]},
+        {'record_id': 'analysis', 'title': '如何改善服务', 'source': '乙', 'topic_hits': [1],
+         'content': '某大学教授赵明向行业报记者表示，服务改革有助于提高资源使用效率。'}]}
+    source = tmp_path / 'corpus.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, topics, aliases).read_text('utf-8'))
+    assert aliases == {topics[0]: ['服务改革']}
+    assert index['topics'][0]['shortlist'][0]['record_id'] == 'analysis'
+    assert index['topics'][0]['shortlist'][0]['professional_attribution_hint_count'] == 1
+
+
+def test_topic_title_lends_context_to_professional_says_but_not_other_topic(tmp_path):
+    topics = ['教育政策', '法规调整']
+    text = '研究所所长张明说，服务供给应随人口结构变化作动态调整。'
+    data = {'topic_aliases': [['教育政策'], ['法规调整']], 'candidates': [
+        {'record_id': 'law', 'title': '法规调整专家解读', 'account': '法务', 'source': '公众号',
+         'topic_hits': [1, 2], 'content': '教育政策写在背景中。\n' + text},
+        {'record_id': 'edu', 'title': '教育政策进展访谈', 'account': '教育媒体', 'source': '公众号',
+         'topic_hits': [1], 'content': text}]}
+    source = tmp_path / 'corpus.json'
+    source.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    before = source.read_bytes()
+    index = json.loads(prepare_corpus_index(source, data, topics).read_text('utf-8'))
+    ordered = index['topics'][0]['shortlist']
+    assert ordered[0]['record_id'] == 'edu'
+    assert ordered[0]['professional_attribution_hint_count'] == 1
+    assert next(x for x in ordered if x['record_id'] == 'law')['professional_attribution_hint_count'] == 0
+    assert source.read_bytes() == before
+    assert {r['record_id'] for r in ordered} == {'law', 'edu'}
+    assert json.loads(Path(ordered[0]['full_text_path']).read_text('utf-8'))['content'] == text
+
+
+def test_multitopic_title_cannot_lend_unrelated_professional_context(tmp_path):
+    from prepare_cwh_corpus_index import professional_quote_hint
+    text = '教育政策背景。\n研究所所长张明说，法规调整应完善行政程序。'
+    assert professional_quote_hint(text, ['教育政策']) == 0
+    assert professional_quote_hint(text, ['法规调整']) == 1
+    data = {'topic_aliases': [['教育政策'], ['法规调整']], 'candidates': [
+        {'record_id': 'mix', 'title': '教育政策与法规调整综述', 'source': '综合媒体',
+         'topic_hits': [1, 2], 'content': text}]}
+    source = tmp_path / 'corpus.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, ['教育政策', '法规调整']).read_text('utf-8'))
+    assert index['topics'][0]['shortlist'][0]['professional_attribution_hint_count'] == 0
+
+
+def test_external_aliases_remain_authoritative_and_stale_order_is_rejected(tmp_path):
+    auto, explicit = tmp_path / 'auto.json', tmp_path / 'explicit.json'
+    auto.write_text(json.dumps({'topic_titles': ['甲', '乙'], 'topic_aliases': [['自动甲'], ['自动乙']]}), encoding='utf-8')
+    explicit.write_text(json.dumps({'topic_titles': ['甲', '乙'], 'topic_aliases': [['明确甲'], ['明确乙']]}), encoding='utf-8')
+    assert load_reading_aliases(str(explicit), auto, ['甲','乙']) == {'甲': ['明确甲'], '乙': ['明确乙']}
+    assert load_reading_aliases('', auto, ['乙','甲']) == {}
+    assert load_reading_aliases(str(tmp_path / 'missing.json'), auto, ['甲','乙']) == {}
+
+
+def test_corpus_handoff_keeps_current_literal_aliases():
+    from raw_system_workbook_pipeline import build_public_article_evidence_corpus
+    result = build_public_article_evidence_corpus([], {}, {'topic_titles': ['改革议题'], 'topic_aliases': [['改革政策']]})
+    assert result['topic_aliases'] == [['改革政策']]
 
 
 def test_index_retains_all_raw_ids_and_separate_reading_order(tmp_path):
@@ -73,6 +140,33 @@ def test_bounded_deferral_never_calls_unread_records_reviewed(tmp_path):
     assert any("未逐条审核" in x for x in validate_analysis_bundle(target, ["议题"], require_semantic_review=False, allow_deferred_corpus=True))
 
 
+def test_reading_shortfall_can_deliver_only_with_exact_index_and_explicit_gap(tmp_path):
+    from cwh_available_delivery import prepare_available_delivery
+    raw = corpus()
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(raw), encoding='utf-8')
+    prepare_corpus_index(source, raw, ['议题'])
+    row = {'topic': '议题', 'reviewed_record_ids': ['r0'], 'retained_record_ids': [],
+           'excluded': [{'record_id': 'r0', 'reason': '实际原文审核后排除'}]}
+    data = complete_corpus_deferrals({'research_audit': {'domestic_media_research': {
+        'public_article_corpus_review': {'topic_reviews': [row]}}}}, raw, ['议题'])
+    target = tmp_path / 'draft.json'
+    target.write_text(json.dumps(data), encoding='utf-8')
+    def errors():
+        return validate_analysis_bundle(target, ['议题'], require_semantic_review=False, allow_deferred_corpus=True)
+    assert any('未逐条审核' in e for e in errors())
+    available = prepare_available_delivery(data)
+    target.write_text(json.dumps(available), encoding='utf-8')
+    assert not any('未逐条审核' in e for e in errors())
+    assert errors()  # All other source/mapping checks are still enforced.
+    assert available['metadata']['research_budget_gaps']
+    reviewed = available['research_audit']['domestic_media_research']['public_article_corpus_review']['topic_reviews'][0]
+    assert reviewed['reviewed_record_ids'] == ['r0']
+    reviewed['deferred_record_ids'].pop()
+    target.write_text(json.dumps(available), encoding='utf-8')
+    assert any('未逐条审核' in e for e in errors())
+
+
 def test_professional_body_hint_beats_generic_analysis_title_without_excluding_rows(tmp_path):
     data = corpus()
     data['candidates'][0].update(title='某政策最新部署', content='某研究院副院长张明表示，制度覆盖须保留实际就业群体的适用条件。')
@@ -114,6 +208,24 @@ def test_reasoning_reading_hint_does_not_use_distant_unrelated_analysis():
     from prepare_cwh_corpus_index import reasoning_reading_hint
     assert reasoning_reading_hint('公共服务布局最新情况。' + '无关信息。' * 100 + '预计另一产业需求增长。', ['公共服务布局']) == 0
     assert reasoning_reading_hint('公共服务布局实际效果取决于投入。' * 10, ['公共服务布局']) == 3
+
+
+def test_long_agenda_does_not_hide_a_declared_short_policy_alias():
+    from prepare_cwh_corpus_index import reasoning_reading_hint
+    assert reasoning_reading_hint('公共交通改善的效果取决于末端衔接。',
+                                  ['研究城市公共交通服务体系建设有关工作', '公共交通']) == 1
+
+
+def test_full_agenda_title_does_not_outrank_policy_reasoning(tmp_path):
+    topic = '听取城市公共交通服务体系建设情况汇报'
+    data = {'candidates': [
+        {'record_id': 'bulletin', 'title': topic, 'source': '甲', 'topic_hits': [1], 'content': '会议听取公共交通有关情况汇报。'},
+        {'record_id': 'analysis', 'title': '公共交通如何改善', 'source': '乙', 'topic_hits': [1], 'content': '公共交通改善的实际效果取决于末端接驳和资金安排。'}]}
+    source = tmp_path / 'public_article_evidence.json'
+    source.write_text(json.dumps(data), encoding='utf-8')
+    index = json.loads(prepare_corpus_index(source, data, [topic], {topic: ['公共交通']}).read_text('utf-8'))
+    assert [row['record_id'] for row in index['topics'][0]['shortlist']] == ['analysis', 'bulletin']
+    assert len(index['topics'][0]['record_ids']) == 2
 
 
 def test_raw_source_hydration_only_fills_missing_exact_fields():

@@ -39,7 +39,7 @@ def compact_authoring_references(schema_text: str, registry_text: str, topic_pla
         "每次真实查询保存后端、查询、时间、总结果数、URL快照和候选ID；快照每条URL均须判定。不能编造搜索或将访问失败写为无结果。",
         "稳定来源按本议题分组任务逐项留痕，hit需要web候选ID；平台无结果必须有平台定向查询。等待登录记录terminal=false及恢复动作。",
         "对eligible网页候选读取全文并核验页面发布时间在监测期内，保留完整文本快照；搜索摘要不能充当全文。",
-        "按不同观点家族聚类，通常至少4个独立声音、2个成熟观点簇，每簇至少2声音及120汉字；单条观点通常45至120字，不能为凑数填充。",
+        "按不同观点家族聚类，通常至少4个独立声音、2个成熟观点簇，每簇至少2声音及120汉字；单条观点通常50至120字（软目标，不凑字、不截断），不能为凑数填充。",
         "缺证据如实记录evidence_shortfall、single_cluster_exception或thin_cluster_exception及reason/search_evidence/reviewed_by，不能自动视为通过。",
         "每条证据只归因于一个真实主体，保留含主体和观点的连续source_excerpt。formal_claim不超出原文，不拼接跨段引文或强化因果结论。",
         "优先选具名专家、专业机构及含具体机制的媒体判断；是否为独立解读、是否有实质论据及实际讨论对象，按以下共享选材规则逐条核对，不按金融、消费等话题词直接排除。",
@@ -48,5 +48,8 @@ def compact_authoring_references(schema_text: str, registry_text: str, topic_pla
         "只提交原子观点、归因、引文、简洁态度标题。宿主生成details、编号、句式和哈希；不要写报告、工作台或独立审核结论。",
         "预算为上限，不是搜索配额；按研究计划的停止条件保留实际过程，未完成不得冒称饱和。最终仍由原有完整门禁决定是否接受。"
     ] + [writing_rules()['viewpoint'][key] for key in
-         ('interpretation_eligibility_rule', 'meeting_reference_rule', 'selection_rule',
-          'claim_composition_rule', 'cluster_structure_rule', 'heading_support_rule')]}
+         ('interpretation_eligibility_rule', 'source_reasoning_quality_rule', 'meeting_reference_rule', 'selection_rule',
+          'claim_composition_rule', 'claim_unit_rule', 'paragraph_pairing_rule',
+          'cluster_structure_rule', 'heading_support_rule')]
+        + ['可选句式，不是必填栏目；只按实际原文选用，不照模板编造事实：'
+           + '；'.join(writing_rules()['viewpoint']['composition_frames'])]}

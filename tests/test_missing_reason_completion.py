@@ -114,6 +114,41 @@ def test_plain_timestamp_source_header_excludes_outside_period_without_editing_s
     assert packet['items'][0]['content'] == content
 
 
+def test_malformed_reason_gets_one_local_retry_inside_original_budget(monkeypatch, tmp_path):
+    from cwh_host_research import SemanticResponseError
+    packet, decision = fixture()
+    before = copy.deepcopy(decision)
+    calls = []
+    def model(request, prompt, command, workspace, label, timeout, **kwargs):
+        calls.append((copy.deepcopy(request), label, timeout))
+        if len(calls) == 1:
+            raise SemanticResponseError('Unescaped quote', {'session_id': 'bad', 'seconds': 3})
+        return {'items': [{'id': 'r1', 'reason': '原文机制'}]}, {'session_id': 'good', 'seconds': 2}
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    result, run = repair_missing_reasons(packet, decision, [], tmp_path, 45)
+    assert calls[0][0] == calls[1][0]
+    assert calls[1][2] <= calls[0][2] <= 45
+    assert run['seconds'] == 5
+    assert result['transport_repairs'][0]['completion_responses'][0]['invalid_response_run']['session_id'] == 'bad'
+    assert decision == before
+
+
+@pytest.mark.parametrize('kind', ['syntax', 'timeout'])
+def test_reason_repair_never_loops_or_retries_transport(monkeypatch, tmp_path, kind):
+    from cwh_host_research import SemanticResponseError, HostModelError
+    packet, decision = fixture()
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(1)
+        if kind == 'syntax':
+            raise SemanticResponseError('bad JSON', {'session_id': str(len(calls))})
+        raise HostModelError('timeout', 124)
+    monkeypatch.setattr('cwh_host_research.semantic_json', model)
+    with pytest.raises((SemanticResponseError, HostModelError)):
+        repair_missing_reasons(packet, decision, [], tmp_path, 45)
+    assert len(calls) == (2 if kind == 'syntax' else 1)
+
+
 @pytest.mark.parametrize('content', [
     '文章正文于2026-08-13 17:07讨论决定。\n来源：真实媒体',
     'https://example.org/2026-08-13\n来源：真实媒体',

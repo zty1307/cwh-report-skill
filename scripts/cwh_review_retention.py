@@ -16,14 +16,17 @@ def retain_reviewed_content(original, initial):
     result = copy.deepcopy(original)
     current = {ev['evidence_id']: ev for _, ev in evidence_rows(result)}
     actions, rejected = [], set()
+    draft_issues = validate_analysis_mapping(original, require_semantic_review=False)['issues']
     for identity, review in reviews.items():
-        if review['verdict'] == 'fully_supported':
+        hard_issues = [i for i in draft_issues if i.get('evidence_id') == identity
+                       and i['code'] in {'claim_adds_numbers', 'claim_adds_quoted_terms'}]
+        if review['verdict'] == 'fully_supported' and not hard_issues:
             continue
         revision = review.get('revision')
         usable = (isinstance(revision, dict) and revision.get('verdict') == 'fully_supported'
                   and isinstance(revision.get('formal_claim'), str) and revision['formal_claim'].strip()
                   and isinstance(revision.get('rationale'), str) and revision['rationale'].strip())
-        issues = []
+        issues = hard_issues
         if usable:
             trial = copy.deepcopy(result)
             ev = next(ev for _, ev in evidence_rows(trial) if ev['evidence_id'] == identity)
@@ -38,6 +41,8 @@ def retain_reviewed_content(original, initial):
                                'message': 'Reviewer revision still contains an unexpanded meeting reference'})
         action = {'evidence_id': identity, 'original_review': copy.deepcopy(review),
                   'action': 'narrowed' if usable else 'excluded', 'draft_gate_issues': issues}
+        if hard_issues:
+            action['host_reference_gate'] = 'Native verdict retained verbatim; unsupported literal claim excluded unless a valid native revision exists'
         if usable:
             current[identity]['formal_claim'] = revision['formal_claim'].strip()
         else:
@@ -69,6 +74,11 @@ def retain_reviewed_content(original, initial):
         'reviewer_run_id': initial['reviewer_run_id'], 'actions': actions,
         'candidate_actions': candidate_actions,
         'scope': 'Actual rejected claims only; not zero-result research or semantic certification by controller'}
+    unreviewed = [a['evidence_id'] for a in actions if a['original_review'].get('host_unreviewed')]
+    if unreviewed:
+        result.setdefault('metadata', {}).setdefault('independent_review_gaps', []).append({
+            'unreviewed_evidence_ids': unreviewed,
+            'notice': f'{len(unreviewed)}条已提取观点未完成独立核验，保留原文和草稿，不进入本次正式正文。'})
     result = normalize_analysis(prepare_available_delivery(result))
     return result, actions
 
@@ -91,7 +101,10 @@ def retention_packet(repaired, initial, actions, run, source_hash):
         raw.append(row)
     final = compile_review(repaired, {'reviews': raw}, run, source_hash)
     for row in final['reviews']:
-        row['reviewer_run_id'] = initial['reviewer_run_id']
+        earlier = first[row['evidence_id']]
+        row.update(reviewed_by=earlier['reviewed_by'], reviewed_at=earlier['reviewed_at'],
+                   reviewer_run_id=earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+    final['reviewer_run_ids'] = list(initial.get('reviewer_run_ids') or [initial['reviewer_run_id']])
     final['repair_provenance'] = {
         'mode': 'reviewer_retention_v1',
         'original_source_bundle_sha256': initial['source_bundle_sha256'],
@@ -104,8 +117,14 @@ def retention_packet(repaired, initial, actions, run, source_hash):
 
 def validate_retention(original, repaired, initial, combined):
     expected, actions = retain_reviewed_content(original, initial)
+    grouping = (repaired.get('research_audit') or {}).get('post_review_grouping')
+    if grouping:
+        from cwh_verified_grouping import apply_grouping_audit
+        expected = apply_grouping_audit(expected, grouping)
     if expected != repaired:
         raise ValueError('Retention changed frozen sources, accepted content or actual rejection audit')
+    if set(combined['repair_provenance'].get('repaired_evidence_ids') or []) != {a['evidence_id'] for a in actions}:
+        raise ValueError('Retention repair list differs from actual review or literal-source gate')
     excluded = {a['evidence_id'] for a in actions if a['action'] == 'excluded'}
     if set(combined['repair_provenance'].get('excluded_evidence_ids') or []) != excluded:
         raise ValueError('Retention exclusion audit differs from actual rejected claims')
@@ -117,12 +136,13 @@ def validate_retention(original, repaired, initial, combined):
     for identity, row in final.items():
         earlier = first[identity]
         if earlier['verdict'] == 'fully_supported':
-            if row != {**earlier, 'reviewer_run_id': initial['reviewer_run_id']}:
+            if row != {**earlier, 'reviewer_run_id': earlier.get('reviewer_run_id') or initial['reviewer_run_id']}:
                 raise ValueError('Retention rewrote an accepted verdict or real reviewer')
         else:
             revision = earlier['revision']
             ev = next(ev for _, ev in evidence_rows(repaired) if ev['evidence_id'] == identity)
             if (row['verdict'] != 'fully_supported' or row['rationale'] != revision['rationale']
                     or ev['formal_claim'] != revision['formal_claim'].strip()
-                    or row['reviewer_run_id'] != initial['reviewer_run_id']):
+                    or row['reviewer_run_id'] != (earlier.get('reviewer_run_id') or initial['reviewer_run_id'])
+                    or row['reviewed_by'] != earlier['reviewed_by'] or row['reviewed_at'] != earlier['reviewed_at']):
                 raise ValueError('Retention changed independent narrowing certification')

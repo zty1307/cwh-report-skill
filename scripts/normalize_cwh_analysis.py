@@ -18,6 +18,7 @@ from cwh_pipeline_runtime import atomic_write_json
 from cwh_available_delivery import available_delivery, valid_gap
 from cwh_writing_rules import judgment_heading as canonical_judgment_heading
 from cwh_writing_rules import attribution_verb, formal_attribution, source_rank, writing_rules, writing_rules_sha256
+from cwh_writing_rules import normalize_display_quotation_marks
 
 
 STANCE_RE = re.compile("^(?:" + "|".join(re.escape(value) for value in writing_rules()["viewpoint"]["attribution_verbs"]) + ")")
@@ -28,17 +29,39 @@ def clean_sentence(value: Any) -> str:
     return text.rstrip("。；;，,")
 
 
+def terminated_sentence(value: str) -> str:
+    """Add display punctuation only; never append another stop after a full quote."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    if re.search(r'[。！？!?][”’"\u300d\u300f]*$', text):
+        return text
+    return text + '。'
+
+
 def judgment_heading(value: Any) -> str:
     """Use a neutral reported-judgment frame, never invent approval or criticism."""
     return canonical_judgment_heading(value)
 
 
 def evidence_sentence(row: dict[str, Any]) -> str:
-    claim = clean_sentence(row.get("formal_claim"))
+    claim = normalize_display_quotation_marks(clean_sentence(row.get("formal_claim")))
     if not claim:
         return ""
     subject = clean_sentence(formal_attribution(row))
     if not subject or claim.startswith(subject):
+        return claim
+    # Preserve a literal source sentence whose explicit attribution follows
+    # the ordinary reporting connector. Do not prepend that same name again.
+    connected = re.sub(r'^对此[，,]', '', claim, count=1)
+    if connected != claim and connected.startswith(subject) and STANCE_RE.match(connected[len(subject):]):
+        return claim
+    # A literal quotation may already close with its exact declared speaker.
+    # Keep that postposed attribution verbatim; do not prepend the same name
+    # a second time or strip any frozen claim/source text.
+    tail = re.search(r'[”’"」』]' + re.escape(subject) + r'(?:' +
+                     '|'.join(re.escape(v) for v in writing_rules()['viewpoint']['attribution_verbs']) + r')(?=$|[，,。；;：:])', claim)
+    if tail:
         return claim
     name = clean_sentence(row.get("speaker_name"))
     # Expand an existing exact name-only attribution; preserve the atomic claim
@@ -73,8 +96,8 @@ def assemble_cluster_details(cluster: dict[str, Any]) -> str:
         if not sentence or not signature or signature in seen:
             continue
         seen.add(signature)
-        parts.append(sentence)
-    return "。".join(parts) + ("。" if parts else "")
+        parts.append(terminated_sentence(sentence))
+    return "".join(parts)
 
 
 def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:

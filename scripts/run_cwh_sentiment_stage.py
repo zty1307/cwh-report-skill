@@ -689,7 +689,7 @@ def label_schema_text() -> str:
 
 每条可追溯评论还必须单独完成正式引用审核：填写 `ai_formal_include=true/false`、`ai_semantic_quality` 和 `ai_formal_reason`。仅当 `ai_formal_include=true` 时填写表达具体立场、诉求或判断的 `comment_heading`；禁止使用“关注+议题名称”代替观点判断。
 
-同一子议题有多条 `ai_formal_include=true` 的评论时，还必须为这些行填写完全一致的 `topic_comment_heading`，作为正文的唯一并列小标题。只有一条正式评论时可与 `comment_heading` 相同。
+`topic_comment_heading`为兼容索引列，使用本期同一子议题的完整题名，不作为正文小标题。每条正式引文须填写独立审核通过的`comment_heading`；同题同判断使用相同标题，不同诉求可分点。编译式评论流程自动填写索引，不让模型重复生成。
 """
 
 

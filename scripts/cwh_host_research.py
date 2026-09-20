@@ -17,11 +17,12 @@ from build_research_plan import policy_search_subject
 
 
 class HostModelError(RuntimeError):
-    def __init__(self, message, exit_code, *, category="", retry_after=""):
+    def __init__(self, message, exit_code, *, category="", retry_after="", run=None):
         super().__init__(message)
         self.exit_code = exit_code
         self.category = category
         self.retry_after = retry_after
+        self.run = run
 
 
 class SemanticResponseError(ValueError):
@@ -134,12 +135,12 @@ def invoke(command_template, prompt, workspace, label, timeout):
 
 
 def topic_search_tasks(plan, period):
-    subject = policy_search_subject(plan['topic'])
+    subject = plan.get('search_subject') or policy_search_subject(plan['topic'])
     tasks = [{"source_id": row["source_id"], "query": row["query"],
               "route": "public_platform" if row.get("tier") == "public_platform" else "stable_registry"}
              for row in plan["stable_source_tasks"] if row.get("must_check")]
     tasks.append({"source_id": "open_web", "query": f'{period["start"]} 国务院常务会议 {subject} 专家 解读', "route": "open_web"})
-    tasks.append({"source_id": "open_web", "query": f'{period["start"]} {subject} 国常会 (建议 OR 评论 OR 分析)', "route": "open_web"})
+    tasks.append({"source_id": "open_web", "query": f'{period["start"]} {subject} (建议 OR 评论 OR 分析)', "route": "open_web"})
     # Planned discovery lanes must reach the real observed search transport.
     academic = (plan.get("queries") or {}).get("academic_and_think_tank_viewpoints") or []
     if academic:
@@ -177,7 +178,16 @@ def collect_topic(plan, period, command_template, workspace, timeout):
               "禁止访问ydata.woa.com。所有查询执行后只回复done；任何工具失败直接保留错误，不重试。\n"
               + json.dumps(tasks, ensure_ascii=False, separators=(",", ":")))
     if log is None:
-        log, run = invoke(command_template, prompt, workspace, "search", timeout)
+        if timeout <= 0:
+            log = ''
+            path = workspace / 'search-not-invoked.jsonl'
+            path.write_text(log, encoding='utf-8')
+            now = utc_now()
+            run = {'session_id': str(uuid.uuid4()), 'model_invoked': False, 'exit_code': 124,
+                   'started_at': now, 'completed_at': now, 'log': str(path), 'seconds': 0,
+                   'reason': 'Discovery budget exhausted before call; queries were not executed'}
+        else:
+            log, run = invoke(command_template, prompt, workspace, "search", timeout)
     observations = observed_tools(log)
     records = []
     for number, task in enumerate(tasks, 1):
@@ -215,6 +225,8 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
                 return prior["result"], prior["run"]
         except (ValueError, AttributeError):
             pass
+    if timeout <= 0:
+        raise TimeoutError('No remaining semantic request budget and no matching completed cache')
     log, run = invoke(command, prompt + "\n" + payload, workspace, label, timeout)
     if run["exit_code"]:
         error = run.get("transport_error") or {}
@@ -223,7 +235,7 @@ def semantic_json(packet, prompt, command, workspace, label, timeout, *, reuse_c
         message = f'Model request failed: {run["exit_code"]}; {run["log"]}'
         if category:
             message = f'Model request failed: {category}' + (f'; retry after {retry_after}' if retry_after else '')
-        raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after)
+        raise HostModelError(message, run["exit_code"], category=category, retry_after=retry_after, run=run)
     try:
         result = response_object(log)
     except ValueError as exc:
