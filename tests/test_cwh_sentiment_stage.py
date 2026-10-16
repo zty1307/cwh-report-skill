@@ -203,7 +203,7 @@ class CwhSentimentStageTests(unittest.TestCase):
             self.assertEqual(second["report_comment_handoff"]["eligible_rows"], 1)
             self.assertEqual(second["report_comment_handoff"]["excluded_rows"], 1)
             self.assertEqual(second["status"], "ai_review_complete")
-            self.assertEqual(second["formal_sentiment_percentages"], "available")
+            self.assertEqual(second["formal_sentiment_percentages"], "withheld_by_policy")
 
     def test_missing_formal_use_review_cannot_enter_report_handoff(self) -> None:
         comments = [{

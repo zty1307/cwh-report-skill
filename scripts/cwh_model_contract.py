@@ -130,6 +130,8 @@ def build_task_payload(
         "fixed_writing_rules": str(WRITING_RULES_PATH),
         "writing_rules_sha256": writing_rules_sha256(),
         "writing_handoff": {
+            "speaker_eligibility_rule": writing_rules()["viewpoint"]["speaker_eligibility_rule"],
+            "attribution_body_rule": writing_rules()["viewpoint"]["attribution_body_rule"],
             "model_fields": ["heading", "summary", "speaker_name", "source_excerpt", "formal_claim", "semantic_review", "translation"],
             "script_fields": ["source_order", "details", "opening", "propagation_prose", "numbering", "comment_lead", "hotword_prose", "overseas_frames", "Word/Markdown layout"],
             "instruction": "Submit only the semantic fields required by this stage. Do not draft whole report sections or polish script-generated paragraphs. Preserve the source meaning and all qualifications.",

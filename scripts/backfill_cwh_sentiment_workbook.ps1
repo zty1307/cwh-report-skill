@@ -6,6 +6,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$policyPath = Join-Path $PSScriptRoot '../config/report_presentation_policy.v1.json'
+$presentationPolicy = Get-Content -LiteralPath $policyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($presentationPolicy.sentiment_percentages.mode -ne 'reviewed') {
+    throw '当前阶段情感百分比暂留空：禁止自动回填；真实评论及样本标签仍可保留。'
+}
 $base = (Resolve-Path -LiteralPath $BaseWorkbook).Path
 $summaryPath = (Resolve-Path -LiteralPath $SentimentSummary).Path
 $outputPath = [IO.Path]::GetFullPath($Output)

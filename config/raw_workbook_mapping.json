@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "channel_display_labels": {
     "domestic_mainstream": "境内主流媒体"
   },
-  "channel_display_label_basis": "用户指定基准表显示名；基准配套Excel中境内主流媒体逐日直接引用境内新闻列。仅为既有统计口径的展示名称，不代表对每条来源重新进行主流媒体资格判定；原始列名、公式及数量保留审计。",
+  "channel_display_label_basis": "2026-09-21用户确认：以细分渠道-日趋势为统计来源；境内主流媒体只取境内新闻-境内新闻，百家号、头条归新媒体。保留来源字段和归并审计，不根据历史人工调整值平衡渠道。",
   "file_patterns": {
     "total_heat": "^总[0-9]+-.*热度分析\\.xlsx$",
     "child_heat": "^子([1-9][0-9]*)(?:-|\\.xlsx$).*(?:热度分析\\.xlsx)?$",
@@ -20,6 +20,7 @@
   },
   "sheet_aliases": {
     "daily_trend": ["日趋势", "每日趋势", "天趋势"],
+    "detailed_daily_trend": ["细分渠道-日趋势", "细分渠道日趋势", "细分渠道—日趋势", "细分渠道－日趋势"],
     "public_articles": ["最热公号文章", "最热公号文章 （10w+）", "最热公号文章（10w+）", "公众文章最热样本", "公众文章"],
     "overseas_news": ["境外新闻", "境外新闻最新样本"]
   },
@@ -55,7 +56,7 @@
     "wechat": ["public_articles", "public_recommend", "public_comments"],
     "weibo": ["weibo"],
     "video_account": ["video_account"],
-    "other_new_media": ["domestic_app", "domestic_forum", "other_video", "x", "overseas_other", "douyin"]
+    "other_new_media": ["domestic_app", "domestic_forum", "other_video", "x", "overseas_other", "douyin", "baijiahao", "toutiao", "reddit"]
   },
   "child_groups": {
     "domestic_mainstream": ["domestic_news"],
@@ -71,7 +72,10 @@
       "x",
       "overseas_other",
       "video_account",
-      "douyin"
+      "douyin",
+      "baijiahao",
+      "toutiao",
+      "reddit"
     ]
   },
   "meeting_anchor_patterns": [
@@ -124,5 +128,59 @@
       "aliases": ["央视新闻", "央视网"],
       "reason": "同一中央广播电视总台新闻发布主体的公众号榜单账号族按一个来源席位计；不扩展到新闻联播等独立栏目账号"
     }
-  ]
+  ],
+  "daily_source_mode": "detailed_channels",
+  "detailed_daily_columns": {
+    "date": ["日期", "时间"],
+    "public_articles": ["公众文章"],
+    "public_recommend": ["公号-在看量（推荐量）", "公号-在看量", "公号-推荐量"],
+    "public_comments": ["公号-精选评论量", "精选评论量"],
+    "weibo": ["新浪微博", "微博"],
+    "domestic_app": ["境内APP", "国内APP", "新闻客户端"],
+    "x": ["X", "推特", "Twitter"],
+    "video_account": ["视频号发文", "视频号"],
+    "douyin": ["抖音"],
+    "domestic_news": ["境内新闻-境内新闻"],
+    "baijiahao": ["境内新闻-百度百家"],
+    "toutiao": ["境内新闻-头条"],
+    "forum_douban": ["境内论坛-豆瓣"],
+    "forum_other": ["境内论坛-境内论坛"],
+    "forum_xiaohongshu": ["境内论坛-小红书"],
+    "forum_zhihu": ["境内论坛-知乎"],
+    "video_huoshan": ["其他视频-火山"],
+    "video_kuaishou": ["其他视频-快手"],
+    "video_long": ["其他视频-长视频"],
+    "video_other_short": ["其他视频-其他短视频"],
+    "video_xigua": ["其他视频-西瓜"],
+    "overseas_news": ["境外新闻-境外新闻"],
+    "reddit": ["境外新闻-reddit"],
+    "facebook": ["境外其他-facebook"],
+    "tiktok": ["境外其他-tiktok"],
+    "youtube": ["境外其他-youtube"]
+  },
+  "detailed_daily_rollup": {
+    "date": ["date"],
+    "public_articles": ["public_articles"],
+    "public_recommend": ["public_recommend"],
+    "public_comments": ["public_comments"],
+    "weibo": ["weibo"],
+    "domestic_news": ["domestic_news"],
+    "domestic_app": ["domestic_app"],
+    "domestic_forum": ["forum_douban", "forum_other", "forum_xiaohongshu", "forum_zhihu"],
+    "other_video": ["video_huoshan", "video_kuaishou", "video_long", "video_other_short", "video_xigua"],
+    "overseas_news": ["overseas_news"],
+    "x": ["x"],
+    "overseas_other": ["facebook", "tiktok", "youtube"],
+    "video_account": ["video_account"],
+    "douyin": ["douyin"],
+    "baijiahao": ["baijiahao"],
+    "toutiao": ["toutiao"],
+    "reddit": ["reddit"]
+  },
+  "detailed_extra_headers": {
+    "baijiahao": "百家号",
+    "toutiao": "头条",
+    "reddit": "Reddit"
+  },
+  "ignored_detailed_summary_headers": ["境内新闻", "境内论坛", "其他视频", "境外新闻", "境外其他", "合计", "总量", "信息传播量"]
 }

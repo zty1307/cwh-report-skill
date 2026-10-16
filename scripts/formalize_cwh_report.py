@@ -437,6 +437,9 @@ def platform_count(stats: dict[str, Any], *names: str) -> int:
 
 
 def sentiment_ratio_cells(row: dict[str, Any]) -> list[str]:
+    from cwh_presentation_policy import sentiment_percentages_enabled
+    if not sentiment_percentages_enabled():
+        return ["", "", ""]
     if not formal_sentiment_row_ready(row):
         return ["待分析", "待分析", "待分析"]
     counts = row.get("sentiment") or {}

@@ -4,6 +4,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -269,11 +270,15 @@ def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
         evidence: list[str] = []
         heat_total: int | float | None = None
 
-        daily_sheet = matched_sheet(workbook, config["sheet_aliases"]["daily_trend"])
+        aliases, source_columns, rollup = daily_source_contract(config)
+        daily_sheet = matched_sheet(workbook, aliases)
+        if (daily_sheet is None and config.get("daily_source_mode") == "detailed_channels"
+            and matched_sheet(workbook, config["sheet_aliases"]["daily_trend"]) is not None):
+            raise PipelineError(f"{path.name}缺少细分渠道-日趋势；本期口径不能回退到普通日趋势，请提供细分渠道表。")
         if daily_sheet is not None:
             headers = [daily_sheet.cell(1, column).value for column in range(1, daily_sheet.max_column + 1)]
-            columns = matched_column_names(headers, config["daily_columns"])
-            missing = [name for name in config["daily_columns"] if name not in columns]
+            columns = matched_column_names(headers, source_columns)
+            missing = [name for name in source_columns if name not in columns]
             if not missing:
                 structural_roles.append("heat")
                 evidence.append(f"工作表“{daily_sheet.title}”包含完整日趋势字段")
@@ -284,7 +289,9 @@ def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
                     if raw_date in (None, ""):
                         continue
                     valid_rows += 1
-                    for canonical in CANONICAL_DAILY_COLUMNS[1:]:
+                    for canonical in source_columns:
+                        if canonical == "date":
+                            continue
                         number = to_number(daily_sheet.cell(row_index, columns[canonical] + 1).value)
                         if number is None:
                             heat_total = None
@@ -583,27 +590,77 @@ def resolve_columns(headers: list[Any], aliases: dict[str, list[str]], purpose: 
     return result
 
 
-def read_daily(path: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
+def daily_source_contract(config):
+    mode = config.get("daily_source_mode", "legacy_daily")
+    if mode == "legacy_daily":
+        return (config["sheet_aliases"]["daily_trend"], config["daily_columns"],
+                {key: [key] for key in CANONICAL_DAILY_COLUMNS})
+    if mode != "detailed_channels":
+        raise PipelineError(f"未知渠道口径：{mode}")
+    fields, rollup = config["detailed_daily_columns"], config["detailed_daily_rollup"]
+    assigned = [key for group in rollup.values() for key in group]
+    if Counter(assigned) != Counter(fields.keys()):
+        raise PipelineError("细分渠道映射必须恰好覆盖每个原始字段一次，不能遗漏或重复累加。")
+    return config["sheet_aliases"]["detailed_daily_trend"], fields, rollup
+
+
+def daily_output_columns(config):
+    return list(daily_source_contract(config)[2])
+
+
+def read_daily(path: Path, config: dict[str, Any], *, audit: list | None = None) -> list[dict[str, Any]]:
     workbook = load_workbook(path, data_only=True, read_only=False)
     try:
-        worksheet = find_sheet(workbook, config["sheet_aliases"]["daily_trend"], "日趋势")
+        aliases, source_columns, rollup = daily_source_contract(config)
+        detailed = config.get("daily_source_mode") == "detailed_channels"
+        purpose = "细分渠道-日趋势" if detailed else "日趋势"
+        worksheet = find_sheet(workbook, aliases, purpose + "（不允许回退普通日趋势）" if detailed else purpose)
         headers = [worksheet.cell(1, column).value for column in range(1, worksheet.max_column + 1)]
-        columns = resolve_columns(headers, config["daily_columns"], f"{path.name}/日趋势")
+        columns = resolve_columns(headers, source_columns, f"{path.name}/{purpose}")
+        duplicates = [h for h, n in Counter(normalize_text(h) for h in headers if h is not None).items() if n > 1]
+        if duplicates:
+            raise PipelineError(f"{path.name}/{purpose}存在重复字段：{duplicates}")
+        ignored = [str(h) for i, h in enumerate(headers) if h is not None and i not in columns.values()]
+        if detailed:
+            allowed = {normalize_text(h) for h in config.get("ignored_detailed_summary_headers", [])}
+            unknown = [h for h in ignored if normalize_text(h) not in allowed]
+            if unknown:
+                raise PipelineError(f"{path.name}/{purpose}存在未映射渠道：{unknown}；需确认归类，不能静默丢弃。")
         rows = []
+        source_rows, dates = [], set()
         for row_index in range(2, worksheet.max_row + 1):
             raw_date = worksheet.cell(row_index, columns["date"] + 1).value
             if raw_date in (None, ""):
                 continue
             row: dict[str, Any] = {"date": normalize_date(raw_date)[:10]}
-            for canonical in CANONICAL_DAILY_COLUMNS[1:]:
+            try:
+                date.fromisoformat(row["date"])
+            except ValueError as exc:
+                raise PipelineError(f"{path.name}/{purpose}/{row_index}行不是有效日期：{raw_date!r}") from exc
+            if row["date"] in dates:
+                raise PipelineError(f"{path.name}/{purpose}日期重复：{row['date']}")
+            dates.add(row["date"])
+            source_row = {"date": row["date"]}
+            for canonical in source_columns:
+                if canonical == "date":
+                    continue
                 value = worksheet.cell(row_index, columns[canonical] + 1).value
                 number = to_number(value)
-                if number is None:
-                    raise PipelineError(f"{path.name}/日趋势/{row_index}行/{canonical}不是有效数值：{value!r}")
-                row[canonical] = number
+                if number is None or not math.isfinite(number) or number < 0:
+                    raise PipelineError(f"{path.name}/{purpose}/{row_index}行/{canonical}不是有效计数：{value!r}")
+                source_row[canonical] = number
+            for key, fields in rollup.items():
+                if key != "date":
+                    row[key] = sum(source_row[field] for field in fields)
+            source_rows.append({"source_row": row_index, "values": source_row})
             rows.append(row)
         if not rows:
             raise PipelineError(f"{path.name}/日趋势没有有效数据行")
+        if audit is not None:
+            audit.append({"source_file": str(path.resolve()), "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "source_sheet": worksheet.title, "mode": config.get("daily_source_mode", "legacy_daily"),
+                "source_columns": {key: {"column": columns[key] + 1, "header": headers[columns[key]]} for key in columns},
+                "daily_rollup": copy.deepcopy(rollup), "ignored_summary_columns": ignored, "rows": source_rows})
         return rows
     finally:
         workbook.close()
@@ -1621,8 +1678,13 @@ def build_public_article_evidence_corpus(
 
 
 def summarize_daily(rows: list[dict[str, Any]], groups: dict[str, list[str]]) -> list[dict[str, Any]]:
+    assigned = [field for fields in groups.values() for field in fields]
+    if len(assigned) != len(set(assigned)):
+        raise PipelineError("同一个渠道不能重复计入多个传播类别。")
     summarized = []
     for row in rows:
+        if set(row) - {"date"} != set(assigned):
+            raise PipelineError("传播类别映射必须覆盖所有来源渠道，不能遗漏渠道或引用不存在的字段。")
         item: dict[str, Any] = {"date": row["date"]}
         for group_name, fields in groups.items():
             item[group_name] = sum(float(row[field]) for field in fields)
@@ -1736,8 +1798,9 @@ def build_normalized_bundle(
     public_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate_declared_topic_mapping(metadata)
-    total_daily = read_daily(inputs.total_heat, config)
-    child_daily = {index: read_daily(path, config) for index, path in inputs.child_heat.items()}
+    channel_source_audit = []
+    total_daily = read_daily(inputs.total_heat, config, audit=channel_source_audit)
+    child_daily = {index: read_daily(path, config, audit=channel_source_audit) for index, path in inputs.child_heat.items()}
 
     topic_titles = list(metadata.get("topic_titles") or [])
     if len(topic_titles) != len(child_daily):
@@ -1821,9 +1884,14 @@ def build_normalized_bundle(
             "classification_audit": list(inputs.classification_audit),
             "time_window_audit": time_window_audit,
         },
-        "daily_display_headers": DISPLAY_DAILY_HEADERS,
-        "canonical_daily_columns": CANONICAL_DAILY_COLUMNS,
+        "daily_display_headers": [
+            dict(zip(CANONICAL_DAILY_COLUMNS, DISPLAY_DAILY_HEADERS)).get(key)
+            or config["detailed_extra_headers"][key] for key in daily_output_columns(config)],
+        "canonical_daily_columns": daily_output_columns(config),
+        "channel_source_audit": channel_source_audit,
         "channel_mapping": {
+            "source_mode": config.get("daily_source_mode", "legacy_daily"),
+            "config_version": config.get("version"),
             "total_groups": config["total_groups"],
             "child_groups": config["child_groups"],
         },
@@ -2005,7 +2073,7 @@ def write_audit(
             else "- 境外候选尚待逐条AI语义审核；当前统计仍保留原始系统境外新闻数，不以脚本关键词筛选结果改写。"
         ),
         f"- 关键词、排除词、事件ID按本轮要求留空；词云页已写入{len(hotwords.get('selected') or [])}个经AI逐词审核并完成二次复核的热词和透明PNG。",
-        "- 情感比例没有原始逐条评论和专项分析结果，因此保持空白，未复制人工基准表比例。",
+        "- 当前阶段正式情感比例按展示策略保持空白；真实评论及样本标签保留，不复制人工基准表比例。",
         "",
         "## 输入文件自动识别",
         "",
@@ -2053,16 +2121,18 @@ def write_audit(
             "",
             "### 总事件",
             "",
-            "- 境内主流媒体 = 境内新闻。",
+            ("- 境内主流媒体 = 细分渠道-日趋势中的境内新闻-境内新闻；百家号、头条独立保留并计入新媒体。"
+             if normalized.get("channel_mapping", {}).get("source_mode") == "detailed_channels"
+             else "- 历史显式口径：境内主流媒体 = 境内新闻。"),
             "- 境外媒体 = 境外新闻。",
             "- 微信公众号 = 公众文章 + 公号在看量 + 公号精选评论量。",
             "- 新浪微博 = 新浪微博；视频号 = 视频号发文。",
-            "- 新闻客户端、论坛等 = 境内APP + 境内论坛 + 其他视频 + 推特/X + 境外其他 + 抖音。",
+            "- 新闻客户端、论坛等按channel_mapping.total_groups.other_new_media逐字段归并；细分口径包含百家号、头条、APP、论坛、其他视频、X、Reddit、境外其他社交渠道和抖音，父级汇总列不重复累加。",
             "",
             "### 子事件",
             "",
             "- 境内主流媒体 = 境内新闻；境外媒体 = 境外新闻。",
-            "- 新媒体 = 除境内新闻、境外新闻之外的其余11个有效渠道合计。",
+            "- 新媒体 = 微信公众号 + 新浪微博 + 视频号 + 其他新媒体；按同一细分映射计算。",
             f"- {len(normalized.get('children') or [])}个子事件维持独立查询口径，没有跨子事件去重，也没有强行求和为总事件。",
             "",
             "## 与人工基准表的数值核对",

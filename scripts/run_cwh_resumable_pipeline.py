@@ -136,7 +136,8 @@ def validate_data_workbook(path: Path, report_data: dict[str, Any]) -> list[str]
                 problems.append(f"子事件{idx}汇总C:F与报告权威数据不一致：{actual}≠{expected}")
             if sum(actual[:3]) != actual[3]:
                 problems.append(f"子事件{idx}汇总总量不等于三类传播量之和")
-            if not topic.get("sentiment_formal_ready"):
+            from report_rules import formal_sentiment_row_ready
+            if not formal_sentiment_row_ready(topic):
                 sentiment_values = [summary.cell(row, col).value for col in range(7, 11)]
                 if any(value not in (None, "") for value in sentiment_values):
                     problems.append(f"子事件{idx}情感样本未达门槛但工作簿G:J仍有值")

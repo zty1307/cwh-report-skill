@@ -396,9 +396,10 @@ class InputIdentificationTests(unittest.TestCase):
     def create_heat(self, name: str, total: int):
         workbook = Workbook()
         worksheet = workbook.active
-        worksheet.title = "日趋势"
-        worksheet.append(self.pipeline.DISPLAY_DAILY_HEADERS)
-        worksheet.append(["2026-01-01", total, *([0] * 12)])
+        worksheet.title = "细分渠道-日趋势"
+        fields = self.config["detailed_daily_columns"]
+        worksheet.append([aliases[0] for aliases in fields.values()])
+        worksheet.append(["2026-01-01" if key == "date" else total if key == "public_articles" else 0 for key in fields])
         workbook.save(self.root / name)
 
     def create_detail(self, name: str, sheet_name: str):

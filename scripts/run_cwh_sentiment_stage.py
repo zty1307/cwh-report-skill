@@ -850,6 +850,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stage_status = "ai_review_incomplete"
         percentage_status = "pending"
+    from cwh_presentation_policy import sentiment_percentages_enabled
+    if not sentiment_percentages_enabled():
+        percentage_status = "withheld_by_policy"
     audit: dict[str, Any] = {
         "schema_version": "1.0",
         "status": stage_status,
@@ -880,7 +883,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         audit["preparation"] = {"status": "not_run", "reason": "no row-level comment text"}
 
     if args.backfill_workbook:
-        if workbook_summary["status"] in {"ready_for_workbook_backfill", "partial_workbook_backfill"} and not result_blockers:
+        if not sentiment_percentages_enabled():
+            audit["workbook_backfill"] = {"status": "not_run", "reason": "当前阶段正式情感比例按配置留空；保留评论及样本标签。"}
+        elif workbook_summary["status"] in {"ready_for_workbook_backfill", "partial_workbook_backfill"} and not result_blockers:
             if not args.backfill_output:
                 raise ValueError("--backfill-output is required with --backfill-workbook")
             verification = out_dir / "sentiment_backfill_verification.json"

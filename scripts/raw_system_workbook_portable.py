@@ -174,9 +174,10 @@ def write_total_event(workbook: Workbook, data: dict[str, Any], chart_path: Path
     rows = event.get("summary") or []
     raw_rows = event.get("daily") or []
     worksheet = workbook.create_sheet("总事件")
+    raw_end = 14 + len(data["canonical_daily_columns"])
     worksheet.merge_cells("A2:H2")
     worksheet["A2"] = (data.get("metadata") or {}).get("event_sheet_title", "国务院常务会议")
-    worksheet.merge_cells("O2:AB2")
+    worksheet.merge_cells(start_row=2, start_column=15, end_row=2, end_column=raw_end)
     worksheet["O2"] = worksheet["A2"].value
     left_headers = ["日期", (data.get("channel_labels") or {}).get("domestic_mainstream", "境内主流媒体"), "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"]
     for column, header in enumerate(left_headers, 1):
@@ -205,14 +206,14 @@ def write_total_event(workbook: Workbook, data: dict[str, Any], chart_path: Path
     for column, key in enumerate((data.get("canonical_daily_columns") or [])[1:], 16):
         worksheet.cell(total_row, column, sum(number(row.get(key)) for row in raw_rows))
     style_range(worksheet, 2, 2, 1, 8, fill=BLUE, bold=True, size=13)
-    style_range(worksheet, 2, 2, 15, 28, fill=BLUE, bold=True, size=13)
+    style_range(worksheet, 2, 2, 15, raw_end, fill=BLUE, bold=True, size=13)
     style_range(worksheet, 3, 3, 1, 8, fill=GRAY, bold=True)
-    style_range(worksheet, 3, 3, 15, 28, fill=RAW_BLUE, bold=True, size=10)
+    style_range(worksheet, 3, 3, 15, raw_end, fill=RAW_BLUE, bold=True, size=10)
     style_range(worksheet, 4, 3 + len(rows), 1, 8)
-    style_range(worksheet, 4, 3 + len(rows), 15, 28, size=10)
+    style_range(worksheet, 4, 3 + len(rows), 15, raw_end, size=10)
     style_range(worksheet, total_row, total_row, 1, 8, fill=GREEN, bold=True)
-    style_range(worksheet, total_row, total_row, 15, 28, fill=GREEN, bold=True)
-    set_widths(worksheet, {1: 13, 2: 15, 3: 13, 4: 15, 5: 12, 6: 11, 7: 22, 8: 15, **{index: 13 for index in range(15, 29)}})
+    style_range(worksheet, total_row, total_row, 15, raw_end, fill=GREEN, bold=True)
+    set_widths(worksheet, {1: 13, 2: 15, 3: 13, 4: 15, 5: 12, 6: 11, 7: 22, 8: 15, **{index: 13 for index in range(15, raw_end + 1)}})
     worksheet.row_dimensions[2].height = 32
     worksheet.freeze_panes = "A4"
     image = ExcelImage(str(chart_path))
@@ -220,12 +221,15 @@ def write_total_event(workbook: Workbook, data: dict[str, Any], chart_path: Path
     worksheet.add_image(image, "A14")
 
 
-def write_child(workbook: Workbook, child: dict[str, Any], headers: list[str]) -> None:
+def write_child(workbook: Workbook, child: dict[str, Any], headers: list[str], canonical_columns=None) -> None:
+    from raw_system_workbook_pipeline import CANONICAL_DAILY_COLUMNS
+    canonical_columns = canonical_columns or CANONICAL_DAILY_COLUMNS
+    raw_end = 7 + len(canonical_columns)
     index = int(child.get("index") or len(workbook.sheetnames))
     worksheet = workbook.create_sheet(f"子事件{index}")
     worksheet.merge_cells("A2:E2")
     worksheet["A2"] = f"子事件{index}-{child.get('title', '')}"
-    worksheet.merge_cells("H2:U2")
+    worksheet.merge_cells(start_row=2, start_column=8, end_row=2, end_column=raw_end)
     worksheet["H2"] = worksheet["A2"].value
     left_headers = ["日期", (child.get("channel_labels") or {}).get("domestic_mainstream", "境内主流媒体"), "境外媒体", "新媒体", "信息传播量"]
     for column, header in enumerate(left_headers, 1):
@@ -241,7 +245,7 @@ def write_child(workbook: Workbook, child: dict[str, Any], headers: list[str]) -
         for column, value in enumerate(values, 2):
             worksheet.cell(offset, column, number(value))
         raw = raw_rows[offset - 4]
-        for column, key in enumerate(["date", "public_articles", "public_recommend", "public_comments", "weibo", "domestic_news", "domestic_app", "domestic_forum", "other_video", "overseas_news", "x", "overseas_other", "video_account", "douyin"], 8):
+        for column, key in enumerate(canonical_columns, 8):
             value = raw.get(key)
             worksheet.cell(offset, column, date_value(value) if key == "date" else number(value))
             if key == "date":
@@ -252,18 +256,18 @@ def write_child(workbook: Workbook, child: dict[str, Any], headers: list[str]) -
     for column, key in enumerate(["domestic_mainstream", "overseas_media", "new_media", "total"], 2):
         worksheet.cell(total_row, column, number(totals.get(key)))
     worksheet.cell(total_row, 8, "合计")
-    raw_keys = ["public_articles", "public_recommend", "public_comments", "weibo", "domestic_news", "domestic_app", "domestic_forum", "other_video", "overseas_news", "x", "overseas_other", "video_account", "douyin"]
+    raw_keys = canonical_columns[1:]
     for column, key in enumerate(raw_keys, 9):
         worksheet.cell(total_row, column, sum(number(row.get(key)) for row in raw_rows))
     style_range(worksheet, 2, 2, 1, 5, fill=BLUE, bold=True, size=13)
-    style_range(worksheet, 2, 2, 8, 21, fill=BLUE, bold=True, size=13)
+    style_range(worksheet, 2, 2, 8, raw_end, fill=BLUE, bold=True, size=13)
     style_range(worksheet, 3, 3, 1, 5, fill=GRAY, bold=True)
-    style_range(worksheet, 3, 3, 8, 21, fill=RAW_BLUE, bold=True, size=10)
+    style_range(worksheet, 3, 3, 8, raw_end, fill=RAW_BLUE, bold=True, size=10)
     style_range(worksheet, 4, 3 + len(rows), 1, 5)
-    style_range(worksheet, 4, 3 + len(rows), 8, 21, size=10)
+    style_range(worksheet, 4, 3 + len(rows), 8, raw_end, size=10)
     style_range(worksheet, total_row, total_row, 1, 5, fill=GREEN, bold=True)
-    style_range(worksheet, total_row, total_row, 8, 21, fill=GREEN, bold=True)
-    set_widths(worksheet, {1: 13, 2: 15, 3: 13, 4: 15, 5: 15, **{index: 13 for index in range(8, 22)}})
+    style_range(worksheet, total_row, total_row, 8, raw_end, fill=GREEN, bold=True)
+    set_widths(worksheet, {1: 13, 2: 15, 3: 13, 4: 15, 5: 15, **{index: 13 for index in range(8, raw_end + 1)}})
     worksheet.freeze_panes = "A4"
 
 
@@ -402,7 +406,7 @@ def build_portable_workbook(normalized_path: Path, output_path: Path, verificati
     write_keywords(workbook, data)
     write_total_event(workbook, data, trend_path)
     for child in data.get("children") or []:
-        write_child(workbook, child, data.get("daily_display_headers") or [])
+        write_child(workbook, child, data.get("daily_display_headers") or [], data.get("canonical_daily_columns"))
     write_summary(workbook, data.get("children") or [], topic_path)
     write_overseas(workbook, data)
     write_wordcloud(workbook, data, wordcloud_path)

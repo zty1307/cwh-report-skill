@@ -93,6 +93,8 @@ Missing evidence is a structured blocker. A model assertion that work is complet
 
 ## Input Routing and Stage Boundaries
 
+Raw heat exports currently require `细分渠道-日趋势`. Use the mapped detailed news column for domestic mainstream media; classify 百家号 and 头条 as new media, preserving separate source fields. Do not fall back to ordinary `日趋势` or shift counts into APP to match a historical report. See `references/raw_workbook_pipeline.md`. The current `config/report_presentation_policy.v1.json` keeps formal sentiment percentages blank across Word, HTML and Excel, while preserving actual comments and sample labels.
+
 The pipeline order is fixed:
 
 1. `preflight`
@@ -130,6 +132,8 @@ If the workbook already contains `关键词`、`总事件`、`子事件1...N` an
 Read [references/analysis_bundle_schema.md](references/analysis_bundle_schema.md) when producing or repairing the analysis bundle. Read [references/sentiment_pipeline.md](references/sentiment_pipeline.md) for comment collection and sentiment. Read [references/system_data_contract.md](references/system_data_contract.md) when adapting workbook fields.
 
 ## Formal writing and output
+
+For domestic media/self-media viewpoints, apply the configured `speaker_eligibility_rule` and `attribution_body_rule`: named professionals need source-verified institution, role and name; ordinary or anonymous people and self-reported experience do not qualify for this section. Attribute account-authored analysis to the full account name and expert quotations to the expert. Formal claims omit interview-process wording and repeated speaker/account headers. Preserve original source text and keep genuine netizen comments under the separate comment rules.
 
 Use the shipped `templates/cwh_fill_in_template.docx` for Word output; read [references/word_fill_in_template.md](references/word_fill_in_template.md) when developing or repairing template filling. The renderer fills 11 named slots and retains fixed headings. Do not ask a model to recreate Word layout or invent a replacement template. Scripts own fonts, tables, charts, paragraph boundaries and placeholder checks; models own evidence selection and semantic grouping. Physical paragraph splitting never certifies source-order recovery as completed editorial grouping.
 

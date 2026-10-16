@@ -4,7 +4,13 @@ An auditable, resumable workflow for generating public-opinion reports for State
 
 The default `bounded_60m` profile is model-neutral and uses one active model worker: it exposes bounded JSON tasks and keeps deterministic writing, validation, state, hashing, rendering, and delivery outside the model. Research has a 45-minute cutoff inside the one-hour total budget. `bounded_40m` remains a tighter explicit option; `exhaustive` preserves uncapped research. Independent evidence review remains a separate sequential run, not author self-certification.
 
-Current evaluation version: **2026.09.14-v47-rc3** (`config/release.json`). This candidate adds host-compiled semantic decisions, claim-local verified quotation ranges, script-owned hotword evidence/scoring handoffs, bounded selected-field repairs and a watchdog that also covers blocked large-stdin delivery on Windows. Standard-workbook budgets reuse the raw-normalization allowance for authoring and independent review. Successful end-to-end completion within one hour on ordinary domestic models remains a forward-test target, not a claimed result.
+Current evaluation version: **2026.10.16-rules-sync** (`config/release.json`). This update brings the detailed-channel accounting and speaker-attribution rules into the published editorial candidate. The existing host-compiled evidence decisions, independent review and delivery gates remain required. Successful end-to-end completion within one hour on ordinary domestic models remains a forward-test target, not a claimed result.
+
+统计规则：总事件、各子事件分别从“细分渠道-日趋势”取数；细分新闻列归境内主流媒体，百家号、头条等独立保留并归新媒体；微信合计公众文章、在看／推荐量、精选评论量三项；微博、视频号单列，不将父级汇总列与子级细数重复累加。境外仍经原文审核后回算，本阶段正式情感百分比留空。
+
+引述规则：境内媒体自媒体观点中的具名个人须核实机构、职务、姓名；普通个人、普通网友和仅自报经历者不作该部分样本。账号自身发言归完整账号名，转引专家归专家。正文直接写主体和观点，去除采访过程套话及重复账号抬头。真实网民评论仍按独立评论章节规则审核。规则同步不代表已完成新一轮真实模型报告测试。
+
+本次发布副本的自动化验证：1492项测试通过、7项因外部夹具或环境条件跳过，Skill格式检查通过。它与包含其他未发布修复的开发候选不是同一个测试集合。
 
 Validation details and remaining limitations are recorded in [the candidate validation report](references/v47_validation.md). Real hy4 tests distinguish fresh raw review, recovery using earlier decisions, and report-stage continuation; none may be relabelled as a fresh full-report success. No API token reduction percentage or full-report speedup is claimed. Review-only snapshots do not count as formal report delivery.
 
@@ -25,7 +31,7 @@ See [rc3 observed results and unresolved gates](references/v47_rc3_validation.md
 
 ## 国产模型复测
 
-更新完整 Skill 目录并确认 `config/release.json` 为 `2026.09.14-v47-rc3`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。旧测试中修改过哈希、回退过状态或使用旧节点结构的任务留作审计，不能继续用它证明新版本成功。
+更新完整 Skill 目录并确认 `config/release.json` 为 `2026.10.16-rules-sync`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。旧测试中修改过哈希、回退过状态或使用旧节点结构的任务留作审计，不能继续用它证明新版本成功。
 
 先确认可用的 Python（建议 3.12），运行 `python scripts/cwh_preflight.py --skill-root .`；按预检提示补齐依赖。Windows 若 `python` 命中商店别名，改用实际 Python 可执行文件的完整路径。
 

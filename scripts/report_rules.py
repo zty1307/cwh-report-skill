@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from cwh_writing_rules import unsupported_padding_issues, writing_rules, judgment_heading
+from cwh_writing_rules import unsupported_padding_issues, writing_rules, judgment_heading, attribution_format_issues
 from cwh_available_delivery import available_delivery, valid_gap
 
 
@@ -353,6 +353,10 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
                         "cluster": cluster_name, "message": f"{topic}的成文包含禁用表述“{phrase}”；请使用具体主体与原文支持的判断。",
                     })
             for evidence in cluster.get("evidence") or []:
+                for code, message in attribution_format_issues(evidence):
+                    issues.append({'code': code, 'severity': 'error', 'topic': topic,
+                                   'cluster': cluster_name, 'evidence_id': evidence.get('evidence_id'),
+                                   'message': message})
                 for phrase in unsupported_padding_issues(evidence):
                     issues.append({
                         "code": "unsupported_rhetorical_padding", "severity": "error", "topic": topic,
@@ -542,6 +546,9 @@ def domestic_viewpoint_quality_issues(data: dict[str, Any]) -> list[dict[str, An
 
 
 def formal_sentiment_row_ready(row: dict[str, Any]) -> bool:
+    from cwh_presentation_policy import sentiment_percentages_enabled
+    if not sentiment_percentages_enabled():
+        return False
     counts = row.get("sentiment") or {}
     total = sum(int(counts.get(label, 0) or 0) for label in ("positive", "neutral", "negative"))
     return bool(

@@ -37,7 +37,8 @@ def editorial_eligibility_prompt() -> str:
     rules = writing_rules()['viewpoint']
     exclusions = '；'.join(row['description'] for row in rules['editorial_exclusions'])
     return ('正式选材资格与文字忠实度分开检查：原文确实这样说，并不自动表示适合本题正文。'
-        '以下只按原文语义判断，不按关键词、渠道名称或专家身份自动通过/排除：' + exclusions + '。'
+        + rules.get('speaker_eligibility_rule', '') + rules.get('attribution_body_rule', '') +
+        '通过主体资格检查后，以下按原文语义判断，不因关键词、渠道名称或专家身份自动通过：' + exclusions + '。'
         '实质的产业、金融或投资分析，只要有直接相关的具体政策机制、条件或论据即可保留；'
         '不能因出现产业链、投资、受益等词就删除，也不要求每条必须由具名专家提出。'
         + rules.get('public_reasoning_boundary_rule', '') + rules['source_reasoning_quality_rule'] +
@@ -220,6 +221,31 @@ def formal_attribution(row: dict[str, Any]) -> str:
     else:
         platform = "自媒体账号"
     return f"{platform}“{bare}”"
+
+
+def attribution_format_issues(row: dict[str, Any]) -> list[tuple[str, str]]:
+    """Check explicit identity fields and prose; semantic eligibility is reviewed separately."""
+    issues = []
+    status = str(row.get('attribution_status') or '').strip().lower()
+    role = str(row.get('speaker_role') or '').strip()
+    name = str(row.get('speaker_name') or '').strip()
+    claim = str(row.get('formal_claim') or row.get('claim') or '').strip()
+    if status in {'ordinary_person', 'netizen', 'anonymous_person'}:
+        issues.append(('ineligible_person_viewpoint', '普通个人、普通网友及匿名个人不进入境内媒体自媒体观点；不能改归发布账号。'))
+    if status == 'named_person':
+        if not name or not role:
+            issues.append(('unverified_professional_identity', '具名个人须有原文可核实的机构、职务和姓名；缺失时不补造身份。'))
+        elif re.search(r'普通(?:人|网友|市民)|网友(?:热评|留言)?|网民|(?:陆续在|从事).{0,30}(?:年|工作)', role):
+            issues.append(('ineligible_person_viewpoint', '自述经历、工龄和网友标签不能作为专业身份。'))
+    prose = str(row.get('attribution') or '') + claim
+    if re.search(r'(?:在)?接受[^。；\n]{0,60}(?:采访|专访)(?:时)?(?:表示|指出|认为|称|说)|对[^，。；\n]{1,40}记者(?:表示|指出|称|说)', prose):
+        issues.append(('interview_process_in_claim', '正式引述直接写主体加观点，删除采访媒体、记者及采访过程；来源信息保留在审计中。'))
+    if status == 'self_media' and name:
+        labels = {name, formal_attribution(row)}
+        if any(re.match(re.escape(label) + r'(?:[：:]|(?:解读称|认为|指出|表示|建议|强调|称)[，,:：\s]*)', claim)
+               for label in labels if label):
+            issues.append(('repeated_account_attribution', 'formal_claim直接写观点，不重复账号名及归因前缀。'))
+    return issues
 
 
 def attribution_verb(row: dict[str, Any]) -> str:

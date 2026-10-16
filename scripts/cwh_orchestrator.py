@@ -2740,7 +2740,8 @@ def write_cwh_data_workbook(data: dict[str, Any], path: Path) -> None:
         new_media = int(row.get("self_media", 0) or 0)
         overseas_media = int(row.get("overseas_media", 0) or 0)
         total = int(row.get("spread_count", row.get("total_samples", domestic_media + new_media + overseas_media)) or 0)
-        sentiment_ready = bool(row.get("sentiment_formal_ready"))
+        from report_rules import formal_sentiment_row_ready
+        sentiment_ready = formal_sentiment_row_ready(row)
         excel_row = idx + 2
         ws.append([
             idx,
@@ -3272,7 +3273,9 @@ def apply_sentiment_summary(
             row["sentiment_sample_status"] = "pending"
             row["sentiment_denominator"] = 0
             continue
-        row["sentiment_formal_ready"] = matched.get("status") == "ready"
+        from cwh_presentation_policy import sentiment_percentages_enabled
+        row["sentiment_formal_ready"] = matched.get("status") == "ready" and sentiment_percentages_enabled()
+        row["sentiment_display_policy"] = "reviewed" if sentiment_percentages_enabled() else "withheld"
         row["sentiment_sample_status"] = str(matched.get("status") or "pending")
         row["sentiment_denominator"] = int(matched.get("denominator") or 0)
         if isinstance(matched.get("counts"), dict):

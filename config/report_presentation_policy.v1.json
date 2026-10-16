@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "sentiment_percentages": {
+    "mode": "withheld",
+    "reason": "当前阶段按用户确认暂不展示正式情感百分比；评论样本数量门槛不能替代代表性验证。",
+    "scope": "Word、工作台、配套Excel及标准总表回填；保留真实评论、逐条标签和样本观察数据。"
+  }
+}

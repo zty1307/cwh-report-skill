@@ -1,5 +1,7 @@
 # CWH Sentiment Pipeline
 
+Current presentation policy: `config/report_presentation_policy.v1.json` sets formal percentages to `withheld`. Keep Word, HTML and workbook ratio cells blank even when sample counts pass the numerical threshold. Continue collecting, reviewing and exposing real quotations and sample labels. Re-enabling ratios requires a separate policy decision about representativeness; the sample-size gate alone does not permit population-level reporting.
+
 ## Scope
 
 Analyze only traceable domestic-platform netizen comments inside the monitoring window. Prefer monitoring-system comment detail; when it is absent and public collection is authorized, use the reviewed output of `run_cwh_domestic_comment_collection.py` or `run_cwh_agent_reach_comment_collection.py`. Media articles, posts, video descriptions, search snippets and policy texts are evidence for viewpoints, not members of the `网民情感` denominator. System sentiment labels and aggregate ratios are retained only as audit references; they never replace this pipeline or enter the formal denominator.

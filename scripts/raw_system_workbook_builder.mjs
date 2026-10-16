@@ -86,22 +86,15 @@ function dateValue(value) {
 }
 
 function dailyMatrix(rows) {
-  return rows.map((row) => [
-    dateValue(row.date),
-    row.public_articles,
-    row.public_recommend,
-    row.public_comments,
-    row.weibo,
-    row.domestic_news,
-    row.domestic_app,
-    row.domestic_forum,
-    row.other_video,
-    row.overseas_news,
-    row.x,
-    row.overseas_other,
-    row.video_account,
-    row.douyin,
-  ]);
+  return rows.map(row => data.canonical_daily_columns.map(key => key === 'date' ? dateValue(row[key]) : row[key]));
+}
+
+function rawGroupFormula(fields, startColumn, row) {
+  return '=' + fields.map(key => {
+    const index = data.canonical_daily_columns.indexOf(key);
+    if (index < 1) throw new Error('Unknown numeric channel: ' + key);
+    return columnLetter(startColumn + index) + row;
+  }).join('+');
 }
 
 function applyTableStyle(sheet, rangeAddress, headerAddress = null) {
@@ -148,35 +141,32 @@ function buildKeywordsSheet() {
 
 function buildTotalSheet() {
   const sheet = workbook.worksheets.add("总事件");
+  const rawEnd = 14 + data.canonical_daily_columns.length, rawLast = columnLetter(rawEnd);
   sheet.showGridLines = false;
   sheet.mergeCells("A2:H2");
-  sheet.mergeCells("O2:AB2");
+  sheet.mergeCells(`O2:${rawLast}2`);
   sheet.getRange("A2").values = [[data.metadata.event_sheet_title]];
   sheet.getRange("O2").formulas = [["=A2"]];
   sheet.getRange("A2:H2").format = titleFormat;
-  sheet.getRange("O2:AB2").format = titleFormat;
+  sheet.getRange(`O2:${rawLast}2`).format = titleFormat;
 
   const leftHeaders = ["日期", (data.channel_labels?.domestic_mainstream || "境内主流媒体"), "境外媒体", "微信公众号", "新浪微博", "视频号", "新闻客户端、论坛等", "信息传播量"];
   sheet.getRange("A3:H3").values = [leftHeaders];
-  sheet.getRange("O3:AB3").values = [data.daily_display_headers];
+  sheet.getRange(`O3:${rawLast}3`).values = [data.daily_display_headers];
   sheet.getRange("A3:H3").format = headerFormat;
-  sheet.getRange("O3:AB3").format = rawHeaderFormat;
+  sheet.getRange(`O3:${rawLast}3`).format = rawHeaderFormat;
 
   const startRow = 4;
   const lastDataRow = startRow + data.total_event.daily.length - 1;
-  sheet.getRange(`O${startRow}:AB${lastDataRow}`).values = dailyMatrix(data.total_event.daily);
-  sheet.getRange(`O${startRow}:AB${lastDataRow}`).format = bodyFormat;
+  sheet.getRange(`O${startRow}:${rawLast}${lastDataRow}`).values = dailyMatrix(data.total_event.daily);
+  sheet.getRange(`O${startRow}:${rawLast}${lastDataRow}`).format = bodyFormat;
   sheet.getRange(`O${startRow}:O${lastDataRow}`).format.numberFormat = "yyyy/m/d";
 
   for (let row = startRow; row <= lastDataRow; row += 1) {
     sheet.getRange(`A${row}:H${row}`).formulas = [[
       `=TEXT(O${row},"m/d")`,
-      `=T${row}`,
-      `=X${row}`,
-      `=P${row}+Q${row}+R${row}`,
-      `=S${row}`,
-      `=AA${row}`,
-      `=U${row}+V${row}+W${row}+Y${row}+Z${row}+AB${row}`,
+      ...['domestic_mainstream','overseas_media','wechat','weibo','video_account','other_new_media']
+        .map(key => rawGroupFormula(data.channel_mapping.total_groups[key], 15, row)),
       `=SUM(B${row}:G${row})`,
     ]];
   }
@@ -190,12 +180,12 @@ function buildTotalSheet() {
     sheet.getRange(`${letter}${totalRow}`).formulas = [[`=SUM(${letter}${startRow}:${letter}${lastDataRow})`]];
   }
   sheet.getRange(`O${totalRow}`).values = [["合计"]];
-  for (let column = 16; column <= 28; column += 1) {
+  for (let column = 16; column <= rawEnd; column += 1) {
     const letter = columnLetter(column);
     sheet.getRange(`${letter}${totalRow}`).formulas = [[`=SUM(${letter}${startRow}:${letter}${lastDataRow})`]];
   }
   sheet.getRange(`A${totalRow}:H${totalRow}`).format = { ...headerFormat, fill: COLORS.summaryHeader };
-  sheet.getRange(`O${totalRow}:AB${totalRow}`).format = { ...rawHeaderFormat, fill: COLORS.summaryHeader };
+  sheet.getRange(`O${totalRow}:${rawLast}${totalRow}`).format = { ...rawHeaderFormat, fill: COLORS.summaryHeader };
 
   const chart = sheet.charts.add("line", { chartType: "line", hasLegend: true });
   const series = chart.series.add("信息传播量");
@@ -213,7 +203,8 @@ function buildTotalSheet() {
     O: 12, P: 9, Q: 12, R: 12, S: 10, T: 10, U: 10, V: 10, W: 10,
     X: 10, Y: 8, Z: 10, AA: 10, AB: 10,
   });
-  sheet.getRange("A3:AB3").format.rowHeight = 34;
+  for (let column=29; column<=rawEnd; column++) setWidths(sheet, {[columnLetter(column)]: 13});
+  sheet.getRange(`A3:${rawLast}3`).format.rowHeight = 34;
   sheet.freezePanes.freezeRows(3);
   return { sheet, totalRow, startRow, lastDataRow };
 }
@@ -221,29 +212,29 @@ function buildTotalSheet() {
 function buildChildSheet(child) {
   const sheetName = `子事件${child.index}`;
   const sheet = workbook.worksheets.add(sheetName);
+  const rawEnd = 7 + data.canonical_daily_columns.length, rawLast = columnLetter(rawEnd);
   sheet.showGridLines = false;
   sheet.mergeCells("A2:E2");
-  sheet.mergeCells("H2:U2");
+  sheet.mergeCells(`H2:${rawLast}2`);
   sheet.getRange("A2").values = [[`${sheetName}-${child.title}`]];
   sheet.getRange("H2").formulas = [["=A2"]];
   sheet.getRange("A2:E2").format = titleFormat;
-  sheet.getRange("H2:U2").format = titleFormat;
+  sheet.getRange(`H2:${rawLast}2`).format = titleFormat;
   sheet.getRange("A3:E3").values = [["日期", (data.channel_labels?.domestic_mainstream || "境内主流媒体"), "境外媒体", "新媒体", "信息传播量"]];
-  sheet.getRange("H3:U3").values = [data.daily_display_headers];
+  sheet.getRange(`H3:${rawLast}3`).values = [data.daily_display_headers];
   sheet.getRange("A3:E3").format = headerFormat;
-  sheet.getRange("H3:U3").format = rawHeaderFormat;
+  sheet.getRange(`H3:${rawLast}3`).format = rawHeaderFormat;
 
   const startRow = 4;
   const lastDataRow = startRow + child.daily.length - 1;
-  sheet.getRange(`H${startRow}:U${lastDataRow}`).values = dailyMatrix(child.daily);
-  sheet.getRange(`H${startRow}:U${lastDataRow}`).format = bodyFormat;
+  sheet.getRange(`H${startRow}:${rawLast}${lastDataRow}`).values = dailyMatrix(child.daily);
+  sheet.getRange(`H${startRow}:${rawLast}${lastDataRow}`).format = bodyFormat;
   sheet.getRange(`H${startRow}:H${lastDataRow}`).format.numberFormat = "yyyy/m/d";
   for (let row = startRow; row <= lastDataRow; row += 1) {
     sheet.getRange(`A${row}:E${row}`).formulas = [[
       `=TEXT(H${row},"m/d")`,
-      `=M${row}`,
-      `=Q${row}`,
-      `=I${row}+J${row}+K${row}+L${row}+N${row}+O${row}+P${row}+R${row}+S${row}+T${row}+U${row}`,
+      ...['domestic_mainstream','overseas_media','new_media']
+        .map(key => rawGroupFormula(data.channel_mapping.child_groups[key], 8, row)),
       `=SUM(B${row}:D${row})`,
     ]];
   }
@@ -257,18 +248,19 @@ function buildChildSheet(child) {
     sheet.getRange(`${letter}${totalRow}`).formulas = [[`=SUM(${letter}${startRow}:${letter}${lastDataRow})`]];
   }
   sheet.getRange(`H${totalRow}`).values = [["合计"]];
-  for (let column = 9; column <= 21; column += 1) {
+  for (let column = 9; column <= rawEnd; column += 1) {
     const letter = columnLetter(column);
     sheet.getRange(`${letter}${totalRow}`).formulas = [[`=SUM(${letter}${startRow}:${letter}${lastDataRow})`]];
   }
   sheet.getRange(`A${totalRow}:E${totalRow}`).format = { ...headerFormat, fill: COLORS.summaryHeader };
-  sheet.getRange(`H${totalRow}:U${totalRow}`).format = { ...rawHeaderFormat, fill: COLORS.summaryHeader };
+  sheet.getRange(`H${totalRow}:${rawLast}${totalRow}`).format = { ...rawHeaderFormat, fill: COLORS.summaryHeader };
   setWidths(sheet, {
     A: 12, B: 10, C: 10, D: 12, E: 12, F: 3, G: 3,
     H: 12, I: 9, J: 12, K: 12, L: 10, M: 10, N: 10, O: 10, P: 10,
     Q: 10, R: 8, S: 10, T: 10, U: 10,
   });
-  sheet.getRange("A3:U3").format.rowHeight = 34;
+  for (let column=22; column<=rawEnd; column++) setWidths(sheet, {[columnLetter(column)]: 13});
+  sheet.getRange(`A3:${rawLast}3`).format.rowHeight = 34;
   sheet.freezePanes.freezeRows(3);
   return { sheet, totalRow, startRow, lastDataRow };
 }
@@ -479,14 +471,15 @@ await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await fs.mkdir(previewsDir, { recursive: true });
 
 const keyChecks = [];
-for (const [sheetId, range] of [["总事件", "A1:AB12"], ["子事件数据汇总", "A1:I10"], ["词云", "A1:E20"], ["公众TOP", "B1:I12"]]) {
+workbook.recalculate();
+for (const [sheetId, range] of [["总事件", `A1:${columnLetter(14 + data.canonical_daily_columns.length)}12`], ["子事件数据汇总", "A1:I10"], ["词云", "A1:E20"], ["公众TOP", "B1:I12"]]) {
   const inspection = await workbook.inspect({
     kind: "table",
     sheetId,
     range,
     include: "values,formulas",
     tableMaxRows: 20,
-    tableMaxCols: 30,
+    tableMaxCols: Math.max(30, 14 + data.canonical_daily_columns.length),
     maxChars: 12000,
   });
   keyChecks.push({ sheetId, range, ndjson: inspection.ndjson });

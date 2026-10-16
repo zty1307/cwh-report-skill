@@ -118,13 +118,15 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
                 name = clean_sentence(row.get('speaker_name'))
                 original = str(row.get('formal_claim') or '')
                 verbs = ['解读称', *writing_rules()['viewpoint']['attribution_verbs']]
-                match = re.match(re.escape(name) + '(' + '|'.join(map(re.escape, verbs)) + r')[，,:：\s]*', original) if name else None
+                labels = sorted({name, formal_attribution(row)}, key=len, reverse=True)
+                prefix = '|'.join(re.escape(label) for label in labels if label)
+                match = re.match('(?:' + prefix + ')(?:(' + '|'.join(map(re.escape, verbs)) + r')[，,:：\s]*|[：:]\s*)', original) if prefix else None
                 if match and original[match.end():].strip():
                     # Strip only an exact redundant account attribution before
                     # freezing/review; original text and author wording remain.
                     row['author_formal_claim'] = original
                     row['formal_claim'] = original[match.end():].strip()
-                    row['attribution_verb'] = '称' if match[1] == '解读称' else match[1]
+                    row['attribution_verb'] = '称' if match[1] in (None, '解读称') else match[1]
             # Python's stable sort preserves source order within the same
             # priority class. Only explicit source metadata changes priority.
             cluster["evidence"] = sorted(cluster.get("evidence") or [], key=lambda row: source_rank(row) if isinstance(row, dict) else 999)

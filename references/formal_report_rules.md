@@ -134,6 +134,8 @@ Inside a viewpoint group, use dynamically generated `一是、二是……` when
 
 Every claim should include evidence sources such as experts, media, institutions, or public accounts:
 
+境内媒体自媒体观点执行 `viewpoint.speaker_eligibility_rule` 和 `viewpoint.attribution_body_rule`：具名个人须有原文可核实、与议题相关的机构、职务和姓名；普通个人、普通网友、匿名个人及仅自报经历或工龄者不作本节样本，也不改归转载账号。真实网友评论仍按独立网民章节规则审核。账号自身观点用平台类型和账号全名；账号引述专家时归专家。正文直接写“核实的机构＋职务＋姓名＋归因动词＋观点”或“媒体／平台账号全名＋归因动词＋观点”，省去采访过程。`formal_claim` 直接写观点，不重复当前主体姓名、账号名或栏目抬头。完整原文、采访渠道和原始身份保留在证据审计中；不补造缺失身份。明确重复的账号前缀可在冻结前规范化并保存作者原稿；冻结后不靠渲染删改绕过核查。
+
 ```text
 某专家称……
 某媒体报道称……
