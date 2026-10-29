@@ -18,7 +18,7 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def prioritize_pages(observations, topic, limit, fallback, command, workspace, timeout, model_call):
+def prioritize_pages(observations, topic, limit, fallback, command, workspace, timeout, model_call, context=None):
     rows, seen = [], set()
     for query in observations.get('queries', []):
         for row in query.get('results', []):
@@ -30,6 +30,8 @@ def prioritize_pages(observations, topic, limit, fallback, command, workspace, t
                          'snippet_hint': str(row.get('snippet') or '')[:240]})
     packet = {'topic': topic, 'request_count': min(limit, len(rows)), 'candidates': rows,
               'scope': 'Discovery metadata only; original observations stay intact; full body not yet reviewed'}
+    if context is not None:
+        packet['current_period_and_raw_gap'] = context
     key = digest({'packet': packet, 'prompt': PROMPT, 'command': command, 'fallback': fallback})
     path = workspace / 'reading_priority.json'
     if path.is_file():

@@ -264,8 +264,10 @@ def matched_column_names(headers: list[Any], aliases: dict[str, list[str]]) -> d
 
 def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
     """Classify a workbook by sheets and headers before consulting its filename."""
-    workbook = load_workbook(path, data_only=True, read_only=False)
+    workbook = load_workbook(path, data_only=True, read_only=True)
     try:
+        for sheet in workbook:
+            sheet.reset_dimensions()
         structural_roles: list[str] = []
         evidence: list[str] = []
         heat_total: int | float | None = None
@@ -276,7 +278,7 @@ def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
             and matched_sheet(workbook, config["sheet_aliases"]["daily_trend"]) is not None):
             raise PipelineError(f"{path.name}缺少细分渠道-日趋势；本期口径不能回退到普通日趋势，请提供细分渠道表。")
         if daily_sheet is not None:
-            headers = [daily_sheet.cell(1, column).value for column in range(1, daily_sheet.max_column + 1)]
+            headers = list(next(daily_sheet.iter_rows(values_only=True), ()))
             columns = matched_column_names(headers, source_columns)
             missing = [name for name in source_columns if name not in columns]
             if not missing:
@@ -284,15 +286,16 @@ def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
                 evidence.append(f"工作表“{daily_sheet.title}”包含完整日趋势字段")
                 heat_total = 0
                 valid_rows = 0
-                for row_index in range(2, daily_sheet.max_row + 1):
-                    raw_date = daily_sheet.cell(row_index, columns["date"] + 1).value
+                for values in daily_sheet.iter_rows(min_row=2, values_only=True):
+                    values = (*values, *([None] * max(0, len(headers)-len(values))))
+                    raw_date = values[columns["date"]]
                     if raw_date in (None, ""):
                         continue
                     valid_rows += 1
                     for canonical in source_columns:
                         if canonical == "date":
                             continue
-                        number = to_number(daily_sheet.cell(row_index, columns[canonical] + 1).value)
+                        number = to_number(values[columns[canonical]])
                         if number is None:
                             heat_total = None
                             break
@@ -312,7 +315,7 @@ def profile_raw_workbook(path: Path, config: dict[str, Any]) -> dict[str, Any]:
             worksheet = matched_sheet(workbook, config["sheet_aliases"][alias_key])
             if worksheet is None:
                 continue
-            headers = [worksheet.cell(1, column).value for column in range(1, worksheet.max_column + 1)]
+            headers = list(next(worksheet.iter_rows(values_only=True), ()))
             columns = matched_column_names(headers, config["detail_columns"])
             missing = [name for name in config["detail_columns"] if name not in columns]
             if not missing:
@@ -434,6 +437,14 @@ def identify_inputs(raw_directory: Path, config: dict[str, Any]) -> InputBundle:
 
     def unique_structural(role: str, label: str) -> dict[str, Any]:
         matched = [profile for profile in profiles if role in profile["structural_roles"]]
+        if len(matched) > 1 and role in {"public_top", "overseas_latest"}:
+            totals = [p for p in matched if re.match(r"^总(?:[-_]|事件)", p["file"])]
+            supplements = [p for p in matched if child_index_from_filename(p["path"], config) is not None]
+            if len(totals) == 1 and len(supplements) + 1 == len(matched):
+                audit.extend({"file": p["file"], "role": role + "_numbered_supplement",
+                    "method": "explicit_total_and_numbered_supplement_exports",
+                    "scope": "supplemental source rows; not summed into total event statistics"} for p in supplements)
+                matched = totals
         if len(matched) != 1:
             names = [profile["file"] for profile in matched]
             raise PipelineError(f"按工作表和字段识别{label}应为1个，实际{len(matched)}个：{names}")
@@ -672,27 +683,32 @@ def read_detail_rows(
     config: dict[str, Any],
     purpose: str,
 ) -> list[dict[str, Any]]:
-    workbook = load_workbook(path, data_only=True, read_only=False)
+    workbook = load_workbook(path, data_only=True, read_only=True)
     try:
         worksheet = find_sheet(workbook, sheet_aliases, purpose)
-        headers = [worksheet.cell(1, column).value for column in range(1, worksheet.max_column + 1)]
+        worksheet.reset_dimensions()
+        iterator = worksheet.iter_rows(values_only=True)
+        headers = list(next(iterator, ()))
         columns = resolve_columns(headers, config["detail_columns"], f"{path.name}/{worksheet.title}")
         rows = []
-        for row_index in range(2, worksheet.max_row + 1):
-            title = worksheet.cell(row_index, columns["title"] + 1).value
-            url = worksheet.cell(row_index, columns["url"] + 1).value
+        for row_index, values in enumerate(iterator, 2):
+            values = (*values, *([None] * max(0, len(headers)-len(values))))
+            title = values[columns["title"]]
+            url = values[columns["url"]]
             if title in (None, "") and url in (None, ""):
                 continue
             item = {
                 "source_row": row_index,
-                "source": json_value(worksheet.cell(row_index, columns["source"] + 1).value),
+                "source": json_value(values[columns["source"]]),
                 "url": json_value(url),
-                "published_at": normalize_date(worksheet.cell(row_index, columns["published_at"] + 1).value),
+                "published_at": normalize_date(values[columns["published_at"]]),
                 "title": json_value(title),
-                "content": json_value(worksheet.cell(row_index, columns["content"] + 1).value),
-                "account": json_value(worksheet.cell(row_index, columns["account"] + 1).value),
-                "read_count": to_number(worksheet.cell(row_index, columns["read_count"] + 1).value),
-                "recommend_count": to_number(worksheet.cell(row_index, columns["recommend_count"] + 1).value),
+                "content": json_value(values[columns["content"]]),
+                "account": json_value(values[columns["account"]]),
+                "source_file": str(path.resolve()),
+                "source_sheet": worksheet.title,
+                "read_count": to_number(values[columns["read_count"]]),
+                "recommend_count": to_number(values[columns["recommend_count"]]),
             }
             rows.append(item)
         return rows
@@ -1612,6 +1628,7 @@ def build_public_article_evidence_corpus(
                 {
                     "record_id": record_id,
                     "source_row": row.get("source_row"),
+                "source_file": row.get("source_file"), "source_sheet": row.get("source_sheet"),
                     "published_at": row.get("published_at"),
                     "account": row.get("account"),
                     "source": row.get("source"),
@@ -1632,6 +1649,7 @@ def build_public_article_evidence_corpus(
             {
                 "record_id": record_id,
                 "source_row": row.get("source_row"),
+                "source_file": row.get("source_file"), "source_sheet": row.get("source_sheet"),
                 "published_at": row.get("published_at"),
                 "account": row.get("account"),
                 "source": row.get("source"),
@@ -1838,7 +1856,17 @@ def build_normalized_bundle(
         if key not in {"total_daily", "child_daily"}
     }
     public_top = filter_public_top(public_rows, config, metadata, review=public_review)
-    public_article_evidence = build_public_article_evidence_corpus(public_rows, config, metadata)
+    evidence_rows = list(public_rows)
+    for supplement in sorted(inputs.public_top.parent.glob("*.xlsx")):
+        if supplement == inputs.public_top or child_index_from_filename(supplement, config) is None:
+            continue
+        if "公众文章" not in supplement.name:
+            continue
+        evidence_rows.extend(read_detail_rows(supplement, config["sheet_aliases"]["public_articles"], config, "补充公众文章"))
+    public_article_evidence = build_public_article_evidence_corpus(evidence_rows, config, metadata)
+    public_article_evidence["supplemental_input_scope"] = {
+        "total_export_rows": len(public_rows), "total_and_numbered_export_rows": len(evidence_rows),
+        "scope": "Complete source rows deduplicated in evidence corpus only; ranking and heat counts use total export."}
     hotwords = build_hotword_payload(
         public_rows,
         metadata,

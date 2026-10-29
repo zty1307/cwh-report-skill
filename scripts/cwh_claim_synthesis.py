@@ -122,7 +122,7 @@ def flat_packet(request):
                 'title': item.get('title'), 'speaker': claim.get('speaker'),
                 'role': claim.get('role'), 'speaker_type': claim.get('speaker_type'),
                 'claim': claim['claim']})
-    context = {key: copy.deepcopy(request[key]) for key in ('period', 'agenda_topics', 'report_agenda', 'formal_selection', 'synthesis_validation_feedback') if key in request}
+    context = {key: copy.deepcopy(request[key]) for key in ('period', 'agenda_topics', 'report_agenda', 'formal_selection', 'synthesis_validation_feedback', 'previously_verified_claims') if key in request}
     from cwh_viewpoint_gate import independent_voice_keys
     voices = independent_voice_keys([{'speaker_name': row.get('speaker'), 'source': row.get('source')}
                                      for row in candidates])
@@ -148,6 +148,8 @@ def flat_prompt(rules=None, *, ranked=False):
             '"shortfall_reason":"","single_cluster_reason":""}。不要返回正文、原文、解释或未选清单。'
             '组与组内编号按代表性排序；脚本将未选、重复和超限编号完整保留备选，不判它们无效。'
             '同一主体本题只选一条，prior_source_uses中已达两次者本题不选；不造第二来源。'
+            '若提供previously_verified_claims，结合已核验的有效判断补充新增机制、条件和议题缺口，'
+            '不要只为维持原稿条数替换不同且有价值的判断；相同判断仍可择优，遵守主体和分组上限。'
             '来源不同不等于观点不同：只留有实质信息增量的判断，互补机制、条件和不同意见可以归组，'
             '不得截断不同意见、必要限定；同一专家另一项独立判断未选时留备选。'
             f"最多{rules['bounded_max_formal_clusters']}组、至多formal_selection.max_independent_voices个主体；"

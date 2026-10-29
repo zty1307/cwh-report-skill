@@ -51,11 +51,12 @@ def semantic_packet(packet):
         item = {k: v for k, v in row.items() if k not in {"capture", "content"}}
         item["segments"] = [{"id": seg["id"], "text": seg["text"]} for seg in source_segments(row.get("content", ""), row.get("segment_scope"), row.get("segment_scheme", "line_v1"))]
         rows.append(item)
-    return {**packet, "items": rows}
+    return {**{k:v for k,v in packet.items() if k not in {'screened_readings','screen_reading_runs','screen_integration_active','_reading_cache_root'}}, "items": rows}
 
 
 def author_transport_with_fixed_unread_web(packet):
-    """Do not ask a model to classify an article whose body was not obtained."""
+    """Resolve absent bodies and explicit publication period misses before AI."""
+    from cwh_semantic_compiler import labeled_publication_date
     readable, fixed = [], {}
     for item in packet['items']:
         if item.get('origin') == 'web' and not (item.get('content') or '').strip():
@@ -63,7 +64,13 @@ def author_transport_with_fixed_unread_web(packet):
                 'reason': 'fixed_body_evidence_unavailable:未取得网页正文，仅保留发现信息；未做全文语义审核，待补取',
                 'classification_origin': 'deterministic_body_availability_gate'}
         else:
-            readable.append(item)
+            publication=labeled_publication_date(item.get('content','')) if item.get('origin')=='web' else None
+            if publication and not packet['period']['start'][:10]<=publication['date']<=packet['period']['end'][:10]:
+                fixed[item['id']]={'id':item['id'],'decision':'excluded','relevant':False,'claims':[],
+                    'reason':'fixed_outside_monitoring_period:正文明确发布日期为'+publication['date'],
+                    'classification_origin':'deterministic_publication_period_gate',
+                    'publication_evidence':publication}
+            else:readable.append(item)
     return semantic_packet({**packet, 'items': readable}), fixed
 
 
@@ -91,17 +98,22 @@ def discovery_title_key(item):
 
 def balanced_fetch_urls(observations, limit=4, *, topic=''):
     """Spend bounded fetch slots across observed queries, not only query one."""
-    queues = []
+    from cwh_web_research_budget import is_index_url
+    queues, index_urls = [], []
     policy_grams = {topic[i:i+3] for i in range(max(0, len(topic)-2))}
     for row in observations['queries']:
         results = list(row.get('results') or [])
         if topic:
             domains = query_domains(row.get('query') or '')
             results.sort(key=lambda item: (
+                bool(item.get('reading_priority_out_of_period_hint')),
                 not domain_matches(item['url'], domains) if domains else False,
                 -sum(gram in str(item.get('title') or '') for gram in policy_grams),
                 -bool(re.search('解读|评论|观察|深度|论谈|为什么|如何', str(item.get('title') or '')))))
-        queues.append(results)
+        # A portal home page can recur in every lane. Preserve its discovery,
+        # but use the scarce full-article slots for observed article URLs first.
+        index_urls.extend(item['url'] for item in results if is_index_url(item['url']))
+        queues.append([item for item in results if not is_index_url(item['url'])])
     urls, delayed, seen_urls, title_keys = [], [], set(), set()
     while any(queues) and len(urls) < limit:
         for queue in queues:
@@ -121,11 +133,16 @@ def balanced_fetch_urls(observations, limit=4, *, topic=''):
     # Identical headlines may still contain distinct interviews. They are
     # merely delayed, never discarded or reported as duplicates without text.
     urls.extend(delayed[:max(0, limit - len(urls))])
+    for url in index_urls:
+        if len(urls) >= limit:
+            break
+        if url not in urls:
+            urls.append(url)
     return urls
 
 
-def cached_public_pages(workspace, urls, timeout=8):
-    """Reuse an immutable, hash-checked page snapshot during semantic repairs."""
+def validated_public_page_cache(workspace, urls):
+    """Only existing matching snapshots; never perform network activity."""
     pages_path = workspace / "public_pages.json"
     cache_path = workspace / "public_pages.cache.json"
     input_hash = hashlib.sha256(json.dumps(urls, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -139,6 +156,17 @@ def cached_public_pages(workspace, urls, timeout=8):
                     return pages
         except (ValueError, TypeError, AttributeError):
             pass
+    return None
+
+
+def cached_public_pages(workspace, urls, timeout=8):
+    """Reuse an immutable, hash-checked page snapshot during semantic repairs."""
+    cached = validated_public_page_cache(workspace, urls)
+    if cached is not None:
+        return cached
+    pages_path = workspace / 'public_pages.json'
+    cache_path = workspace / 'public_pages.cache.json'
+    input_hash = hashlib.sha256(json.dumps(urls, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     pages = read_public_pages(urls, timeout=timeout)
     atomic_write_json(pages_path, pages)
     atomic_write_json(cache_path, {
@@ -148,20 +176,24 @@ def cached_public_pages(workspace, urls, timeout=8):
     return pages
 
 
-def recover_failed_page_slots(workspace, observations, urls, pages, plan, deadline, *, topic=''):
+def recover_failed_page_slots(workspace, observations, urls, pages, plan, deadline, *, topic='', reserve_seconds=60):
     """One bounded replacement wave for failed reads, never inferred eligibility."""
     failed = sum(row.get('status') == 'access_failed' for row in pages)
     ceiling = int((plan.get('execution_budget') or {}).get('max_full_page_fetches_per_topic') or 0)
     room = max(0, ceiling - len(urls))
     extra_urls = [url for url in balanced_fetch_urls(observations, ceiling, topic=topic)
                   if url not in urls][:min(failed, room)]
-    # Preserve 60 seconds for the next stage; at most four parallel public reads.
-    required_seconds = 60 + ((len(extra_urls) + 3) // 4) * 8
-    if not extra_urls or deadline - time.monotonic() < required_seconds:
+    # Legacy callers keep60seconds; a dedicated discovery deadline already
+    # protects later reading and can explicitly use a zero additional reserve.
+    required_seconds = reserve_seconds + ((len(extra_urls) + 3) // 4) * 8
+    if not extra_urls:
         return pages
     recovery = workspace / 'failed_page_recovery'
+    retained = validated_public_page_cache(recovery, extra_urls)
+    if retained is None and deadline - time.monotonic() < required_seconds:
+        return pages
     recovery.mkdir(parents=True, exist_ok=True)
-    extra_pages = cached_public_pages(recovery, extra_urls, timeout=8)
+    extra_pages = retained if retained is not None else cached_public_pages(recovery, extra_urls, timeout=8)
     atomic_write_json(recovery / 'reading_audit.json', {
         'scope': 'replacement reading opportunities only; no semantic eligibility decision',
         'initial_urls': urls, 'initial_failed_reads': failed,
@@ -299,9 +331,27 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
     synthesis_feedback = [item for item in feedback if is_synthesis_feedback(item)]
     started = time.monotonic()
     originals = {item['id']: item for item in packet['items']}
-    choices, batch_runs, manifest, deferrals = [], [], [], []
+    choices = copy.deepcopy(packet.get('screened_readings') or [])
+    batch_runs = copy.deepcopy(packet.get('screen_reading_runs') or [])
+    manifest, deferrals = [], []
     for number, group in enumerate(transport_groups, 1):
         ids = [item['id'] for item in group['items']]
+        cache_root = packet.get('_reading_cache_root')
+        cache_prompt = reading_prompt(bounded=packet.get('delivery_policy') == 'deliver_available_with_gaps')
+        if cache_root and not article_feedback:
+            from cwh_article_read_cache import key as article_key, load as load_article
+            missing = []
+            for item_id in ids:
+                entry = load_article(cache_root, article_key(packet, originals[item_id], cache_prompt, command), item_id)
+                if entry:
+                    choice, cached_run = entry
+                    choices.append(choice); batch_runs.append(cached_run)
+                    manifest.append({'item_ids': [item_id], 'status': 'completed_article_cache_reused'})
+                else:
+                    missing.append(item_id)
+            ids = missing
+            if not ids:
+                continue
         local = {**packet, 'items': [originals[value] for value in ids]}
         local_workspace = workspace / f'b{number}'
         local_workspace.mkdir(parents=True, exist_ok=True)
@@ -312,9 +362,11 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         available = max(0, deadline - time.monotonic())
         recoverable = packet.get('delivery_policy') == 'deliver_available_with_gaps'
         has_claims = any(row.get('decision') == 'eligible' and row.get('claims') for row in choices)
-        reserve = (min(135, available) if has_claims else 0) if recoverable else min(
+        from cwh_web_research_budget import synthesis_reserve
+        integrated = bool(packet.get('screen_integration_active'))
+        reserve = synthesis_reserve(available, integrated=integrated, has_claims=has_claims) if recoverable else min(
             45 + 15 * (len(transport_groups) - number), available * 0.5)
-        minimum_reading = 45 if recoverable and has_claims else 15
+        minimum_reading = (20 if integrated else 45) if recoverable and has_claims else 15
         local_deadline = deadline - reserve
         local_prompt = reading_prompt(bounded=recoverable)
         try:
@@ -344,8 +396,14 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
                              'interruption': failure})
             continue
         choices.extend(result[0]['items'])
+        if cache_root:
+            from cwh_article_read_cache import key as article_key, store as store_article
+            for choice in result[0]['items']:
+                store_article(cache_root, article_key(packet, originals[choice['id']], cache_prompt, command), choice, run)
         batch_runs.append(run)
         manifest.append({'batch': number, 'item_ids': ids,
+            'native_item_ids':[r['id'] for r in result[0]['items'] if r.get('classification_origin') not in {
+                'deterministic_publication_period_gate','deterministic_body_availability_gate'}],
             'transport_characters': len(json.dumps(group, ensure_ascii=False, separators=(',', ':')))})
     request = synthesis_packet(packet, choices)
     if deferrals:
@@ -388,6 +446,7 @@ def review_author_article_batches(packet, transport_groups, prompt, command, wor
         'batch_manifest': manifest, 'batch_runs': batch_runs, 'synthesis_run': synthesis_run,
         'selected_claim_length_edit': {k: v for k, v in length_edit.items() if k != 'original_decision'},
         'article_reading_deferrals': deferrals,
+        'public_web_reading_priority': bool(packet.get('screen_integration_active')),
         'original_packet_sha256': hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
         'seconds': round(time.monotonic() - started, 3)}
     return result, run
@@ -448,7 +507,9 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
         try:
             if fixed_unread and not model_packet['items']:
                 result = {'items': [], 'heading': '', 'clusters': [],
-                          'shortfall_reason': '仅有网页发现信息，未取得正文，不能判断是否含独立观点'}
+                          'shortfall_reason': ('仅有网页发现信息，未取得正文，不能判断是否含独立观点'
+                              if all(r.get('classification_origin')=='deterministic_body_availability_gate' for r in fixed_unread.values())
+                              else '条目由正文可用性或明确发布日期门禁处理，未作全文语义审核')}
                 run = {'session_id': str(uuid.uuid4()), 'seconds': 0, 'model_invoked': False,
                        'transport': 'fixed_unread_web_only'}
             else:
@@ -456,13 +517,24 @@ def author_topic_decisions(packets, prompt, command, workspace, deadline, *, reu
                 use_recoverable_reading = packet.get('delivery_policy') == 'deliver_available_with_gaps'
                 transport_groups = (partition_author_packet(model_packet)
                     if allow_article_batches and (input_characters > MAX_AUTHOR_PACKET_CHARACTERS or use_recoverable_reading) else [])
-                if len(transport_groups) > 1 or (transport_groups and use_recoverable_reading):
+                if (allow_article_batches and packet.get('screen_integration_active')) or len(transport_groups) > 1 or (transport_groups and use_recoverable_reading):
+                    if packet.get('screen_integration_active'):
+                        web_packet = {**model_packet, 'items': [r for r in model_packet['items'] if r['origin'] != 'raw_monitoring']}
+                        transport_groups = partition_author_packet(web_packet)
                     readable_ids = set(ids)
                     readable = {**packet, 'items': [row for row in packet['items'] if row['id'] in readable_ids]}
                     remaining_topics = len(packets) - number + 1
-                    reserved = ((deadline - time.monotonic()) * (remaining_topics - 1) / remaining_topics
-                        if use_recoverable_reading else min(max(0, future_topic_reserve_seconds),
-                        (deadline - time.monotonic()) / remaining_topics) * (remaining_topics - 1))
+                    remaining_seconds = max(0, deadline-time.monotonic())
+                    if use_recoverable_reading and packet.get('protected_web_policy'):
+                        from cwh_adaptive_web_research import topic_slice
+                        weights = [p['protected_web_policy']['priority_weight'] for p in packets[number-1:]]
+                        share = topic_slice(remaining_seconds, weights,
+                                            packet['protected_web_policy']['minimum_topic_seconds'])
+                        reserved = remaining_seconds-share
+                    else:
+                        reserved = (remaining_seconds * (remaining_topics - 1) / remaining_topics
+                            if use_recoverable_reading else min(max(0, future_topic_reserve_seconds),
+                            remaining_seconds / remaining_topics) * (remaining_topics - 1))
                     batch_workspace = workspace / f'a{number}'
                     batch_workspace.mkdir(parents=True, exist_ok=True)
                     batch_prompt = prompt
@@ -563,7 +635,7 @@ def actual_author_run_ids(run):
         return []
     transport = run.get('transport')
     if transport == 'sequential_single_topic_semantic':
-        children = run.get('topic_runs') or []
+        children = [*(run.get('topic_runs') or []),*(run.get('selected_repair_runs') or [])]
     elif transport == 'lossless_article_batches_native_topic_synthesis':
         children = [*(run.get('batch_runs') or []), run.get('synthesis_run') or {}]
     else:
@@ -594,59 +666,117 @@ def author(task, deadline):
     policy = read(inputs['execution_policy'])['profiles'][task['execution_profile']]
     delivery_policy = (policy.get('model_contract') or {}).get('on_missing_evidence') or ''
     available = delivery_policy == 'deliver_available_with_gaps'
-    # Discovery and optional ranking may not consume the whole writing budget.
-    from cwh_reading_budget import preparation_policy, optional_priority_budget
-    preparation_fraction, minimum_priority_seconds = preparation_policy(policy)
-    preparation_deadline = time.monotonic() + max(0, deadline - time.monotonic() - 30) * preparation_fraction
-    raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
-    from cwh_reading_budget import frozen_reading_allocation
-    raw_read_limit, page_fetch_limit = frozen_reading_allocation(
-        Path(task['stage_workspace']) / 'reading_allocation.json', plan,
-        (raw_read_limit, page_fetch_limit), len(index['topics']), max(0, deadline - time.monotonic()))
-    for position, indexed in enumerate(index["topics"]):
-        workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
-        workspace.mkdir(parents=True, exist_ok=True)
-        if deadline - time.monotonic() < 60 and not available:
-            raise TimeoutError("No remaining topic budget")
-        topic_prepare_deadline = (time.monotonic() + max(0, preparation_deadline - time.monotonic()) / (len(index['topics']) - position)
-                                  if available else deadline)
-        prepare_seconds = max(0, topic_prepare_deadline - time.monotonic())
-        topic_plan = next(row for row in plan["topics"] if row["topic"] == indexed["topic"])
-        raw_order = indexed['shortlist'][:raw_read_limit]
-        if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
-            from cwh_raw_reading_discovery import prioritize_raw_articles
-            raw_order = prioritize_raw_articles(indexed, raw_read_limit, command, workspace,
-                optional_priority_budget(prepare_seconds, .2, 45, minimum_priority_seconds)
-                if available else min(45, max(0, deadline - time.monotonic() - 60)), semantic_json)
-        source_rows = [read(row['full_text_path']) for row in raw_order]
-        observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
-                                     (min(65, max(0, topic_prepare_deadline - time.monotonic()) * .65)
-                                      if available else min(65, (deadline - time.monotonic()) * .12)))
-        urls = balanced_fetch_urls(observations, page_fetch_limit, topic=indexed['topic'])
-        if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
-            from cwh_reading_priority import prioritize_pages
-            urls = prioritize_pages(observations, indexed['topic'], page_fetch_limit, urls,
-                command, workspace, (optional_priority_budget(topic_prepare_deadline - time.monotonic(), .25, 30, minimum_priority_seconds)
-                    if available else min(30, max(0, deadline - time.monotonic() - 60))), semantic_json)
-        read_timeout = min(8, max(.1, topic_prepare_deadline - time.monotonic()) / max(1, (len(urls) + 3) // 4)) if available else 8
-        pages = cached_public_pages(workspace, urls, timeout=read_timeout)
-        pages = recover_failed_page_slots(workspace, observations, urls, pages, plan,
-                                          topic_prepare_deadline, topic=indexed['topic'])
-        packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
-        packet['delivery_policy'] = delivery_policy
-        packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
-        packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
-        if inputs.get('meeting_context'):
-            packet['meeting_context'] = inputs['meeting_context']
-        selection = topic_plan.get('candidate_pool_contract') or {}
-        packet['formal_selection'] = {
-            'allow_reserve': task['execution_profile'].startswith('bounded_'),
-            'max_independent_voices': selection.get('max_formal_voices_per_topic'),
-            'rule': selection.get('formal_selection_rule', '')}
-        atomic_write_json(workspace / "source_packet.json", packet)
-        packets.append(packet)
-        topic_plans.append(topic_plan)
-        observed.append(observations)
+    adaptive = (policy.get('research') or {}).get('adaptive_web_policy') or {}
+    from cwh_prepared_research import collection_key, load as load_prepared, save as save_prepared
+    prepared_path = Path(task['stage_workspace']) / 'prepared_research.json'
+    if adaptive:
+        corpus_path = Path(inputs['public_corpus_index']).with_name('public_article_evidence.json')
+        if hashlib.sha256(corpus_path.read_bytes()).hexdigest() != index['source_sha256']:
+            raise ValueError('Prepared research source corpus changed')
+    prepared_key = collection_key(plan, index, policy, command, search_command) if adaptive else None
+    prepared = load_prepared(prepared_path, prepared_key) if adaptive else None
+    if prepared:
+        packets, topic_plans, observed = (prepared[k] for k in ('packets','topic_plans','observed'))
+    else:
+        # Discovery and optional ranking may not consume the whole writing budget.
+        from cwh_reading_budget import preparation_policy, optional_priority_budget
+        preparation_fraction, minimum_priority_seconds = preparation_policy(policy)
+        from cwh_screen_bridge import prepare_screen, packet_readings
+        adaptive = (policy.get('research') or {}).get('adaptive_web_policy') or {}
+        if adaptive:
+            from cwh_adaptive_web_research import screen_allowance, raw_topic_needs, plan_targeted_queries, reading_order
+            allowance = screen_allowance(max(0, deadline-time.monotonic()), len(index['topics']),
+                                        adaptive['protected_web_seconds_per_topic'])
+            screened = prepare_screen(task, plan, index, deadline, maximum_seconds=allowance)
+            needs = raw_topic_needs(screened, [t['topic'] for t in index['topics']],
+                                    adaptive['raw_subject_target'])
+        else:
+            screened = prepare_screen(task, plan, index, deadline)
+        preparation_fraction = min(preparation_fraction, .5)
+        preparation_deadline = time.monotonic() + max(0, deadline - time.monotonic() - 30) * preparation_fraction
+        targeted = {}
+        if adaptive:
+            targeted = plan_targeted_queries(needs, plan, command, Path(task['stage_workspace']),
+                        min(45, max(0, preparation_deadline-time.monotonic())*.2), semantic_json)
+            topic_order = sorted(index['topics'], key=lambda row: -needs[row['topic']]['priority_weight'])
+            atomic_write_json(Path(task['stage_workspace'])/'protected_web_allocation.json', {
+                'policy':adaptive,'raw_needs':needs,'raw_screen_allowance_seconds':allowance,
+                'research_order':[t['topic'] for t in topic_order],
+                'scope':'Protected planning time; actual completed readings and final claims are audited separately.'})
+        else:
+            topic_order = index['topics']
+        raw_read_limit, page_fetch_limit = domestic_reading_limits(plan)
+        from cwh_reading_budget import frozen_reading_allocation
+        raw_read_limit, page_fetch_limit = frozen_reading_allocation(
+            Path(task['stage_workspace']) / 'reading_allocation.json', plan,
+            (raw_read_limit, page_fetch_limit), len(index['topics']), max(0, deadline - time.monotonic()))
+        for position, indexed in enumerate(topic_order):
+            workspace = Path(task["stage_workspace"]) / f"compiled-topic-{position+1}"
+            workspace.mkdir(parents=True, exist_ok=True)
+            if deadline - time.monotonic() < 60 and not available:
+                raise TimeoutError("No remaining topic budget")
+            if adaptive:
+                weights = [needs[t['topic']]['priority_weight'] for t in topic_order[position:]]
+                topic_prepare_deadline = time.monotonic() + max(0, preparation_deadline-time.monotonic())*weights[0]/sum(weights)
+            else:
+                topic_prepare_deadline = (time.monotonic() + max(0, preparation_deadline - time.monotonic()) / (len(index['topics']) - position)
+                                          if available else deadline)
+            prepare_seconds = max(0, topic_prepare_deadline - time.monotonic())
+            topic_plan = copy.deepcopy(next(row for row in plan["topics"] if row["topic"] == indexed["topic"]))
+            fetch_limit = page_fetch_limit
+            if adaptive:
+                need = needs[indexed['topic']]
+                topic_plan['targeted_shortfall_queries'] = targeted.get(indexed['topic'], [])
+                topic_plan['query_execution_limit'] = adaptive['base_queries'] + len(topic_plan['targeted_shortfall_queries'])
+                fetch_limit = (adaptive['zero_raw_page_opportunities'] if not need['raw_nominated_subjects'] else
+                               adaptive['thin_raw_page_opportunities'] if need['shortfall'] else
+                               adaptive['base_page_opportunities'])
+                fetch_limit = min(fetch_limit, policy['research']['max_full_page_fetches_per_topic'])
+            source_rows = [r['record'] for r in screened['topics'][indexed['topic']]]
+            observations = collect_topic(topic_plan, plan["monitoring_period"], search_command, workspace,
+                                         (min(65, max(0, topic_prepare_deadline - time.monotonic()) * .65)
+                                          if available else min(65, (deadline - time.monotonic()) * .12)))
+            ordered_observations = reading_order(observations, plan['monitoring_period']) if adaptive else observations
+            urls = balanced_fetch_urls(ordered_observations, fetch_limit, topic=indexed['topic'])
+            if (plan.get('execution_budget') or {}).get('reading_budget_policy'):
+                from cwh_reading_priority import prioritize_pages
+                priority_seconds = (min(30, max(0, topic_prepare_deadline-time.monotonic())-24)
+                                    if adaptive and needs[indexed['topic']]['shortfall'] else
+                                    optional_priority_budget(topic_prepare_deadline - time.monotonic(), .25, 30, minimum_priority_seconds))
+                urls = prioritize_pages(observations, indexed['topic'], fetch_limit, urls,
+                    command, workspace, (optional_priority_budget(topic_prepare_deadline - time.monotonic(), .25, 30, minimum_priority_seconds)
+                        if available and not adaptive else priority_seconds if adaptive else min(30, max(0, deadline - time.monotonic() - 60))), semantic_json,
+                    context={'period':plan['monitoring_period'],**needs[indexed['topic']]} if adaptive else None)
+            read_timeout = min(8, max(.1, topic_prepare_deadline - time.monotonic()) / max(1, (len(urls) + 3) // 4)) if available else 8
+            pages = cached_public_pages(workspace, urls, timeout=read_timeout)
+            pages = recover_failed_page_slots(workspace, ordered_observations, urls, pages, plan,
+                                              topic_prepare_deadline, topic=indexed['topic'],
+                                              reserve_seconds=0 if adaptive else 60)
+            packet = make_packet(indexed["topic"], plan["monitoring_period"], source_rows, observations, pages)
+            packet['screen_integration_active'] = True
+            packet['screened_readings'] = packet_readings(packet, screened)
+            packet['screen_reading_runs'] = screened['runs']
+            if adaptive:
+                packet['protected_web_policy'] = {
+                    **needs[indexed['topic']], 'minimum_topic_seconds':adaptive['minimum_topic_reading_and_synthesis_seconds']}
+            packet['delivery_policy'] = delivery_policy
+            packet['agenda_topics'] = [row['topic'] for row in plan['topics']]
+            packet['report_agenda'] = (plan.get('input_contract') or {}).get('agenda') or ''
+            if inputs.get('meeting_context'):
+                packet['meeting_context'] = inputs['meeting_context']
+            selection = topic_plan.get('candidate_pool_contract') or {}
+            packet['formal_selection'] = {
+                'allow_reserve': task['execution_profile'].startswith('bounded_'),
+                'max_independent_voices': selection.get('max_formal_voices_per_topic'),
+                'rule': selection.get('formal_selection_rule', '')}
+            atomic_write_json(workspace / "source_packet.json", packet)
+            packets.append(packet)
+            topic_plans.append(topic_plan)
+            observed.append(observations)
+        if adaptive:
+            save_prepared(prepared_path, prepared_key, packets, topic_plans, observed)
+    for packet in packets:
+        packet['_reading_cache_root'] = str(Path(task['stage_workspace']) / 'article_readings')
     prompt = AUTHOR_PROMPT
     feedback = inputs.get("validation_problems") or []
     blocker_path = Path(task["stage_workspace"]) / "compiled_blocker.json"
@@ -668,6 +798,8 @@ def author(task, deadline):
     if request and request["topics"]:
         result, run = semantic_json(request, REPAIR_PROMPT + batch_author_contract(request["topics"]), command, Path(task["stage_workspace"]),
             "author-selected-repair", deadline - time.monotonic(), reuse_cache=False)
+        from cwh_prepared_research import carry_repair_runs
+        run = carry_repair_runs(prior.get('run') or {}, run)
         decisions = apply_semantic_repairs(prior["decisions"], request, result)
     else:
         limits = task.get('semantic_request_limits') or {}
@@ -697,6 +829,12 @@ def author(task, deadline):
             topic_run = provenance_runs[position] if position < len(provenance_runs) else {}
             part = compile_topic(packet, decision, observations, topic_plan, task["execution_profile"], registry["version"], run["session_id"],
                                  reading_deferrals=topic_run.get('article_reading_deferrals'))
+            if adaptive:
+                pool = part['research_audit']['domestic_media_research']['candidate_pool_by_topic'][0]
+                pool['adaptive_web_allocation'] = {**packet['protected_web_policy'],
+                    'allocated_queries':len(observations['queries']),
+                    'targeted_queries':topic_plan.get('targeted_shortfall_queries', [])}
+                pool['saturation']['allocated_query_limit'] = len(observations['queries'])
             if decision.get('transport_repairs'):
                 part['transport_repairs'] = decision['transport_repairs']
         except (ValueError, KeyError, TypeError) as exc:
@@ -708,6 +846,9 @@ def author(task, deadline):
     if compilation_errors:
         raise ValueError("; ".join(compilation_errors))
     atomic_write_json(Path(task["stage_workspace"]) / "compiled_runs.json", [run])
+    if adaptive:
+        from cwh_adaptive_web_research import agenda_order
+        parts = agenda_order(parts, [row['topic'] for row in index['topics']])
     merged = merge_topic_bundles(parts, [row["topic"] for row in index["topics"]], index["candidate_count"], author_id)
     merged["metadata"].update(execution_profile=task["execution_profile"],
         monitoring_start=plan["monitoring_period"]["start"], monitoring_end=plan["monitoring_period"]["end"],

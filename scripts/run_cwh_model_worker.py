@@ -68,7 +68,7 @@ def build_prompt(task_path: Path, session_id: str) -> str:
         "按当前任务契约写出带明确缺口的最终JSON，不要仅因这些缺口返回blocker。"
         "不能补造观点、引用或情感比例；已有命题仍须忠实原文。"
         "只有权限/输入损坏等导致当前任务根本无法执行时才写blocker.json并结束。\n"
-        if task.get("execution_profile") in {"bounded_40m", "bounded_60m"}
+        if task.get("execution_profile") in {"bounded_40m", "bounded_45m", "bounded_60m"}
         else "遇到真实证据或访问不足，将 blocker.json 写入 stage_workspace 并结束，勿自行绕过门禁。\n"
     )
     return (
@@ -100,7 +100,10 @@ def main():
     if task['stage_id'] == 'domestic_comments_sentiment' and os.environ.get('CWH_SEMANTIC_COMMAND_JSON'):
         capture = task['inputs'].get('comment_capture') or os.environ.get('CWH_COMMENT_CAPTURE')
         if not capture:
-            from cwh_fast_comment_collection import prepare_task
+            if os.environ.get('CWH_RAW_SAMPLE_DIR'):
+                from cwh_monitoring_comments import prepare_task
+            else:
+                from cwh_fast_comment_collection import prepare_task
             collection_started = time.monotonic()
             try:
                 prepare_task(task_path)

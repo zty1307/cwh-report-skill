@@ -159,7 +159,7 @@ def compact_hotword_packet(packet: dict) -> dict:
 def response_object(log: str) -> dict:
     from cwh_json_transport import (insert_single_missing_member_comma,
         normalize_single_smart_quoted_member_key, remove_single_stray_period_before_string_value,
-        single_fenced_json)
+        single_fenced_json, single_initial_json)
     parse_failures = []
     def parse(value):
         if isinstance(value, dict):
@@ -178,6 +178,9 @@ def response_object(log: str) -> dict:
                     return found
         if isinstance(value, str):
             text = value.strip()
+            initial = single_initial_json(text)
+            if initial is not None:
+                return parse(initial)
             framed = single_fenced_json(text)
             if framed is not None:
                 return parse(framed)

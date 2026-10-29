@@ -23,8 +23,10 @@ def policy():
 def test_40m_remains_available_and_retains_independent_review_and_quality_minimums():
     name, current = execution_profile("bounded_40m")
     assert name == "bounded_40m"
-    assert sum(current["stage_budgets_seconds"].values()) == 2040
-    assert current["reserved_delivery_buffer_seconds"] == 360
+    assert sum(current["stage_budgets_seconds"].values()) == 2160
+    assert current["reserved_delivery_buffer_seconds"] == 240
+    assert current['research_deadline_seconds'] == 2160
+    assert current['stage_budgets_seconds']['domestic_viewpoints'] == 780
     assert current["wall_clock_budget_seconds"] == 2400
     assert current["research"]["parallel_lanes"] is False
     assert current["comments"]["parallel_with_domestic_research"] is False

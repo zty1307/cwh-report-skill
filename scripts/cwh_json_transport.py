@@ -233,6 +233,29 @@ def single_fenced_json(text):
     return result
 
 
+def single_initial_json(text):
+    stripped = text.strip()
+    if not stripped.startswith('{'):
+        return None
+    def reject_constant(value):
+        raise ValueError('Non-standard JSON constant')
+    try:
+        value, end = json.JSONDecoder(object_pairs_hook=unique_members, parse_constant=reject_constant).raw_decode(stripped)
+    except ValueError:
+        return None
+    outside = stripped[end:].strip()
+    if not outside or any(c in outside for c in '{}[]`') or not isinstance(value, dict):
+        return None
+    repairs = value.get('transport_repairs')
+    if repairs is not None and not isinstance(repairs, list):
+        return None
+    value.setdefault('transport_repairs', []).append({
+        'kind': 'decoded_single_initial_complete_json_with_plain_explanation',
+        'original_text_sha256': hashlib.sha256(text.encode()).hexdigest(),
+        'ignored_plain_explanation_characters': len(outside)})
+    return value
+
+
 def load_framed_json(text: str):
     try:
         return json.loads(text)

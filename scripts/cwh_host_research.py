@@ -135,6 +135,12 @@ def invoke(command_template, prompt, workspace, label, timeout):
 
 
 def topic_search_tasks(plan, period):
+    if 'supplemental_search_tasks' in plan:
+        rows = plan['supplemental_search_tasks']
+        if not isinstance(rows, list) or not rows or any(not isinstance(r.get('query'), str) or
+                not r['query'].strip() or r.get('route') != 'open_web' for r in rows):
+            raise ValueError('Invalid explicit supplemental discovery tasks')
+        return rows
     subject = plan.get('search_subject') or policy_search_subject(plan['topic'])
     tasks = [{"source_id": row["source_id"], "query": row["query"],
               "route": "public_platform" if row.get("tier") == "public_platform" else "stable_registry"}
@@ -149,10 +155,24 @@ def topic_search_tasks(plan, period):
     if plan.get("queries"):
         tasks.append({"source_id": "public_platform_supplement", "route": "public_platform",
                       "query": f'(site:sohu.com OR site:163.com OR site:zhihu.com) {period["start"]} {subject} (解读 OR 评论 OR 建议 OR 分析)'})
+    for query in plan.get('targeted_shortfall_queries') or []:
+        if query not in {row['query'] for row in tasks}:
+            tasks.append({'source_id': 'shortfall_targeted', 'query': query,
+                          'route': 'open_web', 'targeted_shortfall': True})
     limit = int(plan.get("query_execution_limit") or 0)
     if limit > 0:
         tasks = tasks[:limit]
     return tasks
+
+
+def query_format_key(value):
+    """Match a planned slot only; the observation still records the actual query.
+
+    Preserve terms, operators, dates, domains and token boundaries. Quotes and
+    repeated whitespace can identify a formatting variant, never certify equal
+    retrieval semantics or rewrite what the host really executed.
+    """
+    return re.sub(r'\s+', ' ', re.sub('["“”]', '', value)).strip()
 
 
 def collect_topic(plan, period, command_template, workspace, timeout):
@@ -189,9 +209,19 @@ def collect_topic(plan, period, command_template, workspace, timeout):
         else:
             log, run = invoke(command_template, prompt, workspace, "search", timeout)
     observations = observed_tools(log)
-    records = []
+    records, used_tool_ids, matched_tasks = [], set(), []
     for number, task in enumerate(tasks, 1):
-        found = [x for x in observations if x["name"] == "WebSearch" and x["input"].get("query") == task["query"]]
+        found = [x for x in observations if x["name"] == "WebSearch" and x['id'] not in used_tool_ids
+                 and x["input"].get("query") == task["query"]]
+        variant = False
+        if not found:
+            candidates = [x for x in observations if x['name'] == 'WebSearch' and x['id'] not in used_tool_ids
+                          and isinstance(x['input'].get('query'), str)
+                          and query_format_key(x['input']['query']) == query_format_key(task['query'])]
+            # Ambiguous matches remain unassigned, never guessed or double-counted.
+            if len(candidates) == 1:
+                found, variant = candidates, True
+        matched_tasks.append(bool(found))
         row = {**task, "query_id": f"q{number}", "round": 2 if number == len(tasks) else 1,
                "backend": "approved_host_WebSearch", "executed_at": run["completed_at"],
                "execution_window": {"start": run["started_at"], "end": run["completed_at"]},
@@ -199,6 +229,12 @@ def collect_topic(plan, period, command_template, workspace, timeout):
                "blocker": "Host received no completed tool result for this exact query", "log": run["log"]}
         if found:
             hit = found[-1]
+            used_tool_ids.add(hit['id'])
+            row['tool_use_id'] = hit['id']
+            if variant:
+                row.update(planned_query=task['query'], query=hit['input']['query'],
+                           query_matching='observed_quote_or_whitespace_variant',
+                           matching_scope='Planned-slot association only; query is the actual executed string from the immutable tool log.')
             results = search_rows(hit["text"])
             if not hit["is_error"] and (results or re.search(r"Found 0 results|No results|未找到.*结果", hit["text"], re.I)):
                 row.update(status="completed", result_count=len(results), results=results,
@@ -208,7 +244,7 @@ def collect_topic(plan, period, command_template, workspace, timeout):
         records.append(row)
     result = {"topic": plan["topic"], "queries": records, "host_run": run,
               "query_plan_sha256": digest, "log_sha256": hashlib.sha256(Path(run["log"]).read_bytes()).hexdigest(),
-              "all_queries_observed": all(any(x["input"].get("query") == t["query"] for x in observations) for t in tasks)}
+              "all_queries_observed": all(matched_tasks)}
     atomic_write_json(workspace / "research_observations.json", result)
     return result
 

@@ -58,7 +58,7 @@ def prepare_available_delivery(data: dict) -> dict:
             if proof:
                 saturation['completed'] = False
                 saturation['budget_stop'] = proof
-                budget_notices.append(f"{pool['topic']}已达到本轮{proof['configured_max_queries']}次查询上限，但最后一轮仍有新增观点；检索未证明饱和，保留现有证据交付。")
+                budget_notices.append(f"{pool['topic']}已完成本轮分配的{len(proof['executed_query_ids'])}次查询（配置上限{proof['configured_max_queries']}次），但最后一轮仍有新增观点；检索未证明饱和，保留现有证据交付。")
     if budget_notices:
         result['metadata']['research_budget_gaps'] = budget_notices
     synthesis_gaps = [t['topic'] + '：分组未完成，已提取观点暂按来源顺序排列，待独立核验。'

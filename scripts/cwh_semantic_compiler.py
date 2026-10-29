@@ -252,10 +252,13 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
         if choice["decision"] != "eligible" and claims:
             raise ValueError("Unselected item cannot contain selected claims")
         raw = item["origin"] == "raw_monitoring"
-        metadata_only = not raw and not (item.get('content') or '').strip()
+        period_only = not raw and choice.get('classification_origin')=='deterministic_publication_period_gate'
+        metadata_only = period_only or (not raw and not (item.get('content') or '').strip())
         model_disposition = None
         machine_disposition = None
-        if metadata_only:
+        if period_only:
+            machine_disposition = copy.deepcopy(choice)
+        elif metadata_only:
             if choice.get('classification_origin') == 'deterministic_body_availability_gate':
                 machine_disposition = copy.deepcopy(choice)
             else:
@@ -285,7 +288,8 @@ def compile_topic(packet, decision, observations, topic_plan, profile, registry_
                        "title": item["title"], "url": item["url"], "published_at": item.get("published_at") or choice.get("published_at", ""),
                        "discovery_route": query["route"], "source_type": "expert" if claim and claim["speaker_type"] == "named_person" else "mainstream_media",
                        "source_tier": "monitoring_export" if raw else "public_web", "content_summary": choice["reason"]}
-                row['review_scope'] = 'discovery_metadata_only' if metadata_only else 'full_text_semantic_review'
+                row['review_scope'] = ('publication_metadata_only' if period_only else
+                    'discovery_metadata_only' if metadata_only else 'full_text_semantic_review')
                 if item['id'] in deferred:
                     row.update(review_scope='full_text_available_semantic_review_deferred',
                         decision_reason='模型阅读未完成，原文保留待审；只暂缓正式选材，不认定原文缺乏解读。',

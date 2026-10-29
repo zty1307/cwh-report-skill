@@ -2,19 +2,19 @@
 
 An auditable, resumable workflow for generating public-opinion reports for State Council executive meetings from monitoring-system exports.
 
-The default `bounded_60m` profile is model-neutral and uses one active model worker: it exposes bounded JSON tasks and keeps deterministic writing, validation, state, hashing, rendering, and delivery outside the model. Research has a 45-minute cutoff inside the one-hour total budget. `bounded_40m` remains a tighter explicit option; `exhaustive` preserves uncapped research. Independent evidence review remains a separate sequential run, not author self-certification.
+The default `bounded_45m` profile is model-neutral and uses one active model worker. The complete job has a 2700-second limit, a 2460-second research cutoff and a 240-second delivery buffer. Scripts own scheduling, calculations, validation, state, caching, rendering and delivery; models read complete selected articles, extract viewpoints and perform separate independent review. `bounded_40m`, `bounded_60m` and `exhaustive` remain explicit alternatives.
 
-Current evaluation version: **2026.10.16-rules-sync** (`config/release.json`). This update brings the detailed-channel accounting and speaker-attribution rules into the published editorial candidate. The existing host-compiled evidence decisions, independent review and delivery gates remain required. Successful end-to-end completion within one hour on ordinary domestic models remains a forward-test target, not a claimed result.
+Current evaluation version: **2026.10.29-feedback45** (`config/release.json`). This publication synchronizes the source used in the complete GLM test on **2026-10-23**: **37m51.25s**, all 12 stages completed, with **28 domestic body claims** (24 from monitoring exports and 4 from public-web research). The result remains `delivered_with_gaps`, not certified formal delivery. See [measured results and limitations](references/feedback45_validation.md).
 
 统计规则：总事件、各子事件分别从“细分渠道-日趋势”取数；细分新闻列归境内主流媒体，百家号、头条等独立保留并归新媒体；微信合计公众文章、在看／推荐量、精选评论量三项；微博、视频号单列，不将父级汇总列与子级细数重复累加。境外仍经原文审核后回算，本阶段正式情感百分比留空。
 
 引述规则：境内媒体自媒体观点中的具名个人须核实机构、职务、姓名；普通个人、普通网友和仅自报经历者不作该部分样本。账号自身发言归完整账号名，转引专家归专家。正文直接写主体和观点，去除采访过程套话及重复账号抬头。真实网民评论仍按独立评论章节规则审核。规则同步不代表已完成新一轮真实模型报告测试。
 
-本次发布副本的自动化验证：1492项测试通过、7项因外部夹具或环境条件跳过，Skill格式检查通过。它与包含其他未发布修复的开发候选不是同一个测试集合。
+实测源码的自动化验证：1632项测试通过、7项因外部夹具或环境条件跳过、5项子测试通过；预检通过。本次GitHub同步另检查发布目录、源码一致性和回归测试，结果见[发布验证说明](references/feedback45_validation.md)。
 
-Validation details and remaining limitations are recorded in [the candidate validation report](references/v47_validation.md). Real hy4 tests distinguish fresh raw review, recovery using earlier decisions, and report-stage continuation; none may be relabelled as a fresh full-report success. No API token reduction percentage or full-report speedup is claimed. Review-only snapshots do not count as formal report delivery.
+Earlier candidate validation is retained in [the historical validation report](references/v47_validation.md). Historical hy4 recovery or report-stage continuation must not be relabelled as a fresh full-report success. The newer GLM measurement is one complete run on one input period and host, not a guarantee for every model, period or provider; no token reduction percentage is claimed.
 
-See [rc3 observed results and unresolved gates](references/v47_rc3_validation.md) and [earlier rc2 observations](references/v47_rc2_validation.md). The compiled adapter remains opt-in through `CWH_SEMANTIC_COMMAND_JSON` and an approved `CWH_SEARCH_COMMAND_JSON`; generic fallback hosts still need their capability-specific adapters. Shared installed Skills and other model windows are not changed by a repository update.
+Earlier [rc3 observations](references/v47_rc3_validation.md) and [rc2 observations](references/v47_rc2_validation.md) remain historical. Configure an approved semantic host through `CWH_SEMANTIC_COMMAND_JSON` and public-web discovery through `CWH_SEARCH_COMMAND_JSON`; other hosts require compatible adapters. This repository update does not install into other model windows or bundle personal sessions.
 
 ## 固定流程与低 token 分工
 
@@ -31,13 +31,13 @@ See [rc3 observed results and unresolved gates](references/v47_rc3_validation.md
 
 ## 国产模型复测
 
-更新完整 Skill 目录并确认 `config/release.json` 为 `2026.10.16-rules-sync`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。旧测试中修改过哈希、回退过状态或使用旧节点结构的任务留作审计，不能继续用它证明新版本成功。
+更新完整 Skill 目录并确认 `config/release.json` 为 `2026.10.29-feedback45`。提供本期议程和原始监测表或标准总表；每个模型使用独立的新任务目录。当前默认 `bounded_45m`，单个AI任务按顺序执行；原文筛选、全网搜索和薄弱议题补充在同一整轮中自动衔接。旧测试、暂停后的诊断续跑不能充当新的45分钟完整实测。
 
 先确认可用的 Python（建议 3.12），运行 `python scripts/cwh_preflight.py --skill-root .`；按预检提示补齐依赖。Windows 若 `python` 命中商店别名，改用实际 Python 可执行文件的完整路径。
 
 可直接把这段交给测试模型，并附议程及数据文件：
 
-> 使用当前目录的 cwh-report-skill 完成这期报告。先读取 SKILL.md 并执行预检，使用 bounded_60m 和新的 job-dir，单工作器顺序运行。由流水线按序生成任务；你只完成当前 tasks 文件声明的输出，采集中间文件写入 stage_workspace，再调用 run 续跑。不重写报告正文和工作台，不重复读取全部资料。独立复核使用新的顺序模型运行上下文，不能由撰稿运行自行认证。不得修改 Skill、配置、状态、事件、哈希或已验证产物。遇到证据不足、登录或超时，按契约保留阻断和日志。完成后核验 Word、Excel、JSON、审计与 HTML，报告真实总耗时、最终状态和全部阻断。
+> 使用当前目录的 cwh-report-skill 完成这期报告。先读取 SKILL.md 并执行预检，使用 bounded_45m 和新的 job-dir，单工作器顺序运行。由流水线按序生成任务；你只完成当前 tasks 文件声明的输出，采集中间文件写入 stage_workspace，再调用 run 续跑。不重写报告正文和工作台，不重复读取全部资料。独立复核使用新的顺序模型运行上下文，不能由撰稿运行自行认证。不得修改 Skill、配置、状态、事件、哈希或已验证产物。遇到证据不足、登录或超时，按契约保留阻断和日志。完成后核验 Word、Excel、JSON、审计与 HTML，报告真实总耗时、最终状态和全部阻断。
 
 标准总表入口（从本目录执行，替换议程与路径）：
 
@@ -46,12 +46,12 @@ python scripts/run_cwh_resumable_pipeline.py run `
   --job-dir outputs/model_retest_v47_new `
   --agenda "本期会议日期或完整议程" `
   --system-workbook "D:\path\本期标准总表.xlsx" `
-  --execution-profile bounded_60m --no-open
+  --execution-profile bounded_45m --no-open
 ```
 
-没有外部工作器时停在 `waiting_ai`，执行当前任务包后用同一命令续跑。自动工作器通过 `CWH_PIPELINE_AI_COMMAND_JSON` 接入，宿主配置见 [model worker hosts](references/model_worker_host.md)。总计时从首次 `run` 开始，节点计时从首次进入节点开始，均包含等待和重试；重复 `run` 或 `invalidate` 不重置。超时记录 `time_budget_exhausted`，不能计为一小时内成功。原始导出目录的入口及必需元数据见 `references/raw_workbook_pipeline.md`。
+没有外部工作器时停在 `waiting_ai`，执行当前任务包后用同一命令续跑。自动工作器通过 `CWH_PIPELINE_AI_COMMAND_JSON` 接入，宿主配置见 [model worker hosts](references/model_worker_host.md)。总计时从首次 `run` 开始，节点计时从首次进入节点开始，均包含等待和重试；重复 `run` 或 `invalidate` 不重置。超时记录 `time_budget_exhausted`，不能计为45分钟内完成。原始导出目录的入口及必需元数据见 `references/raw_workbook_pipeline.md`。
 
-限时模式不再要求逐字重读全部监测文章：脚本保存完整池及议题索引，每个议题至少实际审核 `min(12, 本议题文章数)` 篇全文，其余明确记为 deferred，不能记成审核、排除或没有观点。完整证据、独立声音数量、观点密度及独立复核要求不降低；穷尽模式仍要求全部审核。议题批量模型传输仍属可选实验功能。
+原始监测模式先由脚本保留完整语料和备选索引，默认首批最多50篇、合计11万字符交给AI读完整导出正文；未读备选不记成排除。每题均保留公开搜索及网页阅读机会，薄弱议题优先。独立核验后仍薄弱时，自动回捞未读备选、补读网页，并依据前序剔除理由调整搜索词。新增观点仍须独立复核；已完成阅读复用缓存，不能通过重置时钟扩大预算。详见[原始筛选集成](references/raw_sample_screen_integration.md)和[定向补搜与缓存](references/adaptive_web_research.md)。
 
 复测请保留 `pipeline_state.json`、`pipeline_events.jsonl`、`tasks/`、`logs/` 和 `report/`。状态文件的 `completed_elapsed_seconds` 是首次成功耗时；最终 `succeeded` 还需与事件历史、产物哈希和交付审计相符。等待、阻断和部分产物均不计成功。
 

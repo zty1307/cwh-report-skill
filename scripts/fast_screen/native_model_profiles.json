@@ -1,0 +1,48 @@
+{
+  "deepseek-v4.1-flash": {
+    "host_script": "workbuddy_screen_host.py",
+    "host_hash": "c76b3e61e30641acaeee5515f0552f1f5d5969020201dea76646db4eb69be12e",
+    "max_batch_chars": 90000,
+    "requested_effort": "low",
+    "state": "experimental; inspect actual reading coverage and pending status"
+  },
+  "glm-5.3-flash-ioa": {
+    "host_script": "workbuddy_screen_host.py",
+    "host_hash": "c76b3e61e30641acaeee5515f0552f1f5d5969020201dea76646db4eb69be12e",
+    "max_batch_chars": 60000,
+    "requested_effort": "low",
+    "generation_profile": "glm_low",
+    "system_profile": "semantic",
+    "output_contract": "canonical",
+    "observe_wire": true,
+    "state": "Configured experimental alternative; same3 probes only; this bounded50 profile not validated in four complete periods",
+    "max_batch_articles": 12,
+    "max_body_chars": 110000,
+    "reading_cost_power": 1,
+    "exploration_cost_power": 0.65,
+    "max_selected_articles": 50
+  },
+  "hy3-ioa": {
+    "host_script": "workbuddy_screen_host.py",
+    "host_hash": "c76b3e61e30641acaeee5515f0552f1f5d5969020201dea76646db4eb69be12e",
+    "max_batch_chars": 30000,
+    "requested_effort": "low",
+    "state": "experimental; inspect actual reading coverage and pending status"
+  },
+  "glm-5.3-ioa": {
+    "host_script": "workbuddy_screen_host.py",
+    "host_hash": "c76b3e61e30641acaeee5515f0552f1f5d5969020201dea76646db4eb69be12e",
+    "max_batch_chars": 60000,
+    "requested_effort": "low",
+    "generation_profile": "glm_low",
+    "system_profile": "semantic",
+    "output_contract": "canonical",
+    "observe_wire": true,
+    "state": "Observed four bounded queues completed, one offline missing-field export recovery; candidate collection only; source/date verification pending",
+    "max_batch_articles": 12,
+    "max_body_chars": 110000,
+    "reading_cost_power": 1,
+    "exploration_cost_power": 0.65,
+    "max_selected_articles": 50
+  }
+}

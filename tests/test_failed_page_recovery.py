@@ -4,9 +4,26 @@ import json
 from pathlib import Path
 import sys
 import time
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import run_cwh_compiled_worker as worker
+
+
+@pytest.mark.parametrize('tamper',[False,True])
+def test_existing_hash_valid_replacements_survive_later_expired_budget(tmp_path,monkeypatch,tamper):
+    urls,pages,observations=fixture_rows()
+    monkeypatch.setattr(worker,'read_public_pages',lambda selected,timeout:[
+        {'url':selected[0],'status':'completed','source_text':'已取得的完整补充原文'}])
+    plan={'execution_budget':{'max_full_page_fetches_per_topic':4}}
+    first=worker.recover_failed_page_slots(tmp_path,observations,urls,pages,plan,time.monotonic()+100)
+    assert len(first)==3
+    if tamper:
+        path=tmp_path/'failed_page_recovery/public_pages.json'
+        path.write_text('[]',encoding='utf-8')
+    monkeypatch.setattr(worker,'read_public_pages',lambda *a,**k:pytest.fail('No network after deadline'))
+    second=worker.recover_failed_page_slots(tmp_path,observations,urls,pages,plan,time.monotonic()-1)
+    assert len(second)==(2 if tamper else 3)
 
 
 def fixture_rows():

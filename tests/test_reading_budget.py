@@ -14,7 +14,7 @@ def test_preparation_reserves_most_author_time_for_intact_reading():
     from cwh_model_contract import execution_profile
     fraction, minimum = preparation_policy(execution_profile('bounded_60m')[1])
     assert fraction == .25 and minimum == 30
-    assert preparation_policy(execution_profile('bounded_40m')[1]) == (.45, 10)
+    assert preparation_policy(execution_profile('bounded_40m')[1]) == (.25, 30)
     assert optional_priority_budget(60, .2, 45, minimum) == 0
     assert optional_priority_budget(200, .2, 45, minimum) == 40
     assert optional_priority_budget(900, .2, 45, minimum) == 45

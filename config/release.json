@@ -1,5 +1,11 @@
 {
-  "release_id": "2026.10.16-rules-sync",
-  "rules_updated": "2026-10-16",
-  "required_charts": ["trend_distribution", "topic_distribution", "hotword_distribution"]
+  "release_id": "2026.10.29-feedback45",
+  "rules_updated": "2026-10-23",
+  "required_charts": [
+    "trend_distribution",
+    "topic_distribution",
+    "hotword_distribution"
+  ],
+  "published_on": "2026-10-29",
+  "validation_reference": "references/feedback45_validation.md"
 }

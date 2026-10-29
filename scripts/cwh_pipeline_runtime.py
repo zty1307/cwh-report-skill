@@ -291,6 +291,11 @@ class PipelineRunner:
     def _load_or_initialize(self) -> dict[str, Any]:
         if not self.state_path.exists():
             state = self._new_state()
+            origin = float(self.input_contract.get('budget_origin_epoch') or 0)
+            if origin:
+                if origin <= 0 or origin > time.time():
+                    raise ValueError('Invalid host clock origin')
+                state['budget_started_epoch'] = origin
             atomic_write_json(self.state_path, state)
             self._event("pipeline_created", details={"input_fingerprint": state["input_fingerprint"]})
             return state

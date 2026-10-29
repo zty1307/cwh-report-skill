@@ -13,11 +13,11 @@ from cwh_preflight import run_preflight  # noqa: E402
 
 
 class ModelContractTests(unittest.TestCase):
-    def test_default_profile_fits_one_hour_with_delivery_buffer(self) -> None:
+    def test_default_profile_fits_45_minutes_with_delivery_buffer(self) -> None:
         name, profile = execution_profile()
-        self.assertEqual("bounded_60m", name)
-        self.assertEqual(3600, profile["wall_clock_budget_seconds"])
-        self.assertEqual(3000, profile["research_deadline_seconds"])
+        self.assertEqual("bounded_45m", name)
+        self.assertEqual(2700, profile["wall_clock_budget_seconds"])
+        self.assertEqual(2460, profile["research_deadline_seconds"])
         stage_total = sum(profile["stage_budgets_seconds"].values())
         self.assertLessEqual(
             stage_total + profile["reserved_delivery_buffer_seconds"],

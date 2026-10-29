@@ -938,8 +938,23 @@ def validate_foreign(audit_path: Path, supplements_path: Path, *, allow_partial=
     return problems
 
 
-def build_specs() -> list[StageSpec]:
-    return [
+def complete_compiled_bundle(draft,corpus,topics,profile_name,allow_deferred=True):
+    if allow_deferred and corpus:
+        from prepare_cwh_corpus_index import complete_corpus_deferrals
+        draft=complete_corpus_deferrals(draft,corpus,topics)
+    normalized=normalize_analysis(complete_analysis_structure(draft,corpus))
+    _,settings=execution_profile(profile_name)
+    if (settings.get('model_contract') or {}).get('on_missing_evidence')==DELIVERY_POLICY:
+        normalized=prepare_available_delivery(normalized)
+    pending=[i for i in validate_analysis_mapping(normalized,require_semantic_review=False)['issues']
+             if i['code'] in {'claim_adds_numbers','claim_adds_quoted_terms'}]
+    if pending and allow_deferred:
+        normalized.setdefault('metadata',{})['pending_claim_repairs']=pending
+    return normalized
+
+
+def build_specs(include_remaining=False) -> list[StageSpec]:
+    specs = [
         StageSpec("preflight", "运行环境与Skill完整性预检", artifacts=(ArtifactSpec("preflight", "artifacts/preflight.json"),), max_attempts=1),
         StageSpec("intake", "输入识别与契约固化", dependencies=("preflight",), artifacts=(ArtifactSpec("intake", "artifacts/intake.json"),), max_attempts=1),
         StageSpec(
@@ -1034,6 +1049,17 @@ def build_specs() -> list[StageSpec]:
             max_attempts=2,
         ),
     ]
+    if include_remaining:
+        from dataclasses import replace
+        extra = StageSpec('domestic_remaining_research', '自动利用余量补搜补读并独立复核',
+            dependencies=('hotwords','overseas_evidence'),
+            artifacts=(ArtifactSpec('remaining_research_receipt','artifacts/remaining_research_receipt.json'),
+                       ArtifactSpec('remaining_verified_bundle','artifacts/analysis_bundle_remaining_verified.json',required=False)),
+            max_attempts=1)
+        at = next(i for i,s in enumerate(specs) if s.stage_id=='render')
+        specs.insert(at,extra)
+        specs[at+1] = replace(specs[at+1],dependencies=(*specs[at+1].dependencies,extra.stage_id))
+    return specs
 
 
 class CwhPipeline:
@@ -1046,6 +1072,7 @@ class CwhPipeline:
         for directory in (self.artifacts, self.tasks, self.report):
             directory.mkdir(parents=True, exist_ok=True)
         executors = {
+            'domestic_remaining_research': self.remaining_research,
             "preflight": self.preflight,
             "intake": self.intake,
             "workbook": self.workbook,
@@ -1060,7 +1087,7 @@ class CwhPipeline:
         }
         self.runner = PipelineRunner(
             self.job_dir,
-            build_specs(),
+            build_specs(bool((contract.get('automatic_remaining_research') or {}).get('enabled'))),
             executors,
             pipeline_name="cwh-formal-report",
             input_contract=contract,
@@ -1343,7 +1370,7 @@ class CwhPipeline:
             reading_aliases = load_reading_aliases(
                 self.contract.get('metadata'), self.artifacts / 'run_metadata.json', topics)
             index_path = prepare_corpus_index(corpus_path, corpus, topics, reading_aliases)
-        allow_deferred = self.contract.get("execution_profile") in {"bounded_40m", "bounded_60m"}
+        allow_deferred = self.contract.get("execution_profile") in {"bounded_40m", "bounded_45m", "bounded_60m"}
 
         def evaluate_draft() -> list[str]:
             if not target.exists():
@@ -1352,13 +1379,7 @@ class CwhPipeline:
                 draft = read_json(target)
                 if not isinstance(draft, dict):
                     return ["analysis_bundle.json顶层必须是JSON对象"]
-                if allow_deferred and corpus:
-                    from prepare_cwh_corpus_index import complete_corpus_deferrals
-                    draft = complete_corpus_deferrals(draft, corpus, topics)
-                normalized = normalize_analysis(complete_analysis_structure(draft, corpus))
-                _, delivery_profile = execution_profile(self.contract.get("execution_profile") or "")
-                if (delivery_profile.get("model_contract") or {}).get("on_missing_evidence") == DELIVERY_POLICY:
-                    normalized = prepare_available_delivery(normalized)
+                normalized = complete_compiled_bundle(draft,corpus,topics,self.contract.get('execution_profile') or '',allow_deferred)
             except (ValueError, TypeError, AttributeError) as exc:
                 return [f"analysis_bundle.json无法解析或结构无效：{type(exc).__name__}: {exc}"]
             atomic_write_json(target, normalized)
@@ -1464,7 +1485,7 @@ class CwhPipeline:
                     initial = read_json(runner.root / 'worker' / spec.stage_id / 'initial_independent_review.json')
                     validate_combined(source_data, repaired, initial, packet)
                     draft_problems = validate_analysis_bundle(repaired_path, topics, require_semantic_review=False,
-                        allow_deferred_corpus=self.contract.get('execution_profile') in {'bounded_40m', 'bounded_60m'})
+                        allow_deferred_corpus=self.contract.get('execution_profile') in {'bounded_40m', 'bounded_45m', 'bounded_60m'})
                     if draft_problems:
                         return draft_problems
                     source_data = repaired
@@ -1483,7 +1504,7 @@ class CwhPipeline:
             atomic_write_json(verified_path, verified_data)
             mapping_audit = validate_analysis_mapping(verified_data)
             atomic_write_json(audit_path, mapping_audit)
-            return validate_analysis_bundle(verified_path, topics, allow_deferred_corpus=self.contract.get("execution_profile") in {"bounded_40m", "bounded_60m"})
+            return validate_analysis_bundle(verified_path, topics, allow_deferred_corpus=self.contract.get("execution_profile") in {"bounded_40m", "bounded_45m", "bounded_60m"})
 
         problems = evaluate_review()
         if not problems:
@@ -1618,7 +1639,7 @@ class CwhPipeline:
             supplied = str(self.contract.get(key) or "").strip()
             if supplied and not target.exists():
                 shutil.copy2(supplied, target)
-        allow_partial = self.contract.get('execution_profile') in {'bounded_40m', 'bounded_60m'}
+        allow_partial = self.contract.get('execution_profile') in {'bounded_40m', 'bounded_45m', 'bounded_60m'}
         problems = validate_foreign(audit, supplements, allow_partial=allow_partial) if audit.exists() and supplements.exists() else ["尚未生成境外采集与审核产物"]
         if not problems:
             return StageOutcome.succeeded("境外媒体与境外网民评论已分开采集、审核并保留来源。")
@@ -1706,7 +1727,14 @@ class CwhPipeline:
             details={"task": str(task), "expected_output": str(target), "problems": problems},
         )
 
+    def remaining_research(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
+        from cwh_remaining_research import supplement
+        receipt = supplement(self,runner,spec)
+        return StageOutcome.succeeded('余量补充已结束；采用和待审情况详见补充审计。',
+            details={'status':receipt['status'],'promoted':receipt['promoted']})
+
     def render(self, runner: PipelineRunner, spec: StageSpec) -> StageOutcome:
+        from cwh_remaining_research import effective_bundle
         input_path = self.artifacts / "agenda.txt"
         input_path.write_text(str(self.contract.get("agenda") or "国务院常务会议"), encoding="utf-8")
         command = [
@@ -1717,7 +1745,7 @@ class CwhPipeline:
             "--system-workbook",
             str(self.artifacts / "CWH舆情情况_标准总表.xlsx"),
             "--analysis-bundle",
-            str(self.artifacts / "analysis_bundle_verified.json"),
+            str(effective_bundle(self.job_dir)),
             "--comment-handoff",
             str(self.artifacts / "report_comment_handoff.csv"),
             "--sentiment-results",
@@ -1785,7 +1813,8 @@ class CwhPipeline:
         if report_data:
             problems.extend(validate_data_workbook(data_workbook_path, report_data))
             try:
-                upstream_analysis = read_json(self.artifacts / "analysis_bundle_verified.json")
+                from cwh_remaining_research import effective_bundle
+                upstream_analysis = read_json(effective_bundle(self.job_dir))
                 mapping_audit = validate_release_mapping(self.report, upstream_analysis=upstream_analysis)
             except Exception as exc:
                 mapping_audit = {
@@ -1845,6 +1874,8 @@ def contract_from_args(args: argparse.Namespace) -> dict[str, Any]:
     evidence_review = getattr(args, 'domestic_evidence_review', '')
     return {
         "execution_profile": profile_name,
+        'automatic_remaining_research': profile.get('automatic_remaining_research') or {},
+        'budget_origin_epoch': float(os.environ.get('CWH_PIPELINE_BUDGET_ORIGIN_EPOCH','0')),
         "wall_clock_budget_seconds": int(profile.get("wall_clock_budget_seconds") or 0),
         "research_deadline_seconds": int(profile.get("research_deadline_seconds") or 0),
         "carry_forward_unused_budget": bool(profile.get("carry_forward_unused_budget")),
@@ -2058,9 +2089,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--ai-worker-command-json", default=os.environ.get("CWH_PIPELINE_AI_COMMAND_JSON", ""))
     result.add_argument(
         "--execution-profile",
-        choices=["bounded_40m", "bounded_60m", "exhaustive"],
+        choices=["bounded_40m", "bounded_45m", "bounded_60m", "exhaustive"],
         default=execution_profile()[0],
-        help="Default bounded_60m targets one hour and reserves final delivery time; bounded_40m is a tighter option.",
+        help="Default bounded_45m targets45minutes with protected web research;40m/60m remain explicit options.",
     )
     result.add_argument("--until-stage", default="")
     result.add_argument("--invalidate-from", default="")

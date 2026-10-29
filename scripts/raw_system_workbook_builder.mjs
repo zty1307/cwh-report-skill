@@ -361,7 +361,7 @@ function buildOverseasSheet() {
   const lastRow = Math.max(3, 2 + selected.length);
   sheet.getRange(`B3:${lastColumn}${lastRow}`).format = { ...bodyFormat, font: { name: "微软雅黑", size: 10 } };
   sheet.getRange(`D3:D${lastRow}`).format.numberFormat = "yyyy/m/d";
-  sheet.getRange(`E3:E${lastRow}`).format = { ...bodyFormat, font: { name: "微软雅黑", size: 10, color: COLORS.link, underline: true }, horizontalAlignment: "left" };
+  sheet.getRange(`E3:E${lastRow}`).format = { ...bodyFormat, font: { name: "微软雅黑", size: 10, color: COLORS.link, underline: "single" }, horizontalAlignment: "left" };
   sheet.getRange(`F3:G${lastRow}`).format = { ...bodyFormat, font: { name: "微软雅黑", size: 10 }, horizontalAlignment: "left", wrapText: true };
   const widths = { A: 2, B: 8, C: 24, D: 14, E: 52, F: 64, G: 56 };
   for (let index = 8; index <= 7 + topicCount; index += 1) widths[columnLetter(index)] = 6;
@@ -451,7 +451,7 @@ function buildPublicTopSheet() {
   }
   const lastRow = Math.max(3, 2 + selected.length);
   sheet.getRange(`B3:I${lastRow}`).format = bodyFormat;
-  sheet.getRange(`D3:D${lastRow}`).format = { ...bodyFormat, font: { name: "仿宋", size: 11, color: COLORS.link, underline: true }, horizontalAlignment: "left" };
+  sheet.getRange(`D3:D${lastRow}`).format = { ...bodyFormat, font: { name: "仿宋", size: 11, color: COLORS.link, underline: "single" }, horizontalAlignment: "left" };
   sheet.getRange(`G3:H${lastRow}`).format = { ...bodyFormat, horizontalAlignment: "left", wrapText: true };
   sheet.getRange(`I3:I${lastRow}`).format.numberFormat = "yyyy/m/d";
   setWidths(sheet, { A: 2, B: 7, C: 24, D: 52, E: 14, F: 10, G: 52, H: 56, I: 14 });

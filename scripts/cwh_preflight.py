@@ -32,10 +32,10 @@ def execution_policy_checks(policy: dict[str, Any]) -> list[dict[str, Any]]:
     default_name = str(policy.get("default_profile") or "")
     checks = [{
         "id": "policy:default_profile",
-        "status": "passed" if default_name in {"bounded_40m", "bounded_60m"} and default_name in profiles else "failed",
+        "status": "passed" if default_name in {"bounded_40m", "bounded_45m", "bounded_60m"} and default_name in profiles else "failed",
         "profile": default_name,
     }]
-    for name, expected_wall in (("bounded_40m", 2400), ("bounded_60m", 3600), ("exhaustive", 0)):
+    for name, expected_wall in (("bounded_40m", 2400), ("bounded_45m", 2700), ("bounded_60m", 3600), ("exhaustive", 0)):
         try:
             profile = profiles[name]
             wall_clock = int(profile.get("wall_clock_budget_seconds") or 0)

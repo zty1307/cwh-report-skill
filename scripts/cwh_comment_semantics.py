@@ -87,6 +87,9 @@ def repair_corrupt_toutiao_capture(capture, output_dir):
 
 
 def validate_capture_rows(capture):
+    if capture.get('capture_format') == 'monitoring_export_xlsx_v1':
+        from cwh_monitoring_comments import validate
+        return validate(capture)
     from cwh_weibo_capture import flatten, plain_text, timestamp, window
     from run_cwh_agent_reach_comment_collection import iter_comment_objects, published_at
     left, right = window(capture['monitoring_period']['start'], capture['monitoring_period']['end'])
@@ -700,7 +703,25 @@ def main():
         elif args.split_review:
             result, run, label_run = split_review(capture, topics, command, args.output_dir, author_timeout, meeting_context)
         else:
-            result, run = semantic_json(packet, PROMPT, command, args.output_dir, 'comment-review', author_timeout)
+            from cwh_routed_comment_contract import (PROMPT as ROUTED_PROMPT, expand,
+                conflict_repair_packet, merge_conflict_repair)
+            result, run = semantic_json(packet, ROUTED_PROMPT + QUOTE_CONSTRAINT_PROMPT + QUOTE_HEADING_PROMPT + COMMENT_GROUPING_PROMPT, command, args.output_dir, 'comment-review-routed', author_timeout)
+            try:
+                result = expand(packet, result, COMPACT_CODES)
+            except ValueError as error:
+                if str(error) != 'Unresolved topic cannot be approved':
+                    raise
+                repair_packet = conflict_repair_packet(packet, result, COMPACT_CODES)
+                repair_prompt = ROUTED_PROMPT + '\n本次仅复核这些相互冲突的原记录。议题无法确定时必须用排除代码，不得为通过格式校验猜题；不得新选引用，selected必须为空。其余原文与本期通稿完整保留。'
+                repaired, repair_run = semantic_json(repair_packet, repair_prompt, command,
+                    args.output_dir, 'comment-route-conflict-repair',
+                    min(45, max(1, review_deadline-time.monotonic()-review_reserve)))
+                result = merge_conflict_repair(packet, result, repair_packet, repaired, COMPACT_CODES, repair_run_id=repair_run['session_id'])
+                atomic_write_json(args.output_dir / 'comment_route_conflict_repair.json', {
+                    'ids': [r['id'] for r in repair_packet['rows']],
+                    'author_run': run, 'repair_run': repair_run,
+                    'unaffected_labels_and_quotations_unchanged': True,
+                    'original_comment_and_parent_text_unchanged': True})
         result = complete_single_comment_heading(result)
         compile_results(capture, topics, result, run, classification_only=True)
     except (HostModelError, ValueError, TimeoutError) as exc:
