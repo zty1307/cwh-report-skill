@@ -20,3 +20,8 @@ Dockerfile text eol=lf
 *.png binary
 *.docx binary
 *.ai binary
+
+# Preserve the reviewed HTML and versioned template snapshot bytes.
+docs/production-handoff/index.html -text
+docs/production-handoff/attachments/** -text
+docs/production-handoff/*.zip binary

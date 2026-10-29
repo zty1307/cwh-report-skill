@@ -1,0 +1,43 @@
+{
+  "document_date": "2026-10-29",
+  "html_sha256": "1d38b37bddd5a33b4b9ed86e68e4230eda994ff6e2b8bb85c452e592f164ca24",
+  "runtime_reference_commit": "b37f46cca464c3f2da3dea7811a6ec4de10b1fe0",
+  "runtime_changed": false,
+  "mcp_integrated": false,
+  "business_deliverables": [
+    "Word",
+    "Excel",
+    "HTML"
+  ],
+  "content_validation": {
+    "modules": 6,
+    "steps": 18,
+    "supplement_nodes": 1,
+    "broken_local_links": 0,
+    "template_snapshots_match_runtime": true
+  },
+  "files": {
+    "attachments/cwh_template/config/editorial_template.v1.json": "0a36f49c25f15502e9cb7fb406abd3b81a60280d3cf4d259575aa6f148239d80",
+    "attachments/cwh_template/config/formal_writing_rules.v1.json": "c119cbfc9703c57f5a082535976811e06264e30960ff18cfc583f792daef6e08",
+    "attachments/cwh_template/config/report_presentation_policy.v1.json": "dc69ec6ea8c7bcbedc2ea814322d49a153fdc661e9fe68367f8b0d98ccc2c5c0",
+    "attachments/cwh_template/config/report_visual_style.v1.json": "faae7d36d521ba31ffb08ffb434885a21b34ba8bc3ed1585aed2e7c72afc0541",
+    "attachments/cwh_template/manifest.json": "bc5df4b8cd5d6a8712a3dfca673142995b6f1727c3a5d54432b55d45833620d0",
+    "attachments/cwh_template/references/word_fill_in_template.md": "98e5b648dddf96b9266bcbcd67fdbee57c223b2024472b2b69b4762280dbbd92",
+    "attachments/cwh_template/templates/cwh_fill_in_template.docx": "e96d5ca3dfd0e5e86d3ebce7b3a7fabff5b84a2cd3dff11670fbad541abba846",
+    "attachments/cwh_template/templates/topic_table.xml": "b5dfae26e6a25e54b9deaf47eeb496e19ff72265519e376cd7d6f882e41d1803",
+    "attachments/常务会模板与规则附件.zip": "3bc8534a88df3afbda2d76163c190d78ffca88151fb29fbea44ea6d1e8e5af4c",
+    "index.html": "1d38b37bddd5a33b4b9ed86e68e4230eda994ff6e2b8bb85c452e592f164ca24",
+    "README.md": "e836778e20c94866cbd1da4e55c45287797ff62646547a87068276ebf408f87c"
+  },
+  "source_html_sha256": "0e828fb08e6e484f7c89865f210f22dbbf49fa02833a9424cbfea320651824cd",
+  "formatting_normalization": "Removed indentation from blank HTML lines; content unchanged.",
+  "page_validation": {
+    "passed": true,
+    "brokenAnchors": [],
+    "desktopOverflow": 0,
+    "mobileOverflow": 0,
+    "mobileExpandedOverflow": 0,
+    "errors": [],
+    "remoteRequests": []
+  }
+}

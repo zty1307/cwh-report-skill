@@ -2,6 +2,10 @@
 
 An auditable, resumable workflow for generating public-opinion reports for State Council executive meetings from monitoring-system exports.
 
+**产研交接：** [完整流程说明与打开方式](docs/production-handoff/README.md) · [下载交接文档离线包](https://github.com/zty1307/cwh-report-skill/raw/refs/heads/main/docs/production-handoff/常务会产研交接文档.zip)
+
+业务交付为Word报告、配套Excel和HTML工作台；来源依据、审核结果、结构化中间数据和日志由后台留存，不作为额外业务交付件。参考程序仍保留内部文件，本次文档同步不修改运行输出或质量门禁。MCP部分仅列拟取数据及用途，尚待接入验证。
+
 The default `bounded_45m` profile is model-neutral and uses one active model worker. The complete job has a 2700-second limit, a 2460-second research cutoff and a 240-second delivery buffer. Scripts own scheduling, calculations, validation, state, caching, rendering and delivery; models read complete selected articles, extract viewpoints and perform separate independent review. `bounded_40m`, `bounded_60m` and `exhaustive` remain explicit alternatives.
 
 Current evaluation version: **2026.10.29-feedback45** (`config/release.json`). This publication synchronizes the source used in the complete GLM test on **2026-10-23**: **37m51.25s**, all 12 stages completed, with **28 domestic body claims** (24 from monitoring exports and 4 from public-web research). The result remains `delivered_with_gaps`, not certified formal delivery. See [measured results and limitations](references/feedback45_validation.md).
@@ -66,7 +70,7 @@ The intended forward test starts with an unseen raw export bundle or standard mo
 3. traceable domestic viewpoints and real public comments;
 4. overseas review, sentiment review, and hotword review;
 5. independent evidence mapping and release gates;
-6. synchronized Word, Excel, JSON, audit, and self-contained HTML output;
+6. synchronized Word, Excel, and self-contained HTML business outputs, with JSON and audit files retained internally;
 7. checkpoint/resume behavior, including non-terminal `waiting_login` and `waiting_ai` states.
 
 Historical baseline reports must remain outside the generation context and may be used only by an independent evaluator after generation.

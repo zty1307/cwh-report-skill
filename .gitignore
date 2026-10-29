@@ -41,3 +41,8 @@ temp/
 *.jsonl
 *.docx
 !templates/*.docx
+
+# Public production-handoff template snapshots and offline documentation only.
+!docs/production-handoff/attachments/cwh_template/templates/cwh_fill_in_template.docx
+!docs/production-handoff/attachments/常务会模板与规则附件.zip
+!docs/production-handoff/常务会产研交接文档.zip
